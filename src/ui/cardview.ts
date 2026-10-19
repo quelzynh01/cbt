@@ -1,0 +1,123 @@
+import { CARDS, CURSES } from '../engine/cards';
+import { HEROES, MONSTERS } from '../engine/data';
+import { drawFull } from '../render/chibi';
+
+// Cartas no estilo do jogo de tabuleiro: moldura de pedra, título em pergaminho, medalhões e caixa de texto.
+// A cor de fundo indica o nível (itens e monstros).
+
+/** Cor de cada nível de item. */
+export const ITEM_LEVEL: Record<string, { color: string; name: string }> = {
+  I: { color: '#7d848c', name: 'Inicial' },
+  '1': { color: '#3a7bc8', name: 'Nível 1' },
+  '2': { color: '#7a4bb8', name: 'Nível 2' },
+  '3': { color: '#3c9a52', name: 'Nível 3' },
+  '4': { color: '#d07a26', name: 'Nível 4' },
+  '5': { color: '#b8352a', name: 'Nível 5' },
+  R: { color: '#c79a22', name: 'Recompensa' },
+};
+
+/** Cor de cada nível de Monstro. */
+export const MONSTER_LEVEL: Record<string, string> = { '1': '#d4802a', '2-3': '#4c9a3c', '4-5': '#3567b0', '6': '#6a3a9a' };
+
+export const itemColor = (id: string) => ITEM_LEVEL[CARDS[id]?.level ?? 'I']?.color ?? '#7d848c';
+export const monsterColor = (id: string) => MONSTER_LEVEL[MONSTERS[id]?.level ?? '1'] ?? '#d4802a';
+
+const GROUP_ICON: Record<string, string> = {
+  Espada: '🗡️', Machado: '🪓', Martelo: '🔨', Arco: '🏹', Mágica: '🔮', Arremesso: '💣', Lança: '🔱',
+  Armadura: '🛡️', Escudo: '🛡️', Joia: '💍', Habilidade: '💪', Equipamento: '🎒',
+};
+
+/** Título em pergaminho; nomes longos ficam menores para caber em até 2 linhas. */
+const title = (name: string, sub = '') => {
+  const fs = name.length > 20 ? 13 : name.length > 14 ? 15 : 17;
+  return `<div class="ac-title" style="font-size:${fs}px"><span>${name}</span>${sub ? `<small>${sub}</small>` : ''}</div>`;
+};
+
+const med = (cls: string, v: string | number, title: string) => `<span class="med ${cls}" title="${title}"><b>${v}</b></span>`;
+
+/** Valores atuais de um personagem na partida (com itens, Maldições e efeitos). */
+export interface LiveStats {
+  def: number;
+  /** Vida atual (Vida máxima − Ferimentos). */
+  hp: number;
+  /** Vida máxima com itens e Maldições. */
+  maxHp?: number;
+  rr: number;
+  /** Bônus de dados de ataque (todas as cartas). */
+  atk?: number;
+}
+/** Classe do medalhão comparando o valor atual com o da carta. */
+const cmp = (now: number, base: number) => now > base ? ' up' : now < base ? ' down' : '';
+const diff = (now: number, base: number, name: string) => now === base ? name : `${name}: ${now} (carta: ${base})`;
+
+/** Carta de item (Ataque, Ampliação ou Permanente). Mesmo tamanho das cartas de Monstro. */
+export function itemCard(id: string, extra = '', attrs = '', qty = false, atkBonus = 0): string {
+  const d = CARDS[id];
+  if (!d) return '';
+  const lv = ITEM_LEVEL[d.level] ?? ITEM_LEVEL.I;
+  const type = d.kind === 'attack' ? (d.attackType === 'melee' ? 'Ataque Próximo' : 'Ataque a Distância') : d.kind === 'boost' ? 'Ampliação' : 'Permanente';
+  const bonus = [d.defBonus ? med('def', `+${d.defBonus}`, 'Defesa adicional') : '', d.hpBonus ? med('hp', `+${d.hpBonus}`, 'Vida adicional') : '', d.rerolls ? med('rr', `+${d.rerolls}`, 'Rerrolagem') : ''].join('');
+  const text = `${d.text}${d.partial ? ' <i>(efeito ainda não implementado)</i>' : ''}`;
+  return `<div class="acard item ${extra}" style="--lv:${lv.color}" ${attrs} title="${(d.text || d.name).replace(/"/g, '&quot;')}">
+    ${title(d.name)}
+    <div class="ac-art">${d.cost ? med('coin ac-tl', d.cost, 'Custo em moedas') : ''}${bonus ? `<div class="ac-tr">${bonus}</div>` : ''}<span class="ac-icon">${GROUP_ICON[d.group] ?? '✦'}</span></div>
+    <div class="ac-type"><div><b>${type}</b><small>${d.group}</small></div>${d.kind === 'attack' ? med(`dice ${d.attackType}${atkBonus > 0 ? ' up' : atkBonus < 0 ? ' down' : ''}`, d.dice + atkBonus, atkBonus ? `${d.dice + atkBonus} dados de ataque (carta: ${d.dice})` : `${d.dice} dados de ataque`) : ''}</div>
+    <div class="ac-text ${textSize(d.text)}">${d.text ? `<p>${text}</p>` : '<p><i class="ac-none">Sem efeito especial</i></p>'}</div>
+    <div class="ac-code">${d.code} · ${lv.name}${qty && d.qty ? ` · ${d.qty}x` : ''}${d.scenario ? ` · ${d.scenario}` : ''}</div>
+  </div>`;
+}
+
+const textSize = (t = '') => t.length > 110 ? 'xs' : t.length > 80 ? 'sm' : '';
+
+/** Carta de Maldição Mortal (mesmo tamanho das cartas de Monstro). */
+export function curseCard(id: string, extra = '', attrs = ''): string {
+  const c = CURSES[id];
+  if (!c) return '';
+  return `<div class="acard curse ${extra}" ${attrs}>
+    ${title(c.name)}
+    <div class="ac-art curse-art">${med('curse ac-tl', c.value, 'Valor da Maldição')}<span class="ac-icon">💀</span></div>
+    <div class="ac-type"><div><b>Maldição Mortal</b><small>${c.slot ? 'Ocupa um espaço de carta' : 'Efeito permanente'}</small></div></div>
+    <div class="ac-text ${textSize(c.text)}"><p>${c.text}</p></div>
+    <div class="ac-code">T-${String(c.value).padStart(2, '0')} · ${c.qty}x no baralho</div>
+  </div>`;
+}
+
+/** Carta de Herói (paisagem). O canvas `data-art` recebe o desenho do personagem. */
+export function heroCard(id: string, extra = '', attrs = '', foot = '', badge = '', live?: LiveStats): string {
+  const h = HEROES[id];
+  const def = live?.def ?? h.defense, hp = live?.hp ?? h.hp, rr = live?.rr ?? 0;
+  return `<div class="acard hero ${extra}" ${attrs}>${badge ? `<span class="pick-badge">${badge}</span>` : ''}
+    ${title(h.name, h.title)}
+    <div class="hc-body">
+      <div class="hc-left">
+        <div class="hc-meds">${med(`def big${cmp(def, h.defense)}`, def, diff(def, h.defense, 'Defesa'))}${med(`hp big${cmp(hp, h.hp)}`, hp, live ? `Vida atual: ${hp}/${live.maxHp ?? h.hp} (carta: ${h.hp})` : 'Vida')}${rr ? med(`rr big${cmp(rr, 0)}`, rr, `Rerrolagem: ${rr}`) : ''}${live?.atk ? med('dice melee up', `+${live.atk}`, `+${live.atk} dado(s) em todos os ataques`) : ''}</div>
+        <div class="ac-ribbon"><small>Habilidade</small><b>${h.abilityName}</b></div>
+        <div class="ac-text"><p>${h.abilityText}${h.implemented === false ? ' <i>(a confirmar)</i>' : ''}</p></div>
+      </div>
+      <canvas class="hc-artc" width="200" height="230" data-art="${id}"></canvas>
+    </div>
+    ${foot ? `<div class="ac-code">${foot}</div>` : ''}
+  </div>`;
+}
+
+/** Carta de Monstro (retrato) com a cor do nível. */
+export function monsterCard(id: string, extra = '', attrs = '', live?: LiveStats): string {
+  const m = MONSTERS[id];
+  const def = live?.def ?? m.defense, hp = live?.hp ?? m.hp, rr = live?.rr ?? m.rerolls;
+  const villain = m.category.startsWith('Vilão');
+  return `<div class="acard monster ${extra}" style="--lv:${monsterColor(id)}" ${attrs}>
+    ${title(m.name, `Nível ${m.level}${villain ? ` · ${m.category}` : ''}`)}
+    <div class="mc-art">
+      <div class="mc-meds">${med(`hp${cmp(hp, m.hp)}`, hp, live ? `Vida atual: ${hp}/${m.hp}` : 'Vida')}${Number.isFinite(m.exterm) ? med('skull', m.exterm, 'Extermínio') : ''}${m.defense || def ? med(`def${cmp(def, m.defense)}`, def, diff(def, m.defense, 'Defesa')) : ''}${m.rerolls || rr ? med(`rr${cmp(rr, m.rerolls)}`, rr, diff(rr, m.rerolls, 'Rerrolagem')) : ''}</div>
+      ${med('coin mc-coin', m.reward, 'Recompensa em moedas')}
+      <canvas width="320" height="328" data-art="${id}"></canvas>
+    </div>
+    <div class="ac-type">${med('move', m.move, 'Movimento')}<div><b>${m.attackType === 'melee' ? 'Ataque Próximo' : 'Ataque a Distância'}</b><small>${m.attackName}</small></div>${med(`dice ${m.attackType}`, m.dice, `${m.dice} dados de ataque`)}</div>
+    <div class="ac-text ${textSize(m.abilityText)}"><p>${m.abilityText || '<i class="ac-none">Sem habilidade especial</i>'}</p></div>
+  </div>`;
+}
+
+/** Desenha os personagens das cartas (canvas com data-art) dentro de `root`. */
+export function paintCardArt(root: ParentNode) {
+  root.querySelectorAll<HTMLCanvasElement>('canvas[data-art]').forEach(cv => drawFull(cv, cv.dataset.art!));
+}

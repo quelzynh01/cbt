@@ -1,0 +1,32 @@
+{
+  "vapor": [
+    "se",
+    "sw",
+    "nw",
+    "ne"
+  ],
+  "orc": [
+    "se",
+    "sw",
+    "nw",
+    "ne"
+  ],
+  "goblin": [
+    "se",
+    "sw",
+    "nw",
+    "ne"
+  ],
+  "espetado": [
+    "se",
+    "sw",
+    "nw",
+    "ne"
+  ],
+  "hobsbawm": [
+    "se",
+    "sw",
+    "nw",
+    "ne"
+  ]
+}

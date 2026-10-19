@@ -1,0 +1,99 @@
+/* ---------------- CARTAS (estilo do tabuleiro) ---------------- */
+.acard {
+  --lv: #3a7bc8;
+  --stone: #9aa0a6;
+  position: relative; display: flex; flex-direction: column; gap: 4px; padding: 7px; border-radius: 14px; cursor: default;
+  background:
+    linear-gradient(160deg, color-mix(in srgb, var(--lv) 30%, #eef0f2), color-mix(in srgb, var(--lv) 55%, #9aa0a6) 50%, color-mix(in srgb, var(--lv) 60%, #3a3f45));
+  border: 2px solid color-mix(in srgb, var(--lv) 50%, #222); box-shadow: inset 0 0 0 2px rgba(255,255,255,.35), 0 6px 14px rgba(0,0,0,.45);
+  color: #fff; font-size: 12px; transition: transform .15s, box-shadow .15s;
+}
+.acard[data-i], .acard[data-h], .acard[data-hero] { cursor: pointer; }
+.acard[data-i]:hover, .acard[data-h]:hover, .acard[data-hero]:hover { transform: translateY(-3px); }
+.acard.sel, .acard.picked { box-shadow: 0 0 0 4px #ffe14d, 0 0 18px #ffe14d; }
+.acard.disc { opacity: .5; filter: grayscale(.6); }
+.ac-title {
+  text-align: center; font-family: Georgia, 'Baloo 2', serif; font-weight: 800; font-size: 17px; line-height: 1.1; color: #b8352a; font-variant: small-caps;
+  background: linear-gradient(#fbf6ea, #e6dcc6); border: 2px solid color-mix(in srgb, var(--lv) 45%, #8a7a5a); border-radius: 8px; padding: 3px 6px; text-shadow: 0 1px 0 #fff;
+  min-height: 46px; flex: none; display: flex; flex-direction: column; justify-content: center;
+}
+.ac-title small { display: block; font-size: 11px !important; font-variant: normal; color: #6b5a44; font-family: 'Baloo 2', sans-serif; text-shadow: none; }
+.med {
+  display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; border: 2px solid #2a1606; position: relative; flex: none;
+  font-weight: 800; font-size: 15px; box-shadow: inset 0 -3px 0 rgba(0,0,0,.25), 0 2px 3px rgba(0,0,0,.4);
+}
+.med b { position: relative; z-index: 1; text-shadow: 0 1px 1px rgba(0,0,0,.5); }
+.med.big { width: 40px; height: 40px; font-size: 20px; }
+/* valor atual na partida: verde = melhorado, vermelho = piorado */
+.med.up { box-shadow: 0 0 0 3px #35d04f, 0 0 10px #35d04f; }
+.med.up b { color: #46f06a !important; text-shadow: -1px -1px 0 #0b2a10, 1px -1px 0 #0b2a10, -1px 1px 0 #0b2a10, 1px 1px 0 #0b2a10 !important; }
+.med.down { box-shadow: 0 0 0 3px #ff3b2f, 0 0 10px #ff3b2f; }
+.med.down b { color: #ff5a4a !important; text-shadow: -1px -1px 0 #2a0505, 1px -1px 0 #2a0505, -1px 1px 0 #2a0505, 1px 1px 0 #2a0505 !important; }
+.med.coin { background: radial-gradient(circle at 35% 30%, #fff1a8, #d9a32a 60%, #9a6a10); color: #4a2a00; }
+.med.coin b { text-shadow: 0 1px 0 #fff3c0; }
+.med.def { background: radial-gradient(circle at 35% 30%, #ffffff, #d8d0c0 60%, #a39a88); color: #c86a1a; }
+.med.def b { text-shadow: none; }
+.med.def::after { content: '⛨'; position: absolute; font-size: 10px; right: -3px; bottom: -4px; color: #2a1606; }
+.med.hp { background: radial-gradient(circle at 35% 30%, #ff9b8c, #d83a2a 60%, #8a1a10); color: #fff; }
+.med.hp::after { content: '❤'; position: absolute; font-size: 10px; right: -3px; bottom: -4px; color: #ffd0c8; }
+.med.rr { background: radial-gradient(circle at 35% 30%, #c8ffb0, #4fae3a 60%, #2a6a1a); color: #fff; }
+.med.rr::after { content: '↻'; position: absolute; font-size: 11px; right: -3px; bottom: -4px; color: #eaffe0; }
+.med.skull { background: radial-gradient(circle at 35% 30%, #ffffff, #c8c4bc 60%, #8a857c); color: #2a1606; }
+.med.skull b { text-shadow: none; }
+.med.skull::after { content: '☠'; position: absolute; font-size: 10px; right: -3px; bottom: -4px; color: #2a1606; }
+.med.move { background: radial-gradient(circle at 35% 30%, #a8e0ff, #3a8ac8 60%, #1a4a7a); color: #fff; }
+.med.move::after { content: '👣'; position: absolute; font-size: 9px; right: -4px; bottom: -4px; }
+.med.dice { width: 36px; height: 36px; font-size: 18px; background: radial-gradient(circle at 35% 30%, #ff8a8a, #b8233a 60%, #6a0a1a); color: #fff; }
+.med.dice::after { position: absolute; font-size: 12px; right: -3px; top: -4px; color: #fff; text-shadow: 0 0 2px #000; }
+.med.dice.melee::after { content: '⚔'; }
+.med.dice.ranged::after { content: '➶'; }
+.ac-art { position: relative; height: 128px; flex: none; border-radius: 10px; border: 2px solid rgba(0,0,0,.35); display: grid; place-items: center;
+  background: radial-gradient(ellipse at 50% 55%, color-mix(in srgb, var(--lv) 55%, white), var(--lv) 55%, color-mix(in srgb, var(--lv) 60%, black)); }
+.ac-icon { font-size: 52px; filter: drop-shadow(0 4px 4px rgba(0,0,0,.45)); }
+.ac-tl { position: absolute !important; top: 5px; left: 5px; z-index: 1; }
+.ac-tr { position: absolute; top: 5px; right: 5px; display: grid; gap: 4px; z-index: 1; }
+.ac-type { display: flex; align-items: center; justify-content: space-between; gap: 6px; background: linear-gradient(#d8dce0, #9fa5ab); border: 2px solid #5a5f65; border-radius: 9px; padding: 2px 6px; color: #b8352a; height: 44px; flex: none; overflow: hidden; }
+.ac-type b { display: block; font-size: 11px; white-space: nowrap; text-transform: uppercase; letter-spacing: 0; line-height: 1.1; }
+.ac-type small { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #2a2a2a; font-weight: 700; font-size: 11px; }
+.ac-type > div { flex: 1; min-width: 0; text-align: center; }
+.ac-text { flex: 1 1 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; justify-content: center; border-radius: 9px; border: 2px solid #c8ccd0; padding: 5px 7px; text-align: center; line-height: 1.25;
+  background: radial-gradient(ellipse at 50% 40%, color-mix(in srgb, var(--lv) 35%, #1a2236), #141a2a); }
+.ac-text p { margin: 0; font-size: 11.5px; }
+.ac-text.sm p { font-size: 10.5px; }
+.ac-text.xs p { font-size: 9.8px; line-height: 1.2; }
+.ac-text i { color: #ffb3a0; font-size: 10.5px; }
+.ac-bonus { display: flex; gap: 6px; justify-content: center; margin-bottom: 3px; }
+.ac-code { text-align: center; font-size: 10px; color: #1a1a1a; font-weight: 700; text-shadow: 0 1px 0 rgba(255,255,255,.4); }
+/* Itens, Monstros e Maldições: todas com o mesmo tamanho */
+.acard.item, .acard.monster, .acard.curse { width: 214px; height: 344px; flex: none; }
+.ac-code { flex: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cp-cards { grid-template-columns: repeat(auto-fill, 214px) !important; justify-content: center; }
+.cp-cards.small { zoom: .8; }
+/* Maldição Mortal: moldura de pedra, arte laranja */
+.acard.curse { --lv: #6f7c8a; }
+.curse-art { height: 140px; background: radial-gradient(ellipse at 50% 50%, #ffc070, #e07a22 55%, #8a3a10) !important; }
+.curse-art .ac-icon { font-size: 86px; filter: drop-shadow(0 6px 6px rgba(0,0,0,.5)); }
+.med.curse { width: 38px; height: 38px; font-size: 20px; background: radial-gradient(circle at 35% 30%, #c8d8ff, #4a6ab8 60%, #22346a); color: #fff; }
+/* Herói (paisagem) */
+.acard.hero { --lv: #2f5f9e; min-height: 250px; }
+.hc-body { display: grid; grid-template-columns: 1fr 120px; gap: 6px; align-items: stretch; border-radius: 10px; border: 2px solid rgba(0,0,0,.35); padding: 6px;
+  background: radial-gradient(ellipse at 75% 45%, #6a9ad8, #2f5f9e 60%, #1a3a6a); }
+.hc-left { display: flex; flex-direction: column; gap: 6px; }
+.hc-meds { display: flex; gap: 6px; }
+.hc-artc { width: 120px; height: auto; align-self: end; }
+.ac-ribbon { background: linear-gradient(#d8dce0, #9fa5ab); border: 2px solid #5a5f65; border-radius: 8px; padding: 1px 6px; color: #2a2a2a; text-align: center; }
+.ac-ribbon small { display: block; font-size: 10px; text-transform: uppercase; color: #6b5a44; font-weight: 800; }
+.ac-ribbon b { display: block; font-size: 13px; text-transform: uppercase; color: #2a2a2a; }
+.acard.hero .ac-text { --lv: #2f5f9e; flex: 1 1 auto; overflow: visible; }
+/* Monstro (retrato) */
+
+.mc-art { position: relative; border-radius: 10px; border: 2px solid rgba(0,0,0,.35); height: 158px; flex: none; display: grid; place-items: end center;
+  background: radial-gradient(ellipse at 50% 45%, color-mix(in srgb, var(--lv) 55%, white), var(--lv) 55%, color-mix(in srgb, var(--lv) 55%, black)); }
+.mc-art canvas { width: 152px; height: 156px; }
+.mc-meds { position: absolute; left: 5px; top: 5px; display: grid; gap: 4px; z-index: 1; }
+.mc-coin { position: absolute; right: 5px; top: 5px; z-index: 1; }
+.hgrid.cards3 { grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+.hgrid.cards-m { grid-template-columns: repeat(auto-fill, 214px); justify-content: center; }
+.pick-badge { position: absolute; top: -10px; left: -10px; z-index: 3; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center;
+  background: #ffe14d; color: #2a1606; font-weight: 800; font-size: 18px; border: 3px solid #fff; }
+.ac-text i.ac-none { color: #b8c0d8; font-style: italic; }
