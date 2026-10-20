@@ -1,3 +1,5 @@
+import { entryPlaque } from './dice';
+import { drawTokenImage } from './tokens';
 import { key, sameCell } from '../engine/board';
 import { GUILDS, MONSTERS } from '../engine/data';
 import type { Game } from '../engine/game';
@@ -307,8 +309,11 @@ export class Renderer {
     const out = new Map<string, { gx: number; gy: number }>();
     for (const list of byCell.values()) {
       list.sort((a, b) => a.id.localeCompare(b.id));
+      const hasMission = (this.floor[key(list[0].cell!)] ?? []).some(t => t.type === 'missao');
       list.forEach((u, i) => {
         const cx = u.cell!.c + 0.5, cy = u.cell!.r + 0.5;
+        // marcador de Missão ocupa um lugar: o personagem sozinho fica no outro
+        if (hasMission && list.length === 1) { out.set(u.id, { gx: cx + 0.17 + 0.1, gy: cy - 0.17 + 0.1 }); return; }
         // personagens na metade da frente do Espaço; o fundo fica para itens/marcadores
         if (list.length === 1) out.set(u.id, { gx: cx + 0.08, gy: cy + 0.08 });
         else {
@@ -318,6 +323,11 @@ export class Renderer {
       });
     }
     return out;
+  }
+
+  /** Lugar do marcador de Missão no Espaço (o oposto ao do personagem sozinho). */
+  private missionSlot(c: number, r: number) {
+    return { gx: c + 0.5 - 0.17 + 0.1, gy: r + 0.5 + 0.17 + 0.1 };
   }
 
   private layoutUnits(snap: boolean) {
@@ -612,6 +622,16 @@ export class Renderer {
       ctx.translate(p.x, p.y);
       const sc = 1 + glow * 0.15;
       ctx.scale(sc, sc);
+      const plaque = entryPlaque(em.pair);
+      if (plaque) {
+        // placa de pedra deitada no chão (como no tabuleiro)
+        if (glow) { ctx.shadowColor = '#ffd34d'; ctx.shadowBlur = 18; }
+        ctx.save(); ctx.scale(1, 0.62); ctx.rotate(-0.6);
+        const H = 112, W = H * plaque.width / plaque.height;
+        ctx.drawImage(plaque, -W / 2, -H / 2, W, H);
+        ctx.restore();
+        ctx.shadowBlur = 0;
+      } else {
       ctx.fillStyle = 'rgba(45,25,60,0.88)';
       ctx.strokeStyle = glow ? '#ffd34d' : '#b98ae0';
       ctx.lineWidth = 2.5;
@@ -624,6 +644,7 @@ export class Renderer {
         ctx.font = '900 19px "Baloo 2", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText(DIE_ICON[f], x, 1);
       });
+      }
       ctx.textBaseline = 'alphabetic';
       ctx.restore();
       if (glow) {
@@ -853,17 +874,18 @@ export class Renderer {
     for (const [k, toks] of Object.entries(this.floor)) {
       const [c, r] = k.split(',').map(Number);
       toks.filter(t => t.type === 'missao').forEach(t => {
-        const gx = c + 0.16, gy = r + 0.16;
+        // deitado no chão, num dos dois lugares do Espaço (como um personagem); dá para subir em cima
+        const s0 = this.missionSlot(c, r);
         list.push({
-          d: 1e8, // sempre visível, mesmo atrás de um Monstro
+          d: K(c + r, 1.5, (s0.gx + s0.gy - c - r) / 2),
           draw: () => {
-            const p = g2s(gx, gy);
-            ctx.save(); ctx.translate(p.x, p.y); ctx.scale(1.9, 1.9);
-            drawGem(ctx, 0, 0, tt, gemColor(t.color));
+            const p = g2s(s0.gx, s0.gy);
+            ctx.save(); ctx.translate(p.x, p.y);
+            if (!drawTokenImage(ctx, t, false, 128, 0, true)) { ctx.scale(1.9, 1.9); drawGem(ctx, 0, 0, tt, gemColor(t.color)); }
             ctx.restore();
-            ctx.font = '900 15px "Baloo 2", sans-serif'; ctx.textAlign = 'center';
+            ctx.font = '900 14px "Baloo 2", sans-serif'; ctx.textAlign = 'center';
             ctx.lineWidth = 4; ctx.strokeStyle = '#1b0f08';
-            ctx.strokeText('★ MISSÃO', p.x, p.y - 82); ctx.fillStyle = '#ffe9a8'; ctx.fillText('★ MISSÃO', p.x, p.y - 82);
+            ctx.strokeText('★ MISSÃO', p.x, p.y + 40); ctx.fillStyle = '#ffe9a8'; ctx.fillText('★ MISSÃO', p.x, p.y + 40);
           },
         });
       });
@@ -874,9 +896,13 @@ export class Renderer {
           d: K(c + r, 1, (ox + oy) / 2),
           draw: () => {
             const p = g2s(gx, gy);
-            ctx.save(); ctx.translate(p.x, p.y); ctx.scale(1.35, 1.35);
-            if (t.type === 'missao') drawGem(ctx, 0, 0, tt + i, gemColor(t.color));
-            else drawChestToken(ctx, 0, 0, tt + c + r, t.faceUp || g.s.debug.revealTokens ? tokenShort(t) : '?');
+            ctx.save(); ctx.translate(p.x, p.y);
+            const up = t.faceUp || g.s.debug.revealTokens;
+            if (!drawTokenImage(ctx, t, !up, 66)) {
+              ctx.scale(1.35, 1.35);
+              if (t.type === 'missao') drawGem(ctx, 0, 0, tt + i, gemColor(t.color));
+              else drawChestToken(ctx, 0, 0, tt + c + r, up ? tokenShort(t) : '?');
+            }
             ctx.restore();
           },
         });

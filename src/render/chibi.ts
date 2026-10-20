@@ -943,11 +943,10 @@ const CHAR_SCALE: Record<string, number> = {
   hobsbawm: 1.2, johan: 1.22, kanga: 1.2, escarlate: 1.2, seth: 1.2, orc: 1.45, goblin: 1.08,
   feral_martelador: 1.4, feral_lanceiro: 1.35, irma_dor: 1.25, irma_prazer: 1.25, troll: 1.85, minotauro: 1.8, lorde_presas: 1.5,
 };
-/** Personagens com sprite PNG têm todos a mesma altura (Vilões Maiores continuam maiores). */
-export function charScale(id: string) { id = artId(id); return hasSprite(id) && !BIG[id] ? 1.2 : CHAR_SCALE[id] ?? 1.2; }
-const BIG: Record<string, boolean> = { troll: true, minotauro: true, lorde_presas: true };
+/** Personagens com sprite PNG: o tamanho de cada um (Orc, Ferais, Troll, Minotauro…) já vem no PNG (tools/build_sprites.py). */
+export function charScale(id: string) { id = artId(id); return hasSprite(id) ? 1.2 : CHAR_SCALE[id] ?? 1.2; }
 /** 'orc4' -> 'orc' (o número é o nível do Monstro). */
-export function artId(id: string) { const b = id.replace(/\d+$/, ''); return b === 'capitao_orc' ? 'orc' : b; }
+export function artId(id: string) { const b = id.replace(/\d+$/, ''); return b === 'capitao_orc' && !images.has('capitao_orc_se') ? 'orc' : b; }
 
 // ---------------------------------------------------------------------------
 // Sprites: PNGs em public/sprites/<id>_<dir>.png (listados em manifest.json) ou desenho procedural.
@@ -955,7 +954,11 @@ export function artId(id: string) { const b = id.replace(/\d+$/, ''); return b =
 // ---------------------------------------------------------------------------
 export type Dir = 'se' | 'sw' | 'nw' | 'ne';
 const SW = 200, SH = 180, FX = 100, FY = 168, RES = 2.5;
-const IMG_H = 160; // altura (em unidades) dos sprites em PNG
+/** Unidades do mapa por pixel dos PNGs: o CORPO de um Herói comum tem 400 px (tools/build_sprites.py), então todos
+ *  ficam na mesma proporção — armas e braços levantados não encolhem ninguém, e o Orc continua maior que o Goblin. */
+const PX_UNITS = 140 / 400;
+/** Linha dos pés e topo do corpo (fração da altura do PNG), por id_dir. */
+const meta = new Map<string, { feet: number; top: number; face?: number[] }>();
 
 interface Spr { cv: HTMLCanvasElement; w: number; h: number; fx: number; fy: number; head: [number, number, number, number] }
 const cache = new Map<string, Spr>();
@@ -968,14 +971,16 @@ export async function preloadArt(): Promise<void> {
   try {
     const res = await fetch(`${import.meta.env.BASE_URL}sprites/manifest.json`, { cache: 'no-cache' });
     if (!res.ok) return;
-    const man = (await res.json()) as Record<string, string[]>;
+    type Entry = string[] | { dirs: string[]; ext?: string; feet?: Record<string, number>; top?: Record<string, number>; face?: Record<string, number[]> };
+    const man = (await res.json()) as Record<string, Entry>;
     const jobs: Promise<void>[] = [];
-    for (const [id, dirs] of Object.entries(man)) for (const d of dirs) {
+    for (const [id, e] of Object.entries(man)) for (const d of Array.isArray(e) ? e : e.dirs) {
+      if (!Array.isArray(e)) meta.set(`${id}_${d}`, { feet: e.feet?.[d] ?? 1, top: e.top?.[d] ?? 0, face: e.face?.[d] });
       jobs.push(new Promise(resolve => {
         const img = new Image();
         img.onload = () => { images.set(`${id}_${d}`, img); resolve(); };
         img.onerror = () => resolve();
-        img.src = `${import.meta.env.BASE_URL}sprites/${id}_${d}.png`;
+        img.src = `${import.meta.env.BASE_URL}sprites/${id}_${d}.${Array.isArray(e) ? 'png' : e.ext ?? 'png'}`;
       }));
     }
     await Promise.all(jobs);
@@ -988,14 +993,14 @@ export function hasArt(id: string) { return artId(id) in ARTS; }
 export function hasSprite(id: string) { id = artId(id); return ['se', 'sw', 'nw', 'ne'].some(d => images.has(`${id}_${d}`)); }
 
 /** Imagem para a direção pedida (com espelhamento quando só existe a direção oposta). */
-function pickImage(id: string, dir: Dir): { img: HTMLImageElement; mirror: boolean } | null {
+function pickImage(id: string, dir: Dir): { img: HTMLImageElement; mirror: boolean; key: string } | null {
   const direct = images.get(`${id}_${dir}`);
-  if (direct) return { img: direct, mirror: false };
+  if (direct) return { img: direct, mirror: false, key: `${id}_${dir}` };
   const opposite: Record<Dir, Dir> = { se: 'sw', sw: 'se', nw: 'ne', ne: 'nw' };
   const o = images.get(`${id}_${opposite[dir]}`);
-  if (o) return { img: o, mirror: true };
+  if (o) return { img: o, mirror: true, key: `${id}_${opposite[dir]}` };
   const any = images.get(`${id}_se`) ?? images.get(`${id}_sw`);
-  return any ? { img: any, mirror: dir === 'sw' || dir === 'nw' } : null;
+  return any ? { img: any, mirror: dir === 'sw' || dir === 'nw', key: images.has(`${id}_se`) ? `${id}_se` : `${id}_sw` } : null;
 }
 
 function sprite(id: string, dir: Dir, tint: boolean): Spr {
@@ -1007,7 +1012,9 @@ function sprite(id: string, dir: Dir, tint: boolean): Spr {
   let spr: Spr;
   if (pick) {
     const { img, mirror } = pick;
-    const h = IMG_H, w = (img.width / img.height) * h;
+    const mt = meta.get(pick.key);
+    // escala fixa por pixel (manifesto novo); manifesto antigo: imagem inteira com 160 unidades
+    const h = mt ? img.height * PX_UNITS : 160, w = (img.width / img.height) * h;
     const cv = document.createElement('canvas');
     cv.width = Math.ceil(w * RES);
     cv.height = Math.ceil(h * RES);
@@ -1015,19 +1022,29 @@ function sprite(id: string, dir: Dir, tint: boolean): Spr {
     ctx.imageSmoothingQuality = 'high';
     if (mirror) { ctx.translate(cv.width, 0); ctx.scale(-1, 1); }
     ctx.drawImage(img, 0, 0, cv.width, cv.height);
-    // caixa da cabeça para retratos: a partir da primeira linha opaca, centrada na massa do topo
+    // caixa da cabeça para retratos: a partir do topo do CORPO (não da ponta de uma arma), centrada na massa do topo
     const full = ctx.getImageData(0, 0, cv.width, cv.height).data;
     let top = 0;
-    findTop: for (let y = 0; y < cv.height; y += 2) for (let x = 0; x < cv.width; x += 3) {
+    if (mt) top = Math.round(mt.top * cv.height);
+    else findTop: for (let y = 0; y < cv.height; y += 2) for (let x = 0; x < cv.width; x += 3) {
       if (full[(y * cv.width + x) * 4 + 3] > 128) { top = y; break findTop; }
     }
-    const side = (cv.height - top) * 0.46;
+    const feetPx = (mt?.feet ?? 1) * cv.height;
+    const side = (feetPx - top) * 0.46;
     let sx = 0, n = 0;
     for (let y = top; y < top + side * 0.7; y += 2) for (let x = 0; x < cv.width; x += 2) {
       if (full[(y * cv.width + x) * 4 + 3] > 128) { sx += x; n++; }
     }
-    const cx = n ? sx / n : cv.width / 2;
-    spr = { cv, w, h, fx: w / 2, fy: h, head: [cx - side / 2, Math.max(0, top - side * 0.04), side, side] };
+    let cx = n ? sx / n : cv.width / 2;
+    let head: [number, number, number, number] = [cx - side / 2, Math.max(0, top - side * 0.04), side, side];
+    // rosto marcado no manifesto (tools/build_sprites.py FACE): centro x/y e lado, em fração do PNG
+    const f = mt?.face;
+    if (f) {
+      const fside = f[2] * cv.height;
+      cx = (mirror ? 1 - f[0] : f[0]) * cv.width;
+      head = [cx - fside / 2, f[1] * cv.height - fside / 2, fside, fside];
+    }
+    spr = { cv, w, h, fx: w / 2, fy: (mt?.feet ?? 1) * h, head };
   } else {
     const cv = document.createElement('canvas');
     cv.width = SW * RES;

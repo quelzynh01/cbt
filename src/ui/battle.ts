@@ -1,3 +1,4 @@
+import { dieImg } from '../render/dice';
 import { CARDS, GUILDS, HEROES, MONSTERS } from '../engine/data';
 import type { Game } from '../engine/game';
 import type { DieFace, GameEvent, Unit } from '../engine/types';
@@ -269,7 +270,7 @@ export class BattlePanel {
     };
     for (let i = 0; i < visible; i++) add();
     const spin = window.setInterval(() => {
-      for (const d of dice) if (d.classList.contains('rolling')) d.firstElementChild!.textContent = FACE[pool[Math.floor(Math.random() * pool.length)]];
+      for (const d of dice) if (d.classList.contains('rolling')) d.firstElementChild!.innerHTML = dieImg(pool[Math.floor(Math.random() * pool.length)], cls === 'black');
     }, 70);
     await new Promise(r => setTimeout(r, 750 / sp));
     for (let i = 0; i < faces.length; i++) {
@@ -277,7 +278,7 @@ export class BattlePanel {
       const d = dice[i];
       const f = faces[i];
       d.classList.remove('rolling');
-      d.firstElementChild!.textContent = FACE[f];
+      d.firstElementChild!.innerHTML = dieImg(f, cls === 'black');
       if (f === 'crit' || f === success) d.classList.add('hit');
       if (f === 'crit') { d.classList.add('crit'); d.setAttribute('title', 'Crítico! Rola um dado extra'); }
       await new Promise(r => setTimeout(r, 170 / sp));
@@ -307,7 +308,7 @@ export class BattlePanel {
       el.innerHTML = `<div class="rr-box">
         <div class="bt-head"><span class="bt-reason">↻ Rerrolagem</span><span class="bt-title">${HEROES[h.defId].name} — ${req.kind === 'attack' ? 'rolagem de Ataque' : 'rolagem de Defesa'}</span></div>
         <p>Você tem <b>${req.rerolls}</b> rerrolage${req.rerolls > 1 ? 'ns' : 'm'}. Clique nos dados que quer rolar de novo (o resultado novo substitui o antigo; ✷ crítico não pode ser rerrolado).</p>
-        <div class="rr-dice">${req.faces.map((f, i) => `<button class="bdie ${req.kind === 'attack' ? 'black' : 'white'} ${ok(f) ? 'hit' : ''} ${f === 'crit' ? 'crit' : ''} ${this.askSel.has(i) ? 'pick' : ''}" data-i="${i}" ${f === 'crit' ? 'disabled' : ''}><span>${FACE[f]}</span></button>`).join('')}</div>
+        <div class="rr-dice">${req.faces.map((f, i) => `<button class="bdie ${req.kind === 'attack' ? 'black' : 'white'} ${ok(f) ? 'hit' : ''} ${f === 'crit' ? 'crit' : ''} ${this.askSel.has(i) ? 'pick' : ''}" data-i="${i}" ${f === 'crit' ? 'disabled' : ''}><span>${dieImg(f, req.kind === 'attack')}</span></button>`).join('')}</div>
         <div class="rr-sum">${hits} ${req.kind === 'attack' ? 'acerto' : 'bloqueio'}${hits === 1 ? '' : 's'} agora · selecionados: ${this.askSel.size}/${req.rerolls}</div>
         <div class="bt-btns"><button id="rr-keep">Manter resultado</button><button class="primary" id="rr-go" ${this.askSel.size ? '' : 'disabled'}>↻ Rerrolar ${this.askSel.size || ''}</button></div>
       </div>`;

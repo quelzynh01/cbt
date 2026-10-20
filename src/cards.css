@@ -97,3 +97,15 @@
 .pick-badge { position: absolute; top: -10px; left: -10px; z-index: 3; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center;
   background: #ffe14d; color: #2a1606; font-weight: 800; font-size: 18px; border: 3px solid #fff; }
 .ac-text i.ac-none { color: #b8c0d8; font-style: italic; }
+.ac-bmed { width: 40px; height: 40px; filter: drop-shadow(0 2px 3px rgba(0,0,0,.5)); }
+.ac-tr { gap: 2px; }
+
+/* medalhões com imagem (public/bonus) */
+.bimg { width: 36px; height: 36px; flex: none; filter: drop-shadow(0 2px 3px rgba(0,0,0,.55)); border-radius: 50%; }
+.bimg.big { width: 46px; height: 46px; }
+.ac-type .bimg { width: 38px; height: 38px; }
+.bimg.up { box-shadow: 0 0 0 3px #35d04f, 0 0 12px #35d04f; }
+.bimg.down { box-shadow: 0 0 0 3px #ff3b2f, 0 0 12px #ff3b2f; }
+.bimg.ac-tl, .bimg.mc-coin { position: absolute; top: 5px; z-index: 1; }
+.bimg.ac-tl { left: 5px; }
+.bimg.mc-coin { right: 5px; }

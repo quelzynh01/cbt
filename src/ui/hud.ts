@@ -1,9 +1,11 @@
 import { CARDS, GUILDS, GUILD_NAMES, HEROES, MONSTERS, TOKEN_INFO, setGuildNames, teamName } from '../engine/data';
 import type { Game } from '../engine/game';
-import type { CardInst, DieFace, GameEvent, GuildId, Unit } from '../engine/types';
+import type { CardInst, DieFace, GameEvent, GuildId, Token, Unit } from '../engine/types';
+import { tokenImageId, tokenUrl } from '../render/tokens';
+import { dieImg } from '../render/dice';
 import { drawFace, getArtVersion } from '../render/chibi';
 import { CURSES } from '../engine/cards';
-import { ITEM_LEVEL, curseCard, heroCard, itemCard, itemColor, monsterCard, paintCardArt } from './cardview';
+import { ITEM_LEVEL, bonusImg, curseCard, heroCard, itemCard, itemColor, monsterCard, paintCardArt } from './cardview';
 import { getSettings, onSettings, saveSettings } from './settings';
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string, root: ParentNode = document) => root.querySelector(sel) as T;
@@ -79,6 +81,8 @@ export class Hud {
       <div id="monsterctl" class="panel hidden"></div>
       <div id="timeline"></div>
       <div id="cardview" class="hidden"></div>
+      <div id="tokenflip" class="hidden"></div>
+      <div id="dicecenter" class="hidden"></div>
       <div id="dice" class="hidden"></div>
       <div id="banner" class="hidden"></div>
       <div id="toasts"></div>
@@ -222,6 +226,39 @@ export class Hud {
 
   closeCard() { this.cardOpen = null; $('#cardview', this.root).classList.add('hidden'); }
 
+  // ------------------------------------------------------------------
+  /** Marcador pego: aparece no centro da tela com o verso (?) virando para a face. Vários seguidos entram na fila. */
+  private flipQueue: { heroId: string; token: Token }[] = [];
+  private flipBusy = false;
+  flipToken(heroId: string, token: Token) {
+    this.flipQueue.push({ heroId, token: { ...token } });
+    if (!this.flipBusy) this.nextFlip();
+  }
+  private nextFlip() {
+    const box = $('#tokenflip', this.root);
+    const it = this.flipQueue.shift();
+    if (!it) { this.flipBusy = false; box.classList.add('hidden'); return; }
+    this.flipBusy = true;
+    const g = this.game;
+    const u = g.s.units[it.heroId];
+    const t = it.token;
+    const face = tokenImageId(t);
+    const info = TOKEN_INFO[t.type];
+    const name = t.type === 'bau' ? `${info.name} (${t.value ?? 1})` : t.type === 'missao' ? `Marcador de Missão ${t.color ?? ''}` : info.name;
+    const color = u?.guild ? g.guild(u.guild).color : '#e6c8ff';
+    box.innerHTML = `<div class="tf-card ${t.type === 'armadilha' ? 'bad' : ''}">
+        <div class="tf-coin"><div class="tf-spin" style="--sp:${(1.4 / Math.max(1, this.speed)).toFixed(2)}s"><img class="tf-back" src="${tokenUrl('fundo')}"/><img class="tf-back2" src="${tokenUrl('fundo')}"/>${face ? `<img class="tf-face" src="${tokenUrl(face)}"/>` : `<div class="tf-face tf-txt">${name}</div>`}</div></div>
+        <div class="tf-name">${name}</div>
+        <div class="tf-who" style="color:${color}">${u ? g.name(u) : ''} pegou!</div>
+        <div class="tf-text">${t.type === 'missao' ? 'Marcador de Missão' : info.text}</div>
+      </div>`;
+    box.classList.remove('hidden');
+    const card = box.firstElementChild as HTMLElement;
+    requestAnimationFrame(() => requestAnimationFrame(() => card.classList.add('flip')));
+    const ms = 2600 / Math.max(1, this.speed);
+    setTimeout(() => { card.classList.add('out'); setTimeout(() => this.nextFlip(), 300); }, ms);
+  }
+
   /** Monstros no Cemitério (Tabuleiro de Entrada de Monstro). Atualizado por eventos durante as animações. */
   cem: string[] = [];
   syncCemetery() { this.cem = this.game.s.entryBoard.slice(); this.renderCemetery(); }
@@ -263,12 +300,12 @@ export class Hud {
     const dice = row.querySelector('.sp-dice') as HTMLElement;
     const res = row.querySelector('.sp-res') as HTMLElement;
     row.classList.add('active');
-    dice.innerHTML = '<span class="die black">?</span><span class="die black">?</span>';
+    dice.innerHTML = `<span class="die black">${dieImg('blank', true)}</span><span class="die black">${dieImg('blank', true)}</span>`;
     const faces: DieFace[] = ['crit', 'melee', 'ranged', 'blank'];
-    const spin = window.setInterval(() => dice.querySelectorAll('.die').forEach(d => { d.textContent = FACE_ICON[faces[Math.floor(Math.random() * 4)]]; }), 70);
+    const spin = window.setInterval(() => dice.querySelectorAll('.die').forEach(d => { d.innerHTML = dieImg(faces[Math.floor(Math.random() * 4)], true); }), 70);
     window.setTimeout(() => {
       clearInterval(spin);
-      dice.innerHTML = e.faces.map(f => `<span class="die black hit">${FACE_ICON[f]}</span>`).join('');
+      dice.innerHTML = e.faces.map(f => `<span class="die black hit">${dieImg(f, true)}</span>`).join('');
       res.className = `sp-res ${e.cell ? 'good' : 'bad'}`;
       res.textContent = e.cell ? `${e.reason} (${e.cell.c},${e.cell.r})` : e.reason;
       row.classList.remove('active');
@@ -375,7 +412,7 @@ export class Hud {
       ${!u.alive ? '<div class="tag dead">☠ Morto — ressuscita quando a Guilda Descansar</div>' : ''}
       <div class="cards">${cards.map(c => this.cardHtml(c, u, usableIds)).join('')}</div>
       <div class="tokens">${u.tokens.length ? u.tokens.map(t => `
-        <div class="token" title="${TOKEN_INFO[t.type].text}"><span>${TOKEN_INFO[t.type].name}${t.type === 'bau' ? ` (${t.value})` : ''}</span>
+        <div class="token" title="${TOKEN_INFO[t.type].text}">${tokenImageId(t) ? `<img class="tok-ico" src="${tokenUrl(tokenImageId(t)!)}"/>` : ''}<span>${TOKEN_INFO[t.type].name}${t.type === 'bau' ? ` (${t.value})` : ''}</span>
         ${isActive && mine && t.type !== 'bau' ? `<button data-token="${t.id}">Usar</button>` : ''}</div>`).join('') : '<span class="muted">Sem marcadores de Exploração</span>'}</div>
       ${actions}`;
     if (this.inspected) $('#hb-close', box).onclick = () => this.actions.inspect(null);
@@ -397,7 +434,7 @@ export class Hud {
       <div class="cname">${d.name}</div>
       ${d.kind === 'attack' ? `<div class="cdice">${d.attackType === 'melee' ? '⚔' : '➶'} <b class="${bonus > 0 ? 'up' : ''}" title="${bonus ? `${d.dice} da carta + ${bonus} de bônus` : ''}">${d.dice + bonus}</b><small>${d.attackType === 'melee' ? 'Próximo' : 'Distância'}</small></div>`
         : `<div class="cdice"><small>${d.kind === 'boost' ? '✚ Ampliação' : '◆ Permanente'}</small></div>`}
-      <div class="cgroup">${d.group}${d.defBonus ? ` · ⛨+${d.defBonus}` : ''}${d.hpBonus ? ` · ❤+${d.hpBonus}` : ''}${d.rerolls ? ` · ↻+${d.rerolls}` : ''}</div>
+      <div class="cgroup">${d.group}${d.defBonus || d.hpBonus || d.rerolls ? `<span class="cbonus">${d.defBonus ? bonusImg('def', d.defBonus) : ''}${d.hpBonus ? bonusImg('hp', d.hpBonus) : ''}${d.rerolls ? bonusImg('rr', d.rerolls) : ''}</span>` : ''}</div>
       ${d.text ? `<div class="ctext">${d.text}</div>` : ''}
       ${maya && !c.exhausted && c.uses > 0 ? '<div class="cuses">1 uso restante</div>' : ''}
       ${c.exhausted ? '<div class="cexh">EXAUSTADA</div>' : ''}
@@ -443,7 +480,7 @@ export class Hud {
     const g = this.game;
     switch (e.t) {
       case 'log': this.log(e.text); break;
-      case 'attack': if (!battleShown) this.showDice(e); break;
+      case 'attack': if (!battleShown) this.centerDice(e); break;
       case 'cemetery': {
         if (!this.cem.includes(e.id)) this.cem.push(e.id);
         this.renderCemetery();
@@ -464,7 +501,10 @@ export class Hud {
       case 'coins': this.toast(`🪙 +${e.amount} ${guildShort(e.guild)} — ${e.reason}`, GUILDS[e.guild].color); break;
       case 'rest': this.banner('Descanso', GUILDS[e.guild].color, 'Cartas restauradas · Heróis ressuscitados'); break;
       case 'card': this.toast(`🃏 Nova carta: ${e.cardName}`, '#e0b43a'); break;
-      case 'pickup': this.log(`${g.name(g.unit(e.heroId))} pegou: ${TOKEN_INFO[e.token.type].name}`); break;
+      case 'pickup':
+        this.log(`${g.name(g.unit(e.heroId))} pegou: ${TOKEN_INFO[e.token.type].name}`);
+        this.flipToken(e.heroId, e.token);
+        break;
       case 'door': this.log(`${g.name(g.unit(e.by))} ${e.open ? 'abriu' : 'fechou'} uma porta.`); break;
       case 'spawn': this.log(`${MONSTERS[g.unit(e.id).defId].name} entrou no tabuleiro.`); break;
       case 'reaction': this.log(`${MONSTERS[g.unit(e.monsterId).defId].name}: Reação de ${e.kind === 'alerta' ? 'Alerta' : 'Vingança'}!`); break;
@@ -502,13 +542,75 @@ export class Hud {
     this.bannerTimer = window.setTimeout(() => b.classList.add('hidden'), 1400 / this.speed);
   }
 
+  /** Rolagem no centro da tela: os dados giram, param um a um e aparece o resultado final. */
+  private centerTimers: number[] = [];
+  private centerDice(e: Extract<GameEvent, { t: 'attack' }>) {
+    const g = this.game;
+    const box = $('#dicecenter', this.root);
+    for (const t of this.centerTimers) clearTimeout(t);
+    this.centerTimers = [];
+    const sp = Math.max(1, this.speed);
+    const at = (ms: number, fn: () => void) => this.centerTimers.push(window.setTimeout(fn, ms / sp));
+    const atk = g.unit(e.attackerId);
+    const reason = { heroi: 'Ataque', alerta: 'Reação de Alerta', vinganca: 'Reação de Vingança', armadilha: 'Armadilha' }[e.reason];
+    const ok = (f: DieFace, s: string) => f === 'crit' || f === s;
+    const row = (faces: DieFace[], black: boolean, cls: string) => faces.map((f, i) => `<span class="cd-die ${cls} rolling" data-f="${f}" data-i="${i}">${dieImg(black ? 'blank' : 'blank', black)}</span>`).join('');
+    const totalW = e.targets.reduce((s, t) => s + t.wounds, 0);
+    box.innerHTML = `<div class="cd-box">
+      <div class="cd-title">${reason} · <b>${g.name(atk)}</b> <small>${e.cardName}</small></div>
+      <div class="cd-row atk">${row(e.dice, true, 'black') || '<span class="muted">sem dados</span>'}</div>
+      <div class="cd-sum atk"></div>
+      ${e.targets.map((t, ti) => `<div class="cd-def" data-t="${ti}"><div class="cd-who">${g.name(g.unit(t.id))}</div>
+        <div class="cd-row def">${t.stunnedNoDefense ? '<span class="muted">Atordoado: sem Defesa</span>' : row(t.defense, false, 'white') || '<span class="muted">sem dados de Defesa</span>'}</div><div class="cd-sum def"></div></div>`).join('')}
+      <div class="cd-final"></div></div>`;
+    box.classList.remove('hidden');
+    const spin = (sel: string, black: boolean, pool: DieFace[]) => {
+      const iv = window.setInterval(() => box.querySelectorAll<HTMLElement>(`${sel} .cd-die.rolling`).forEach(d => { d.innerHTML = dieImg(pool[Math.floor(Math.random() * pool.length)], black); }), 70);
+      this.centerTimers.push(iv);
+      return iv;
+    };
+    const settle = (sel: string, black: boolean, success: string, start: number, step: number) => {
+      box.querySelectorAll<HTMLElement>(`${sel} .cd-die`).forEach((d, i) => at(start + i * step, () => {
+        const f = d.dataset.f as DieFace;
+        d.classList.remove('rolling');
+        d.innerHTML = dieImg(f, black);
+        if (ok(f, success)) d.classList.add('hit');
+        if (f === 'crit') d.classList.add('crit');
+      }));
+    };
+    const a1 = spin('.cd-row.atk', true, ['crit', 'melee', 'ranged', 'blank']);
+    settle('.cd-row.atk', true, e.attackType, 500, 110);
+    const atkDone = 500 + e.dice.length * 110;
+    at(atkDone, () => { clearInterval(a1); const s = box.querySelector('.cd-sum.atk')!; s.innerHTML = `<b>${e.hits}</b> acerto${e.hits === 1 ? '' : 's'}${e.crits ? ` <span class="crit">(${e.crits}✷)</span>` : ''}`; });
+    let tEnd = atkDone + 150;
+    e.targets.forEach((t, ti) => {
+      const sel = `.cd-def[data-t="${ti}"]`;
+      const start = tEnd;
+      at(start, () => box.querySelector(sel)?.classList.add('show'));
+      const iv = spin(sel, false, ['crit', 'shield', 'blank', 'blank']);
+      settle(sel, false, 'shield', start + 450, 110);
+      const done = start + 450 + t.defense.length * 110;
+      at(done, () => { clearInterval(iv); box.querySelector(`${sel} .cd-sum`)!.innerHTML = t.stunnedNoDefense ? '' : `<b>${t.blocks}</b> bloqueio${t.blocks === 1 ? '' : 's'}`; });
+      tEnd = done + 150;
+    });
+    at(tEnd + 100, () => {
+      const f = box.querySelector('.cd-final')!;
+      f.className = `cd-final show ${totalW ? 'bad' : 'good'}`;
+      f.innerHTML = e.targets.length > 1
+        ? e.targets.map(t => `${g.name(g.unit(t.id))}: ${t.wounds ? `−${t.wounds}` : 'bloqueou'}`).join(' · ')
+        : totalW ? `−${totalW} Ferimento${totalW > 1 ? 's' : ''}!` : 'Bloqueado!';
+    });
+    at(tEnd + 1500, () => box.classList.add('fade'));
+    at(tEnd + 1900, () => { box.classList.add('hidden'); box.classList.remove('fade'); });
+  }
+
   private showDice(e: Extract<GameEvent, { t: 'attack' }>) {
     const g = this.game;
     const atk = g.unit(e.attackerId);
     const reason = { heroi: '', alerta: 'Reação de Alerta', vinganca: 'Reação de Vingança', armadilha: 'Armadilha' }[e.reason];
     const succ = (f: DieFace, type: string) => f === 'crit' || f === type;
     const dice = (faces: DieFace[], type: string, cls: string) => faces.map((f, i) =>
-      `<span class="die ${cls} ${succ(f, type) ? 'hit' : ''} ${f === 'crit' ? 'crit' : ''}" style="animation-delay:${i * 60}ms">${FACE_ICON[f]}</span>`).join('') || '<span class="muted">sem dados</span>';
+      `<span class="die ${cls} ${succ(f, type) ? 'hit' : ''} ${f === 'crit' ? 'crit' : ''}" style="animation-delay:${i * 60}ms">${dieImg(f, cls === 'black')}</span>`).join('') || '<span class="muted">sem dados</span>';
     const el = $('#dice', this.root);
     el.innerHTML = `
       ${reason ? `<div class="d-reason">${reason}</div>` : ''}

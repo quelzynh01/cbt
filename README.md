@@ -110,12 +110,26 @@ Sprites em PNG ficam em `public/sprites/<id>_<direção>.png` e são listados em
 Direções isométricas: `se` (frente-direita), `sw` (frente-esquerda), `nw` (costas-esquerda), `ne` (costas-direita).
 Se faltar uma direção, a oposta é espelhada; personagens sem PNG usam o desenho por código (`src/render/chibi.ts`).
 
-Já com arte: **Vapor, Espetado, Hobsbawm, Saqueador Orc e Arqueiro Goblin**.
+Já com arte: **os 12 Heróis e todos os Monstros** (Saqueador Orc, Capitão Orc, Arqueiro Goblin, Feral Martelador, Feral Lanceiro, Irmã da Dor, Irmã do Prazer, Troll/Schmetterling, Minotauro/Urratouro e Lorde Presas).
 
-Para adicionar outro personagem: coloque em `ref/modelos/<nome>.jpg` uma imagem com **fundo verde**, a pose de
-**frente à esquerda** e a de **costas à direita**, registre o nome em `NAMES` dentro de `tools/chroma_sprites.py`
-e rode `python tools/chroma_sprites.py` (precisa de Pillow, numpy e scipy). O script recorta pelo verde, espelha as
-duas poses para formar as 4 direções e atualiza o `manifest.json`.
+Para adicionar ou trocar um personagem: coloque em `ref/modelos/<nome>.jpg` uma imagem com **fundo verde**, a pose de
+**frente à esquerda** e a de **costas à direita**, registre o nome em `NAMES` (e o tamanho em `SIZE`) dentro de
+`tools/build_sprites.py` e rode `python tools/build_sprites.py --lineup fila.png` (precisa de Pillow, numpy e scipy).
+
+**Tamanho igual para todos:** as poses têm armas levantadas, braços esticados e pulos, então o script não usa a caixa
+da imagem. Ele mede o **corpo** (topo da cabeça → pés, ignorando partes finas como lanças e espadas) e deixa todos os
+corpos com a mesma altura × `SIZE` (Heróis 1,0; anão 0,9; Goblin 0,86; Irmãs 1,0; Lorde Presas 1,18; Orc 1,22; Capitão 1,28; Ferais 1,3; Troll e Minotauro 1,62). As armas continuam na imagem e a
+âncora no chão é a linha dos **pés**. O manifesto guarda os pés e o topo do corpo de cada direção; o jogo usa uma escala
+fixa por pixel. Se a medição errar num modelo, ajuste em `OVERRIDE` (ex.: o Grom pula com a espada acima da cabeça).
+`--lineup` gera uma imagem com todos lado a lado no mesmo chão, para conferir.
+
+**Marcadores (tokens):** as imagens ficam em `ref/tokens/` (fundo verde) e viram `public/tokens/<id>.webp` com
+`python tools/build_tokens.py`. No mapa, os de Exploração aparecem com o verso (?) até alguém pegar; ao pegar, o marcador
+aparece no centro da tela virando do verso para a face, com o nome de quem pegou. A Biblioteca tem a aba **Marcadores**. Os marcadores de Missão ficam deitados no chão, ocupando um dos dois lugares do Espaço (dá para parar em cima).
+
+**Dados:** as faces (dado preto de ataque, branco de defesa) e as placas das Entradas de Monstro vêm de `ref/dados/` via `python tools/build_dice.py` (a placa ✷+⚔ é montada a partir das outras).
+
+**Medalhões das cartas:** Defesa, Vida, Rerrolagem, dados de ataque (Próximo/Distância), moeda (custo/recompensa), caveira (Extermínio) e movimento usam as imagens 1–10 de `ref/dados/+*.jpg`, geradas com `python tools/build_bonus.py` em `public/bonus/`. Valores fora de 1–10 usam o medalhão desenhado.
 
 ## Multiplayer Online (até 4 jogadores)
 
@@ -124,9 +138,16 @@ envia o resultado para todos via WebRTC (biblioteca PeerJS; o "aperto de mão" i
 gratuito do PeerJS). Os outros jogadores só enviam as jogadas.
 
 1. Menu → **🌐 Multiplayer Online** → digite seu nome → **Criar sala**.
-2. Envie o **código** (ou o link `…/?sala=CODIGO`) para os amigos; eles clicam em **Entrar**.
-3. Cada um escolhe 3 heróis (não pode repetir herói entre Guildas). Vagas vazias: **+ Adicionar IA**.
-4. O anfitrião clica **Começar partida**. Áreas Iniciais e jogador inicial são sorteados.
+2. Envie o **código** (ou o link `…/?sala=CODIGO`) para os amigos; eles clicam em **Entrar**. Vagas vazias: **+ Adicionar IA**
+   (o anfitrião escolhe a dificuldade). Cada um pode dar um nome ao time.
+3. O anfitrião clica **Ir para a mesa** e a preparação é igual à da campanha, numa mesa com as cartas dos outros
+   **viradas para baixo** e o status de cada um (⏳ escolhendo… / ✓ pronto):
+   - **Recrutamento** (3 rodadas): cada um escolhe 1 Herói da mão, sem ver a escolha dos outros; quando todos escolhem,
+     o resto passa para a esquerda. Os Heróis dos outros só aparecem no fim.
+   - **Votação do mapa** (votos escondidos até todos votarem; empate = sorteio).
+   - **Equipamento inicial**: cada um distribui as 5 cartas iniciais entre seus Heróis.
+4. A partida começa com o **posicionamento** na Área Inicial (todos ao mesmo tempo). Quem cair durante a mesa é
+   substituído pela IA para ninguém ficar esperando.
 
 Durante a partida (painel **🌐 Online**, à direita): lista de jogadores, chat e, para o anfitrião, **IA assume**
 (se alguém cair). Quem cair volta pelo mesmo link/código e recebe o estado atual. Regras de 3–4 jogadores: vence quem

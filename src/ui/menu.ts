@@ -9,9 +9,11 @@ import { ITEM_LEVEL, MONSTER_LEVEL, curseCard, heroCard, itemCard, monsterCard, 
 import { CARDS as ALL_CARDS, CURSES } from '../engine/cards';
 import { TITLES, TITLE_TEXT } from '../engine/titles';
 import { getSettings, saveSettings } from './settings';
+import { tokenUrl } from '../render/tokens';
+import { EXPLORATION_BAG, TOKEN_INFO } from '../engine/data';
 
-type Tab = 'herois' | 'monstros' | 'itens' | 'mapas' | 'regras';
-const TABS: [Tab, string][] = [['herois', '👥 Heróis'], ['monstros', '👹 Monstros'], ['itens', '🃏 Itens'], ['mapas', '🗺️ Mapas'], ['regras', '📖 Regras']];
+type Tab = 'herois' | 'monstros' | 'itens' | 'marcadores' | 'mapas' | 'regras';
+const TABS: [Tab, string][] = [['herois', '👥 Heróis'], ['monstros', '👹 Monstros'], ['itens', '🃏 Itens'], ['marcadores', '🪙 Marcadores'], ['mapas', '🗺️ Mapas'], ['regras', '📖 Regras']];
 
 // Tela inicial: galeria de Personagens (status, habilidade, escolha da Guilda) e de Mapas.
 
@@ -87,6 +89,7 @@ export class MenuPages {
     if (tab === 'herois') this.showHeroes();
     else if (tab === 'monstros') this.showMonsters();
     else if (tab === 'itens') this.showItems();
+    else if (tab === 'marcadores') this.showTokens();
     else if (tab === 'mapas') this.showMaps();
     else this.showRules();
   }
@@ -231,6 +234,28 @@ export class MenuPages {
     const b = (v: string, n: string) => `<button class="${lv === v ? 'primary' : ''}" data-il="${v}">${ITEM_LEVEL[v] ? `<span class="lvdot" style="background:${ITEM_LEVEL[v].color}"></span>` : ''}${n}</button>`;
     this.open('Biblioteca', `<div class="lib-filter">${b('I', 'Iniciais')}${b('1', 'Nível 1')}${b('2', 'Nível 2')}${b('3', 'Nível 3')}${b('4', 'Nível 4')}${b('5', 'Nível 5')}${b('R', 'Recompensas')}${b('M', 'Maldições e Títulos')}</div>${body}`);
     this.page.querySelectorAll<HTMLElement>('[data-il]').forEach(x => { x.onclick = () => { this.itemLevel = x.dataset.il!; this.showItems(); }; });
+  }
+
+  showTokens() {
+    const qty = (type: string, value?: number) => EXPLORATION_BAG.filter(t => t.type === type && (value === undefined || t.value === value)).length;
+    const tok = (img: string, name: string, text: string, extra = '') => `<div class="tk-card"><img src="${tokenUrl(img)}"/><b>${name}</b>${extra ? `<small>${extra}</small>` : ''}<p>${text}</p></div>`;
+    this.open('Biblioteca', `
+      <h3 class="mp-sub">Marcadores de Exploração</h3>
+      <p class="muted">Ficam virados para baixo no mapa. O Herói pega automaticamente ao entrar num Espaço sem Inimigos — aí o marcador é revelado.
+        Por partida são sorteados ${EXPLORATION_BAG.length - 2} dos ${EXPLORATION_BAG.length} do saco.</p>
+      <div class="tk-grid">
+        ${tok('fundo', 'Verso', 'É assim que todos aparecem no tabuleiro até alguém pegar.')}
+        ${tok('cura', TOKEN_INFO.cura.name, TOKEN_INFO.cura.text, `${qty('cura')} no saco`)}
+        ${tok('revigorante', TOKEN_INFO.revigorante.name, TOKEN_INFO.revigorante.text, `${qty('revigorante')} no saco`)}
+        ${tok('turno', TOKEN_INFO.turno.name, TOKEN_INFO.turno.text, `${qty('turno')} no saco`)}
+        ${tok('bau1', 'Baú de Tesouro (1)', TOKEN_INFO.bau.text, `${qty('bau', 1)} no saco · vale 1 moeda`)}
+        ${tok('bau2', 'Baú de Tesouro (2)', TOKEN_INFO.bau.text, `${qty('bau', 2)} no saco · vale 2 moedas`)}
+        ${tok('bau3', 'Baú de Tesouro (3)', TOKEN_INFO.bau.text, `${qty('bau', 3)} no saco · vale 3 moedas`)}
+        ${tok('armadilha', TOKEN_INFO.armadilha.name, TOKEN_INFO.armadilha.text, `${qty('armadilha')} no saco`)}
+      </div>
+      <h3 class="mp-sub">Marcadores de Missão</h3>
+      <p class="muted">Ficam à vista. Cada cenário diz o que fazer com eles (recuperar, escoltar, pisar…) — veja em Mapas.</p>
+      <div class="tk-grid">${['azul', 'vermelho', 'verde', 'laranja'].map(c => tok(`missao_${c}`, `Missão ${c[0].toUpperCase()}${c.slice(1)}`, 'Marcador de Missão.')).join('')}</div>`);
   }
 
   showRules() {

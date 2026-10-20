@@ -7,6 +7,8 @@ import { OnlineLobby } from './ui/lobby';
 import { CampaignUI } from './ui/campaignUI';
 import { gameOptions, recordResult } from './campaign/campaign';
 import { preloadArt } from './render/chibi';
+import { preloadTokens } from './render/tokens';
+import { preloadDice } from './render/dice';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const hud = document.getElementById('hud')!;
@@ -85,7 +87,7 @@ hud.classList.add('hidden');
 
 // Carrega os sprites (PNG) antes de liberar o jogo.
 // Atalhos: /#teste inicia direto no Modo Teste; /#biblioteca abre a Biblioteca.
-preloadArt().then(() => {
+Promise.all([preloadArt(), preloadTokens(), preloadDice()]).then(() => {
   if (location.hash === '#teste') { enterGame(); getController().startTest(); }
   if (location.hash === '#biblioteca') pages.showLibrary('herois');
   const sala = new URLSearchParams(location.search).get('sala');

@@ -2,6 +2,7 @@ import Peer, { type DataConnection } from 'peerjs';
 import type { Action } from '../engine/actions';
 import type { GameEvent, GameState, GuildId } from '../engine/types';
 import { loadMapId } from '../engine/maps';
+import { type OnlineSetup, redact } from './onlineSetup';
 
 // Modo online peer-to-peer: o navegador de quem cria a sala é o "servidor" (anfitrião).
 // Ele roda o motor de regras, valida as jogadas e envia eventos + estado para todos.
@@ -22,7 +23,14 @@ export interface Seat {
   host?: boolean;
 }
 
-export interface Lobby { code: string; seats: Seat[]; started: boolean; mapId?: string }
+export interface Lobby {
+  code: string; seats: Seat[]; started: boolean; mapId?: string;
+  /** Preparação (recrutamento, votação, equipamento). Cada jogador recebe a sua versão, com as cartas dos outros escondidas. */
+  setup?: OnlineSetup;
+}
+
+/** Jogadas da preparação. */
+export type SetupMsg = { t: 'draft'; hero: string } | { t: 'vote'; map: string } | { t: 'equip'; inv: Record<string, string[]> };
 
 export type Msg =
   | { t: 'hello'; clientId: string; name: string; heroes: string[] }
@@ -34,6 +42,7 @@ export type Msg =
   | { t: 'reject'; reason: string }
   | { t: 'chat'; from: string; text: string; color?: string }
   | { t: 'kicked'; reason: string }
+  | SetupMsg
   | { t: 'view'; guild?: GuildId; c: [number, number, number]; m: [number, number] | null; sel?: string | null };
 
 export function clientId(): string {
@@ -90,6 +99,8 @@ export class HostSession {
   /** Estado atual da partida (para quem reconectar). */
   getState: () => GameState | null = () => null;
   onSeatsChanged: () => void = () => {};
+  /** Jogada da preparação vinda de um jogador remoto (ou do próprio anfitrião). */
+  onSetupMsg: (guild: GuildId, m: SetupMsg) => void = () => {};
 
   constructor(name: string, heroes: string[], ev: SessionEvents) {
     this.ev = ev;
@@ -124,7 +135,7 @@ export class HostSession {
         cid = m.clientId;
         let seat = this.lobby.seats.find(s => s.clientId === m.clientId);
         if (!seat) {
-          if (this.lobby.started) { conn.send({ t: 'kicked', reason: 'A partida já começou.' } satisfies Msg); setTimeout(() => conn.close(), 300); return; }
+          if (this.lobby.started || this.lobby.setup) { conn.send({ t: 'kicked', reason: 'A partida já começou.' } satisfies Msg); setTimeout(() => conn.close(), 300); return; }
           const free = GUILD_SEATS.find(g => !this.lobby.seats.some(s => s.guild === g));
           if (!free) { conn.send({ t: 'kicked', reason: 'A sala está cheia (4 jogadores).' } satisfies Msg); setTimeout(() => conn.close(), 300); return; }
           seat = { clientId: m.clientId, name: m.name || 'Jogador', heroes: m.heroes, guild: free, ai: false, connected: true };
@@ -152,6 +163,8 @@ export class HostSession {
         if (m.guild && !this.lobby.seats.some(s => s.guild === m.guild)) seat.guild = m.guild;
         if (m.team !== undefined) seat.team = m.team.trim().slice(0, 20) || undefined;
         this.pushLobby();
+      } else if ((m.t === 'draft' || m.t === 'vote' || m.t === 'equip') && this.lobby.setup && !this.lobby.started) {
+        this.onSetupMsg(seat.guild, m);
       } else if (m.t === 'action') {
         const why = this.onRemoteAction(seat.guild, m.action);
         if (why) conn.send({ t: 'reject', reason: why } satisfies Msg);
@@ -168,7 +181,7 @@ export class HostSession {
       this.conns.delete(cid);
       const seat = this.lobby.seats.find(s => s.clientId === cid);
       if (!seat) return;
-      if (!this.lobby.started) this.lobby.seats = this.lobby.seats.filter(s => s !== seat);
+      if (!this.lobby.started && !this.lobby.setup) this.lobby.seats = this.lobby.seats.filter(s => s !== seat);
       else seat.connected = false;
       this.chatAll('Sistema', `${seat.name} desconectou.`);
       this.pushLobby();
@@ -178,7 +191,18 @@ export class HostSession {
 
   send(to: string, m: Msg) { const c = this.conns.get(to); if (c?.open) c.send(m); }
   broadcast(m: Msg) { for (const c of this.conns.values()) if (c.open) c.send(m); }
-  pushLobby() { this.broadcast({ t: 'lobby', lobby: this.lobby }); this.ev.lobby(this.lobby); }
+  /** Sala para um jogador: na preparação, as cartas e escolhas dos outros vão escondidas. */
+  lobbyFor(guild: GuildId | null): Lobby {
+    return this.lobby.setup ? { ...this.lobby, setup: redact(this.lobby.setup, guild) } : this.lobby;
+  }
+  pushLobby() {
+    for (const [cid, c] of this.conns) {
+      if (!c.open) continue;
+      const seat = this.lobby.seats.find(s => s.clientId === cid);
+      c.send({ t: 'lobby', lobby: this.lobbyFor(seat?.guild ?? null) } satisfies Msg);
+    }
+    this.ev.lobby(this.lobbyFor(this.lobby.seats[0].guild));
+  }
 
   chatAll(from: string, text: string, color?: string) {
     this.broadcast({ t: 'chat', from, text, color });
@@ -304,6 +328,7 @@ export class ClientSession {
 
   private send(m: Msg) { if (this.conn?.open) this.conn.send(m); }
   sendAction(a: Action) { this.send({ t: 'action', action: a }); }
+  sendSetup(m: SetupMsg) { this.send(m); }
   sendView(c: [number, number, number], m: [number, number] | null, sel?: string | null) { this.send({ t: 'view', c, m, sel }); }
   setMine(p: { heroes?: string[]; name?: string; guild?: GuildId; team?: string }) {
     if (p.heroes) this.heroes = p.heroes;

@@ -33,6 +33,23 @@ const title = (name: string, sub = '') => {
   return `<div class="ac-title" style="font-size:${fs}px"><span>${name}</span>${sub ? `<small>${sub}</small>` : ''}</div>`;
 };
 
+/** Medalhão de bônus +1..+10 (public/bonus, tools/build_bonus.py). */
+export function bonusImg(kind: 'def' | 'hp' | 'rr', n: number, cls = 'bonus'): string {
+  const name = kind === 'def' ? 'Defesa' : kind === 'hp' ? 'Vida' : 'Rerrolagem';
+  if (n < 1 || n > 10) return `<span class="${cls}">+${n}</span>`;
+  return `<img class="${cls}" src="${import.meta.env.BASE_URL}bonus/${kind}${n}.webp" title="+${n} ${name}" alt="+${n} ${name}" draggable="false"/>`;
+}
+
+type BadgeKind = 'def' | 'hp' | 'rr' | 'melee' | 'ranged' | 'coin' | 'skull' | 'move';
+/** Medalhão com o número (imagem de public/bonus, 1..10); fora disso usa o medalhão desenhado. `extra`: up/down, posição. */
+function medal(kind: BadgeKind, n: number, title: string, extra = ''): string {
+  if (Number.isInteger(n) && n >= 1 && n <= 10) {
+    return `<img class="bimg ${kind} ${extra}" src="${import.meta.env.BASE_URL}bonus/${kind}${n}.webp" title="${title}" alt="${n}" draggable="false"/>`;
+  }
+  const cls = kind === 'melee' || kind === 'ranged' ? `dice ${kind}` : kind;
+  return med(`${cls} ${extra}`, n, title);
+}
+
 const med = (cls: string, v: string | number, title: string) => `<span class="med ${cls}" title="${title}"><b>${v}</b></span>`;
 
 /** Valores atuais de um personagem na partida (com itens, Maldições e efeitos). */
@@ -56,12 +73,12 @@ export function itemCard(id: string, extra = '', attrs = '', qty = false, atkBon
   if (!d) return '';
   const lv = ITEM_LEVEL[d.level] ?? ITEM_LEVEL.I;
   const type = d.kind === 'attack' ? (d.attackType === 'melee' ? 'Ataque Próximo' : 'Ataque a Distância') : d.kind === 'boost' ? 'Ampliação' : 'Permanente';
-  const bonus = [d.defBonus ? med('def', `+${d.defBonus}`, 'Defesa adicional') : '', d.hpBonus ? med('hp', `+${d.hpBonus}`, 'Vida adicional') : '', d.rerolls ? med('rr', `+${d.rerolls}`, 'Rerrolagem') : ''].join('');
+  const bonus = [d.defBonus ? bonusImg('def', d.defBonus, 'ac-bmed') : '', d.hpBonus ? bonusImg('hp', d.hpBonus, 'ac-bmed') : '', d.rerolls ? bonusImg('rr', d.rerolls, 'ac-bmed') : ''].join('');
   const text = `${d.text}${d.partial ? ' <i>(efeito ainda não implementado)</i>' : ''}`;
   return `<div class="acard item ${extra}" style="--lv:${lv.color}" ${attrs} title="${(d.text || d.name).replace(/"/g, '&quot;')}">
     ${title(d.name)}
-    <div class="ac-art">${d.cost ? med('coin ac-tl', d.cost, 'Custo em moedas') : ''}${bonus ? `<div class="ac-tr">${bonus}</div>` : ''}<span class="ac-icon">${GROUP_ICON[d.group] ?? '✦'}</span></div>
-    <div class="ac-type"><div><b>${type}</b><small>${d.group}</small></div>${d.kind === 'attack' ? med(`dice ${d.attackType}${atkBonus > 0 ? ' up' : atkBonus < 0 ? ' down' : ''}`, d.dice + atkBonus, atkBonus ? `${d.dice + atkBonus} dados de ataque (carta: ${d.dice})` : `${d.dice} dados de ataque`) : ''}</div>
+    <div class="ac-art">${d.cost ? medal('coin', d.cost, `Custo: ${d.cost} moeda(s)`, 'ac-tl') : ''}${bonus ? `<div class="ac-tr">${bonus}</div>` : ''}<span class="ac-icon">${GROUP_ICON[d.group] ?? '✦'}</span></div>
+    <div class="ac-type"><div><b>${type}</b><small>${d.group}</small></div>${d.kind === 'attack' ? medal(d.attackType === 'melee' ? 'melee' : 'ranged', d.dice + atkBonus, atkBonus ? `${d.dice + atkBonus} dados de ataque (carta: ${d.dice})` : `${d.dice} dados de ataque ${d.attackType === 'melee' ? 'Próximo' : 'a Distância'}`, atkBonus > 0 ? 'up' : atkBonus < 0 ? 'down' : '') : ''}</div>
     <div class="ac-text ${textSize(d.text)}">${d.text ? `<p>${text}</p>` : '<p><i class="ac-none">Sem efeito especial</i></p>'}</div>
     <div class="ac-code">${d.code} · ${lv.name}${qty && d.qty ? ` · ${d.qty}x` : ''}${d.scenario ? ` · ${d.scenario}` : ''}</div>
   </div>`;
@@ -90,7 +107,7 @@ export function heroCard(id: string, extra = '', attrs = '', foot = '', badge = 
     ${title(h.name, h.title)}
     <div class="hc-body">
       <div class="hc-left">
-        <div class="hc-meds">${med(`def big${cmp(def, h.defense)}`, def, diff(def, h.defense, 'Defesa'))}${med(`hp big${cmp(hp, h.hp)}`, hp, live ? `Vida atual: ${hp}/${live.maxHp ?? h.hp} (carta: ${h.hp})` : 'Vida')}${rr ? med(`rr big${cmp(rr, 0)}`, rr, `Rerrolagem: ${rr}`) : ''}${live?.atk ? med('dice melee up', `+${live.atk}`, `+${live.atk} dado(s) em todos os ataques`) : ''}</div>
+        <div class="hc-meds">${medal('def', def, diff(def, h.defense, 'Defesa'), `big${cmp(def, h.defense)}`)}${medal('hp', hp, live ? `Vida atual: ${hp}/${live.maxHp ?? h.hp} (carta: ${h.hp})` : 'Vida', `big${cmp(hp, h.hp)}`)}${rr ?medal('rr', rr, `Rerrolagem: ${rr}`, `big${cmp(rr, 0)}`) : ''}${live?.atk ?medal('melee', live.atk, `+${live.atk} dado(s) em todos os ataques`, 'big up') : ''}</div>
         <div class="ac-ribbon"><small>Habilidade</small><b>${h.abilityName}</b></div>
         <div class="ac-text"><p>${h.abilityText}${h.implemented === false ? ' <i>(a confirmar)</i>' : ''}</p></div>
       </div>
@@ -108,11 +125,11 @@ export function monsterCard(id: string, extra = '', attrs = '', live?: LiveStats
   return `<div class="acard monster ${extra}" style="--lv:${monsterColor(id)}" ${attrs}>
     ${title(m.name, `Nível ${m.level}${villain ? ` · ${m.category}` : ''}`)}
     <div class="mc-art">
-      <div class="mc-meds">${med(`hp${cmp(hp, m.hp)}`, hp, live ? `Vida atual: ${hp}/${m.hp}` : 'Vida')}${Number.isFinite(m.exterm) ? med('skull', m.exterm, 'Extermínio') : ''}${m.defense || def ? med(`def${cmp(def, m.defense)}`, def, diff(def, m.defense, 'Defesa')) : ''}${m.rerolls || rr ? med(`rr${cmp(rr, m.rerolls)}`, rr, diff(rr, m.rerolls, 'Rerrolagem')) : ''}</div>
-      ${med('coin mc-coin', m.reward, 'Recompensa em moedas')}
+      <div class="mc-meds">${medal('hp', hp, live ? `Vida atual: ${hp}/${m.hp}` : `Vida ${m.hp}`, cmp(hp, m.hp))}${Number.isFinite(m.exterm) ? medal('skull', m.exterm, `Extermínio: ${m.exterm} Ferimentos num só ataque matam sem Vingança`) : ''}${m.defense || def ?medal('def', def, diff(def, m.defense, 'Defesa'), cmp(def, m.defense)) : ''}${m.rerolls || rr ?medal('rr', rr, diff(rr, m.rerolls, 'Rerrolagem'), cmp(rr, m.rerolls)) : ''}</div>
+      ${medal('coin', m.reward, `Recompensa: ${m.reward} moeda(s)`, 'mc-coin')}
       <canvas width="320" height="328" data-art="${id}"></canvas>
     </div>
-    <div class="ac-type">${med('move', m.move, 'Movimento')}<div><b>${m.attackType === 'melee' ? 'Ataque Próximo' : 'Ataque a Distância'}</b><small>${m.attackName}</small></div>${med(`dice ${m.attackType}`, m.dice, `${m.dice} dados de ataque`)}</div>
+    <div class="ac-type">${medal('move', m.move, `Movimento: ${m.move}`)}<div><b>${m.attackType === 'melee' ? 'Ataque Próximo' : 'Ataque a Distância'}</b><small>${m.attackName}</small></div>${medal(m.attackType === 'melee' ? 'melee' : 'ranged', m.dice, `${m.dice} dados de ataque`)}</div>
     <div class="ac-text ${textSize(m.abilityText)}"><p>${m.abilityText || '<i class="ac-none">Sem habilidade especial</i>'}</p></div>
   </div>`;
 }
