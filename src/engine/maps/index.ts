@@ -52,3 +52,20 @@ export function loadMapId(): string {
   return DEFAULT_MAP;
 }
 export function saveMapId(id: string) { try { localStorage.setItem('cbt.map', id); } catch { /* */ } }
+
+/** Dificuldade do cenário (definida em cada mapa, como no Livro de Campanha). */
+export function mapDifficulty(m: MapDef, _level?: string): { label: string; stars: number; color: string } {
+  // dificuldade do Livro de Campanha (não depende do nível dos Monstros)
+  switch (m.difficulty) {
+    case 'muito': return { label: 'Muito difícil', stars: 4, color: '#b8352a' };
+    case 'dificil': return { label: 'Difícil', stars: 3, color: '#d07a26' };
+    case 'medio': return { label: 'Médio', stars: 2, color: '#c79a22' };
+    default: return { label: 'Fácil', stars: 1, color: '#3c9a52' };
+  }
+}
+
+/** Selo HTML da dificuldade (ex.: ★★☆☆ Difícil · Monstros Nível 4-5). */
+export function difficultyBadge(m: MapDef, level?: string): string {
+  const d = mapDifficulty(m, level);
+  return `<span class="diff" style="--dc:${d.color}" title="Monstros Nível ${level ?? m.level ?? '1'}">${'★'.repeat(d.stars)}${'☆'.repeat(4 - d.stars)} ${d.label}</span>`;
+}

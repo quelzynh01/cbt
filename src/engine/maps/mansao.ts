@@ -14,6 +14,7 @@ export const MANSAO: MapDef = {
   id: 'mansao',
   name: 'A Mansão',
   circle: 'Círculo Exterior',
+  difficulty: 'dificil',
   level: '1',
   cols: 9,
   rows: 6,

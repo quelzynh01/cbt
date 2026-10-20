@@ -15,6 +15,7 @@ export const PRACA_AURORA: MapDef = {
   id: 'praca-da-aurora-vermelha',
   name: 'Praça da Aurora Vermelha',
   circle: 'Círculo Interior',
+  difficulty: 'medio',
   level: '4-5',
   cols: 9,
   rows: 9,

@@ -1,0 +1,133 @@
+import { CARDS, HEROES } from '../engine/data';
+import { drawFace } from '../render/chibi';
+import { ITEM_LEVEL, itemCard, paintCardArt } from './cardview';
+
+// Editor de inventário da Guilda (equipamento inicial e Fase de Melhorias):
+// cada Herói mostra seus espaços; clicar num espaço vazio ou numa carta abre a lista das suas cartas para escolher.
+
+/** Onde está cada carta: um Herói, 'pool' (sem Herói ainda) ou 'descartar'. */
+export interface InvItem { id: string; to: string }
+
+export interface InvOptions {
+  heroes: string[];
+  color: string;
+  /** Espaços do Herói com estas cartas (máx. 4 + espaços Mágicos do Tomo; Maldição pode ocupar 1). */
+  slots: (hero: string, cards: string[]) => { used: number; max: number; magicExtra: number };
+  /** Maldição do Herói (texto curto), se houver. */
+  curse?: (hero: string) => string | null;
+  /** Pode descartar cartas (Fase de Melhorias). */
+  discard: boolean;
+  /** Só leitura (já confirmou). */
+  ready?: boolean;
+  /** Modo Teste: qualquer carta do jogo pode ser equipada (escolhida por nível na janela do espaço). */
+  catalog?: boolean;
+}
+
+/** Nível aberto no catálogo do Modo Teste. */
+let catLevel = 'I';
+const CAT_LEVELS: [string, string][] = [['I', 'Iniciais'], ['1', 'Nível 1'], ['2', 'Nível 2'], ['3', 'Nível 3'], ['4', 'Nível 4'], ['5', 'Nível 5'], ['R', 'Recompensas']];
+
+const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+
+/** Erros extras do editor (cartas ainda sem Herói). */
+export function poolErrors(items: InvItem[], discard: boolean): string[] {
+  const left = items.filter(x => x.to === 'pool');
+  if (!left.length) return [];
+  return [`Ainda sem Herói: ${left.map(x => CARDS[x.id]?.name ?? x.id).join(', ')} — clique num espaço para equipar${discard ? ' ou descarte' : ''}.`];
+}
+
+export function invEditorHtml(items: InvItem[], o: InvOptions): string {
+  const heroCols = o.heroes.map(h => {
+    const mine = items.map((x, i) => ({ ...x, i })).filter(x => x.to === h);
+    const sl = o.slots(h, mine.map(x => x.id));
+    const total = Math.max(sl.max + sl.magicExtra, mine.length);
+    const curse = o.curse?.(h);
+    const slots: string[] = mine.map(x => `<button class="inv-slot full" data-slot="${h}" data-item="${x.i}" title="Trocar ou tirar esta carta" ${o.ready ? 'disabled' : ''}>${itemCard(x.id)}</button>`);
+    for (let k = mine.length; k < total; k++) slots.push(`<button class="inv-slot empty ${k >= sl.max ? 'magic' : ''}" data-slot="${h}" ${o.ready ? 'disabled' : ''}><span>＋</span><small>${k >= sl.max ? 'Espaço Mágico' : 'Espaço vazio'}</small></button>`);
+    return `<div class="inv-hero ${sl.used > sl.max ? 'over' : ''}" style="--gc:${o.color}">
+      <div class="inv-hh"><canvas width="56" height="56" data-iface="${h}"></canvas><div><b>${HEROES[h].name}</b><small>${HEROES[h].title}</small></div>
+        <span class="inv-count ${sl.used > sl.max ? 'bad' : ''}">${sl.used}/${sl.max}${sl.magicExtra ? ` +${sl.magicExtra}✨` : ''}</span></div>
+      ${curse ? `<div class="inv-curse">☠ ${esc(curse)} <small>(ocupa 1 espaço)</small></div>` : ''}
+      <div class="inv-slots">${slots.join('')}</div></div>`;
+  }).join('');
+  const pool = items.map((x, i) => ({ ...x, i })).filter(x => x.to === 'pool');
+  const disc = items.map((x, i) => ({ ...x, i })).filter(x => x.to === 'descartar');
+  return `<div class="inv-ed">
+    <div class="inv-heroes">${heroCols}</div>
+    ${pool.length ? `<div class="inv-pool"><h4>🎒 Cartas sem Herói <small>— clique para equipar${o.discard ? ' ou descartar' : ''}</small></h4><div class="inv-row">${pool.map(x => `<button class="inv-slot full" data-item="${x.i}" ${o.ready ? 'disabled' : ''}>${itemCard(x.id)}</button>`).join('')}</div></div>` : ''}
+    ${disc.length ? `<div class="inv-pool disc"><h4>🗑 Descartadas <small>— clique para recuperar</small></h4><div class="inv-row">${disc.map(x => `<button class="inv-slot full disc" data-item="${x.i}" ${o.ready ? 'disabled' : ''}>${itemCard(x.id)}</button>`).join('')}</div></div>` : ''}
+  </div>`;
+}
+
+/** Liga os cliques do editor. `rerender` redesenha a tela depois de cada mudança. */
+export function bindInvEditor(root: ParentNode, items: InvItem[], o: InvOptions, rerender: () => void) {
+  paintCardArt(root);
+  root.querySelectorAll<HTMLCanvasElement>('canvas[data-iface]').forEach(cv => drawFace(cv, cv.dataset.iface!, o.color));
+  if (o.ready) return;
+  root.querySelectorAll<HTMLElement>('.inv-slot').forEach(b => {
+    b.onclick = () => {
+      const hero = b.dataset.slot ?? null;
+      const item = b.dataset.item !== undefined ? Number(b.dataset.item) : null;
+      openPicker(items, o, hero, item, rerender);
+    };
+  });
+}
+
+/** Janela de escolha: as cartas disponíveis para este espaço (e as opções para a carta clicada). */
+function openPicker(items: InvItem[], o: InvOptions, hero: string | null, itemIdx: number | null, rerender: () => void) {
+  let el = document.getElementById('invpick');
+  if (!el) { el = document.createElement('div'); el.id = 'invpick'; document.body.append(el); }
+  const close = () => { el!.classList.add('hidden'); el!.innerHTML = ''; window.removeEventListener('keydown', key, true); };
+  const key = (e: KeyboardEvent) => { if (e.code === 'Escape') { e.stopImmediatePropagation(); close(); } };
+  window.addEventListener('keydown', key, true);
+  const cur = itemIdx !== null ? items[itemIdx] : null;
+  const where = (to: string) => to === 'pool' ? 'sem Herói' : to === 'descartar' ? 'descartada' : `com ${HEROES[to]?.name ?? to}`;
+  let title: string, body: string;
+  if (hero) {
+    // espaço de um Herói: escolher qual carta vai nele
+    const cands = items.map((x, i) => ({ ...x, i })).filter(x => x.i !== itemIdx && x.to !== hero && (o.discard || x.to !== 'descartar'));
+    cands.sort((a, b) => (a.to === 'pool' ? 0 : a.to === 'descartar' ? 2 : 1) - (b.to === 'pool' ? 0 : b.to === 'descartar' ? 2 : 1));
+    title = `${cur ? 'Trocar' : 'Equipar'} — <b>${HEROES[hero].name}</b>`;
+    body = `${cur ? `<div class="ip-cur"><span>No espaço:</span> <b>${CARDS[cur.id]?.name}</b>
+        <button data-act="pool">↩ Tirar do Herói</button>${o.discard ? '<button data-act="descartar">🗑 Descartar</button>' : ''}</div>` : ''}
+      ${cands.length ? `<p class="muted">Escolha uma carta${cur ? ' para trocar (a atual vai para onde a escolhida estava)' : ''}:</p>
+      <div class="ip-grid">${cands.map(x => `<button class="ip-card" data-pick="${x.i}">${itemCard(x.id)}<span class="ip-where ${x.to === 'pool' ? 'free' : ''}">${where(x.to)}</span></button>`).join('')}</div>`
+        : o.catalog ? '' : '<p class="muted">Nenhuma outra carta disponível.</p>'}
+      ${o.catalog ? `<h4 class="ip-cat-h">📚 Todas as cartas</h4>
+      <div class="lib-filter ip-lv">${CAT_LEVELS.map(([v, n]) => `<button data-lv="${v}" class="${catLevel === v ? 'primary' : ''}">${ITEM_LEVEL[v] ? `<span class="lvdot" style="background:${ITEM_LEVEL[v].color}"></span>` : ''}${n}</button>`).join('')}</div>
+      <div class="ip-grid">${Object.values(CARDS).filter(c => c.level === catLevel).map(c => `<button class="ip-card" data-new="${c.id}">${itemCard(c.id)}</button>`).join('')}</div>` : ''}`;
+  } else {
+    // carta sem Herói (ou descartada): escolher o Herói
+    title = `<b>${CARDS[cur!.id]?.name}</b> — equipar em qual Herói?`;
+    body = `<div class="ip-card-big">${itemCard(cur!.id)}</div>
+      <div class="ip-heroes">${o.heroes.map(h => { const n = items.filter(x => x.to === h).map(x => x.id); const sl = o.slots(h, [...n, cur!.id]); const full = sl.used > sl.max; return `<button data-hero="${h}" ${full ? 'class="full"' : ''}>${HEROES[h].name}<small>${full ? 'sem espaço' : `${sl.used}/${sl.max}`}</small></button>`; }).join('')}
+      ${o.discard && cur!.to !== 'descartar' ? '<button data-act="descartar">🗑 Descartar</button>' : ''}${cur!.to === 'descartar' ? '<button data-act="pool">↩ Recuperar (sem Herói)</button>' : ''}</div>`;
+  }
+  el.innerHTML = `<div class="ip-box"><div class="ip-head"><span>${title}</span><button class="ip-x" title="Fechar (Esc)">✕</button></div>${body}</div>`;
+  el.classList.remove('hidden');
+  paintCardArt(el);
+  el.onclick = e => { if (e.target === el) close(); };
+  (el.querySelector('.ip-x') as HTMLElement).onclick = close;
+  const done = () => { close(); rerender(); };
+  el.querySelectorAll<HTMLElement>('[data-act]').forEach(b => { b.onclick = () => { if (cur) cur.to = b.dataset.act!; done(); }; });
+  el.querySelectorAll<HTMLElement>('[data-hero]').forEach(b => { b.onclick = () => { if (cur) cur.to = b.dataset.hero!; done(); }; });
+  // catálogo (Modo Teste): a carta escolhida entra no espaço (a que estava sai)
+  el.querySelectorAll<HTMLElement>('[data-new]').forEach(b => {
+    b.onclick = () => {
+      if (cur) cur.id = b.dataset.new!;
+      else items.push({ id: b.dataset.new!, to: hero! });
+      done();
+    };
+  });
+  el.querySelectorAll<HTMLElement>('[data-lv]').forEach(b => { b.onclick = () => { catLevel = b.dataset.lv!; openPicker(items, o, hero, itemIdx, rerender); }; });
+  el.querySelectorAll<HTMLElement>('[data-pick]').forEach(b => {
+    b.onclick = () => {
+      const pick = items[Number(b.dataset.pick)];
+      const from = pick.to;
+      pick.to = hero!;
+      // a carta que estava no espaço vai para onde a escolhida estava (troca)
+      if (cur) cur.to = from === 'descartar' ? 'pool' : from;
+      done();
+    };
+  });
+}

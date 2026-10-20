@@ -20,6 +20,8 @@ export interface MapDef {
   missionMarkersByArea?: Cell[];
   monsters: { type: string; cell: Cell }[];
   missions: { pve: MissionDef[]; rewards: string[] };
+  /** Dificuldade do cenário (Livro de Campanha). */
+  difficulty?: 'facil' | 'medio' | 'dificil' | 'muito';
   /** Nível dos Monstros (1, 4-5, 6...). */
   level?: string;
   /** Missões necessárias para vencer (padrão: 2 com 2 jogadores, 3 com 3-4). */

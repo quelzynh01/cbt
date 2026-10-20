@@ -21,10 +21,14 @@ export interface Settings {
   musicVolume: number;
   /** Silencia tudo (efeitos e música). */
   muted: boolean;
+  /** Pedir confirmação antes de um movimento que provoca Reação de Alerta. */
+  alertConfirm: boolean;
+  /** Avisar ao encerrar o turno se ainda há o que fazer (ativar, mover, atacar…). */
+  endConfirm: boolean;
 }
 
 const KEY = 'cbt.settings';
-const DEFAULT: Settings = { battle: 'always', speed: 1, clock: true, reroll: 'choose', view: 'free', ai: 'normal', sound: true, volume: 0.7, music: true, musicVolume: 0.12, muted: false };
+const DEFAULT: Settings = { battle: 'always', speed: 1, clock: true, reroll: 'choose', view: 'free', ai: 'normal', sound: true, volume: 0.7, music: true, musicVolume: 0.12, muted: false, alertConfirm: true, endConfirm: true };
 
 export function getSettings(): Settings {
   try { return { ...DEFAULT, ...JSON.parse(localStorage.getItem(KEY) ?? '{}') }; } catch { return { ...DEFAULT }; }

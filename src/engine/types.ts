@@ -8,7 +8,7 @@ export type DieFace = 'crit' | 'melee' | 'ranged' | 'shield' | 'blank';
 
 export type { CardDef } from './cards';
 
-export interface CardInst { uid: string; defId: string; exhausted: boolean; uses: number }
+export interface CardInst { uid: string; defId: string; exhausted: boolean; uses: number; /** Escudo armado para a próxima Defesa. */ armed?: boolean }
 
 export type HeroAbility =
   | 'furia' | 'dominio_magia' | 'oportunista' | 'furtivo' | 'espinhos'
@@ -81,6 +81,8 @@ export interface Unit {
   hitBy?: GuildId[];
   /** Maldição Mortal (campanha). */
   curse?: string;
+  /** Herói exaustado por uma carta (Escudos, Escudo das Almas): não pode ser ativado até a Guilda Descansar. */
+  spent?: boolean;
 }
 
 export interface Door { id: string; a: Cell; b: Cell; open: boolean; small?: boolean; locked?: boolean }
@@ -91,6 +93,8 @@ export interface Activation {
   moved: boolean;
   moveLocked: boolean;
   attacked: boolean;
+  /** Cartas ativáveis já usadas nesta ativação. */
+  used?: string[];
 }
 
 export interface MissionDef {
@@ -182,19 +186,30 @@ export interface GameState {
   mines?: { cell: Cell; guild: GuildId; dice: number }[];
   /** Heróis já ativados neste turno (para a Bênção de Hobsbawm). */
   activatedThisTurn?: string[];
+  /** Último Herói ativado de cada Guilda (a câmera volta nele quando a vez é sua). */
+  lastHero?: Partial<Record<GuildId, string>>;
   /** Bênção de Hobsbawm disponível: pode ativar outro Aliado em Linha de Visão. */
   blessing?: { heroId: string } | null;
+  /** Guilda que já cumpriu as Missões para vencer: a partida termina quando este turno acabar. */
+  winnerPending?: GuildId | null;
+  /** Dados ilimitados. Sem isso (padrão), no máximo 8 dados de ataque e 6 de defesa por rolagem (críticos e rerrolagens inclusos). */
+  unlimitedDice?: boolean;
   /** Posicionamento inicial: Guildas que ainda estão escolhendo onde seus Heróis começam. */
   deploying?: GuildId[] | null;
   /** Arena do Sol Brilhante: marcadores de Guilda colocados nos marcadores de Missão (chaves dos Espaços). */
   arena?: Partial<Record<GuildId, string[]>>;
   /** Esconderijo do Troll já saqueado. */
   hideoutTaken?: boolean;
+  /** Grito de Guerra: a Guilda pode ativar outro Herói neste turno. */
+  warCry?: GuildId | null;
+  /** Cartas ativáveis já usadas neste turno (Manto do Deslocamento). */
+  turnUsed?: string[];
   debug: { attackDice: DiceMode; defenseDice: DiceMode; revealTokens: boolean; heroesImmortal: boolean; freeMode?: boolean };
 }
 
 export type GameEvent =
-  | { t: 'move'; id: string; from: Cell; to: Cell; portal?: boolean }
+  /** push: empurrado pela Rajada de Vento. */
+  | { t: 'move'; id: string; from: Cell; to: Cell; portal?: boolean; push?: boolean }
   | { t: 'door'; doorId: string; open: boolean; by: string }
   | {
       t: 'attack';
@@ -202,6 +217,8 @@ export type GameEvent =
       reason: 'heroi' | 'alerta' | 'vinganca' | 'armadilha';
       cardName: string;
       attackType: AttackType;
+      /** Dados de ataque da carta (com bônus), antes dos dados extras de ✷. */
+      baseDice?: number;
       dice: DieFace[];
       hits: number;
       crits: number;
@@ -209,6 +226,10 @@ export type GameEvent =
       notes: string[];
       /** Rerrolagem do ataque: faces antes e quais dados foram rolados de novo. */
       rr?: RerollInfo;
+      /** Fender: o ataque atingiu Inimigos adicionais Perto do Herói. */
+      cleave?: boolean;
+      /** Ataque de Monstro: a Guilda que controla os Monstros (rola os dados dele). */
+      ctl?: GuildId;
     }
   | { t: 'damage'; id: string; amount: number; wounds: number; maxHp: number }
   | { t: 'heal'; id: string; amount: number; wounds: number }
@@ -218,6 +239,12 @@ export type GameEvent =
   | { t: 'pickup'; heroId: string; token: Token; hidden?: boolean }
   /** Herói usou um marcador (poção). */
   | { t: 'useToken'; heroId: string; token: Token }
+  /** Guilda cumpriu as Missões para vencer (a partida acaba no fim do turno). */
+  | { t: 'victory'; guild: GuildId }
+  /** Título de campanha conquistado. */
+  | { t: 'title'; guild: GuildId; title: string; name: string }
+  /** Carta de Recompensa recebida (mostrada para todos). */
+  | { t: 'reward'; heroId: string; cardId: string }
   /** Habilidade Natural ativada (Furtividade do Vapor, Vingança do Espetado…). */
   | { t: 'skill'; id: string; skill: string; name: string }
   | { t: 'drop'; cell: Cell; tokens: Token[] }

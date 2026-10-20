@@ -1,9 +1,9 @@
 import type { MapDef } from '../engine/board';
 import { key } from '../engine/board';
 import { ALL_HEROES, CARDS, HEROES, MONSTERS, TEST_HUMAN_HEROES, distributeStartingGear } from '../engine/data';
-import { CAMPAIGN, MAPS, getMap, loadMapId, saveMapId } from '../engine/maps';
+import { CAMPAIGN, MAPS, difficultyBadge, getMap, loadMapId, mapDifficulty, saveMapId } from '../engine/maps';
 import { drawFace } from '../render/chibi';
-import { MAX_SLOTS, TEST_GUILDS, type TestConfig, loadTestConfig, normalizeTestConfig, saveTestConfig } from './testConfig';
+import { MAX_SLOTS, TEST_GUILDS, slotsFor, type TestConfig, loadTestConfig, normalizeTestConfig, saveTestConfig } from './testConfig';
 import { GUILDS } from '../engine/data';
 import { ITEM_LEVEL, MONSTER_LEVEL, curseCard, heroCard, itemCard, monsterCard, paintCardArt } from './cardview';
 import { CARDS as ALL_CARDS, CURSES } from '../engine/cards';
@@ -12,9 +12,13 @@ import { getSettings, saveSettings } from './settings';
 import { play } from '../audio/sfx';
 import { tokenUrl } from '../render/tokens';
 import { EXPLORATION_BAG, TOKEN_INFO } from '../engine/data';
+import { bindInvEditor, invEditorHtml, type InvItem, type InvOptions } from './inventoryEditor';
+import { attachMapPeek, closeMapPeek, drawMinimap, mapArtUrl, mapSheet, miniCanvas, paintMapSheets } from './mapInfo';
 
 type Tab = 'herois' | 'monstros' | 'itens' | 'marcadores' | 'mapas' | 'regras';
 const TABS: [Tab, string][] = [['herois', '👥 Heróis'], ['monstros', '👹 Monstros'], ['itens', '🃏 Itens'], ['marcadores', '🪙 Marcadores'], ['mapas', '🗺️ Mapas'], ['regras', '📖 Regras']];
+
+const SET_TABS: [string, string][] = [['jogo', '🎮 Jogabilidade'], ['grafico', '🖥️ Gráficos'], ['som', '🔊 Som']];
 
 // Tela inicial: galeria de Personagens (status, habilidade, escolha da Guilda) e de Mapas.
 
@@ -141,14 +145,21 @@ export class MenuPages {
     const y = this.page.classList.contains('hidden') ? 0 : this.page.scrollTop;
     const m = getMap(c.mapId);
     const humans = c.teams.filter(t => t.controller === 'human').length;
-    const lvColor = (lv: string) => ITEM_LEVEL[lv]?.color ?? '#888';
-    const addOptions = ['I', '1', '2', '3', '4', '5', 'R'].map(lv => `<optgroup label="${ITEM_LEVEL[lv].name}">${Object.values(ALL_CARDS).filter(x => x.level === lv)
-      .map(x => `<option value="${x.id}" style="color:${lvColor(lv)}">${x.name} (${x.kind === 'attack' ? `${x.dice} dados` : x.kind === 'boost' ? 'Ampliação' : 'Permanente'})</option>`).join('')}</optgroup>`).join('');
+    // itens: o mesmo editor da campanha (espaços dos Heróis), com todas as cartas do jogo disponíveis
+    const invItems: InvItem[] = c.heroes.flatMap(h => (c.cards[h] ?? []).map(id => ({ id, to: h })));
+    const invOpts: InvOptions = {
+      heroes: c.heroes, color: GUILDS[c.teams[0].guild].color, discard: false, catalog: true,
+      slots: (_h, cards) => {
+        const magicExtra = slotsFor(cards) - MAX_SLOTS;
+        const magic = cards.filter(id => ALL_CARDS[id]?.magic && ALL_CARDS[id]?.kind === 'attack').length;
+        return { used: cards.length - Math.min(magic, magicExtra), max: MAX_SLOTS, magicExtra };
+      },
+    };
     this.open('Modo Teste', `<div class="ts">
       <section class="ts-sec ts-mapsec"><h3>1. Mapa</h3>
-        <select id="ts-map">${Object.values(MAPS).map(x => `<option value="${x.id}" ${x.id === c.mapId ? 'selected' : ''}>${x.name} — ${x.circle}</option>`).join('')}</select>
-        <canvas id="ts-mini" width="260" height="260"></canvas>
-        <small>Monstros Nível ${m.level ?? '1'} · ${m.startAreas.length} Áreas Iniciais</small></section>
+        <select id="ts-map">${Object.values(MAPS).map(x => `<option value="${x.id}" ${x.id === c.mapId ? 'selected' : ''}>${x.name} — ${x.circle} · ${mapDifficulty(x).label}</option>`).join('')}</select>
+        <div class="ts-mappick" data-peek="${m.id}"><img src="${mapArtUrl(m.id)}" alt=""/>${miniCanvas(m, 360, 'id="ts-mini"')}</div>
+        <small>${difficultyBadge(m)} Monstros Nível ${m.level ?? '1'} · ${m.startAreas.length} Áreas Iniciais · 🔍 abre a ficha</small></section>
       <section class="ts-sec"><h3>2. Times</h3>
         <div class="ts-count">${[2, 3, 4].map(n => `<button data-n="${n}" class="${c.teams.length === n ? 'primary' : ''}">${n} times</button>`).join('')}</div>
         <div class="ts-teams">${c.teams.map((t, i) => `<div class="ts-team" style="--gc:${GUILDS[t.guild].color}">
@@ -160,14 +171,15 @@ export class MenuPages {
       <section class="ts-sec ts-wide"><h3>3. Seus Heróis <small>(Time 1 — escolha 3)</small></h3>
         <div class="ts-heroes">${ALL_HEROES.map(h => { const i = c.heroes.indexOf(h); return `<button class="ts-hero ${i >= 0 ? 'on' : ''}" data-th="${h}">${i >= 0 ? `<span class="pick-badge">${i + 1}</span>` : ''}<canvas width="72" height="72" data-face="${h}"></canvas><b>${HEROES[h].name}</b><small>${HEROES[h].title}</small></button>`; }).join('')}</div></section>
       <section class="ts-sec ts-wide"><h3>4. Itens <small>(até ${MAX_SLOTS} cartas por Herói)</small></h3>
+        <p class="muted">Clique num <b>espaço vazio</b> ou numa <b>carta</b> para escolher qual carta vai nele (qualquer carta do jogo, ou trocar entre Heróis).</p>
         <div class="ts-btnrow"><button id="ts-gear">Equipamento inicial padrão</button><button id="ts-clear">Remover todas as cartas</button></div>
-        <div class="ts-invs">${c.heroes.map(h => `<div class="ts-inv"><div class="ts-inv-h"><b>${HEROES[h].name}</b> <small>${(c.cards[h] ?? []).length}/${MAX_SLOTS}</small></div>
-          <div class="ts-cards">${(c.cards[h] ?? []).map((id, i) => `<div class="ts-card">${itemCard(id)}<button class="ts-x" data-rm="${h}|${i}" title="Remover">✕</button></div>`).join('') || '<i class="muted">Sem cartas</i>'}</div>
-          ${(c.cards[h] ?? []).length < MAX_SLOTS ? `<select data-add="${h}"><option value="">+ Adicionar carta…</option>${addOptions}</select>` : ''}</div>`).join('')}</div></section>
+        ${invEditorHtml(invItems, invOpts)}</section>
       <div class="ts-go"><button class="primary" id="ts-start">▶ Começar teste</button></div>
     </div>`);
     this.page.scrollTop = y;
     drawMinimap(this.page.querySelector('#ts-mini') as HTMLCanvasElement, m);
+    closeMapPeek();
+    attachMapPeek(this.page);
     this.page.querySelectorAll<HTMLCanvasElement>('canvas[data-face]').forEach(cv => drawFace(cv, cv.dataset.face!, '#3a5a8a'));
     const save = () => { this.test = normalizeTestConfig(c); saveTestConfig(this.test); saveMapId(this.test.mapId); this.onMapChange(); this.showTestSetup(onStart); };
     (this.page.querySelector('#ts-ai') as HTMLSelectElement).onchange = e => saveSettings({ ...getSettings(), ai: (e.target as HTMLSelectElement).value as 'normal' | 'hard' });
@@ -193,8 +205,8 @@ export class MenuPages {
     }; });
     (this.page.querySelector('#ts-gear') as HTMLElement).onclick = () => { c.cards = distributeStartingGear(c.heroes); save(); };
     (this.page.querySelector('#ts-clear') as HTMLElement).onclick = () => { c.cards = Object.fromEntries(c.heroes.map(h => [h, []])); save(); };
-    this.page.querySelectorAll<HTMLElement>('[data-rm]').forEach(b => { b.onclick = () => { const [h, i] = b.dataset.rm!.split('|'); c.cards[h].splice(Number(i), 1); save(); }; });
-    this.page.querySelectorAll<HTMLSelectElement>('[data-add]').forEach(s => { s.onchange = () => { if (s.value) { (c.cards[s.dataset.add!] ??= []).push(s.value); save(); } }; });
+    // "Tirar do Herói" no Modo Teste remove a carta
+    bindInvEditor(this.page, invItems, invOpts, () => { c.cards = Object.fromEntries(c.heroes.map(h => [h, invItems.filter(x => x.to === h).map(x => x.id)])); save(); });
     const start = this.page.querySelector('#ts-start') as HTMLButtonElement;
     start.disabled = c.heroes.length !== 3;
     if (c.heroes.length !== 3) start.textContent = 'Escolha 3 Heróis';
@@ -264,11 +276,16 @@ export class MenuPages {
   }
 
   // ------------------------------------------------------------------
+  private setTab: 'jogo' | 'grafico' | 'som' = 'jogo';
   showSettings() {
     const st = getSettings();
     const opt = (name: string, v: string, label: string, cur: string) => `<label class="set-opt"><input type="radio" name="${name}" value="${v}" ${cur === v ? 'checked' : ''}/> ${label}</label>`;
     this.tab = null;
+    const tab = this.setTab;
+    const pane = (id: string) => `<div class="set-pane ${tab === id ? '' : 'hidden'}" data-pane="${id}">`;
     this.open('Configurações', `<div class="set-box">
+      <div class="set-tabs">${SET_TABS.map(([id, label]) => `<button data-stab="${id}" class="${tab === id ? 'primary' : ''}">${label}</button>`).join('')}</div>
+      ${pane('jogo')}
       <h3>Tela de confronto</h3>
       ${opt('battle', 'always', '<b>Sempre</b> — mostra a tela 2D de batalha em todos os ataques', st.battle)}
       ${opt('battle', 'mine', '<b>Só os meus</b> — mostra só quando um Herói seu ataca ou é atacado', st.battle)}
@@ -279,19 +296,27 @@ export class MenuPages {
       <h3>Dificuldade da IA</h3>
       ${opt('ai', 'normal', '<b>Normal</b> — joga bem, mas comete erros e às vezes arrisca à toa', st.ai)}
       ${opt('ai', 'hard', '<b>Difícil</b> — calcula as chances dos dados, usa poções, caça quem carrega Missões e se protege', st.ai)}
+      <h3>Reação de Alerta</h3>
+      <label class="set-opt"><input type="checkbox" id="set-alert" ${st.alertConfirm ? 'checked' : ''}/> Avisar e pedir confirmação antes de um movimento que provoca <b>Reação de Alerta</b></label>
+      <label class="set-opt"><input type="checkbox" id="set-endc" ${st.endConfirm ? 'checked' : ''}/> Avisar ao <b>encerrar o turno</b> se ainda dá para ativar, mover ou atacar</label>
+      <h3>Cronômetro</h3>
+      <label class="set-opt"><input type="checkbox" id="set-clock" ${st.clock ? 'checked' : ''}/> Mostrar o tempo da partida e da campanha</label>
+      </div>
+      ${pane('grafico')}
       <h3>Câmera</h3>
       ${opt('view', 'free', '<b>Visão livre</b> — você move a câmera (arrastar e roda do mouse)', st.view)}
       ${opt('view', 'players', '<b>Visão dos jogadores</b> — a câmera segue quem está jogando (online: a tela e o mouse do jogador da vez)', st.view)}
+      <h3>Velocidade das animações</h3>
+      ${opt('speed', '1', '1x', String(st.speed))}${opt('speed', '2', '2x', String(st.speed))}${opt('speed', '4', '4x', String(st.speed))}
+      </div>
+      ${pane('som')}
       <h3>Som</h3>
       <label class="set-opt"><input type="checkbox" id="set-muted" ${st.muted ? 'checked' : ''}/> <b>Desativar todos os sons</b> (efeitos e música)</label>
       <label class="set-opt"><input type="checkbox" id="set-sound" ${st.sound ? 'checked' : ''}/> Sons ligados</label>
       <label class="set-opt set-vol">Volume dos efeitos <input type="range" id="set-volume" min="0" max="100" step="5" value="${Math.round(st.volume * 100)}"/> <b id="set-volv">${Math.round(st.volume * 100)}%</b></label>
       <label class="set-opt"><input type="checkbox" id="set-music" ${st.music ? 'checked' : ''}/> Música ligada</label>
       <label class="set-opt set-vol">Volume da música <input type="range" id="set-mvolume" min="0" max="100" step="5" value="${Math.round(st.musicVolume * 100)}"/> <b id="set-mvolv">${Math.round(st.musicVolume * 100)}%</b></label>
-      <h3>Velocidade das animações</h3>
-      ${opt('speed', '1', '1x', String(st.speed))}${opt('speed', '2', '2x', String(st.speed))}${opt('speed', '4', '4x', String(st.speed))}
-      <h3>Cronômetro</h3>
-      <label class="set-opt"><input type="checkbox" id="set-clock" ${st.clock ? 'checked' : ''}/> Mostrar o tempo da partida e da campanha</label>
+      </div>
       <p class="muted">As configurações ficam salvas neste navegador e valem na hora, inclusive durante uma partida.</p>
     </div>`);
     const upd = () => {
@@ -308,9 +333,16 @@ export class MenuPages {
       const musicVolume = Number((this.page.querySelector('#set-mvolume') as HTMLInputElement).value) / 100;
       (this.page.querySelector('#set-mvolv') as HTMLElement).textContent = `${Math.round(musicVolume * 100)}%`;
       const muted = (this.page.querySelector('#set-muted') as HTMLInputElement).checked;
-      saveSettings({ ...getSettings(), battle, speed, clock, reroll, view, ai, sound, volume, music, musicVolume, muted });
+      const alertConfirm = (this.page.querySelector('#set-alert') as HTMLInputElement).checked;
+      const endConfirm = (this.page.querySelector('#set-endc') as HTMLInputElement).checked;
+      saveSettings({ ...getSettings(), battle, speed, clock, reroll, view, ai, sound, volume, music, musicVolume, muted, alertConfirm, endConfirm });
     };
     this.page.querySelectorAll<HTMLInputElement>('input').forEach(i => { i.onchange = upd; });
+    this.page.querySelectorAll<HTMLElement>('[data-stab]').forEach(b => { b.onclick = () => {
+      this.setTab = b.dataset.stab as typeof this.setTab;
+      this.page.querySelectorAll<HTMLElement>('[data-stab]').forEach(x => x.classList.toggle('primary', x === b));
+      this.page.querySelectorAll<HTMLElement>('[data-pane]').forEach(x => x.classList.toggle('hidden', x.dataset.pane !== this.setTab));
+    }; });
     (this.page.querySelector('#set-volume') as HTMLInputElement).oninput = upd;
     (this.page.querySelector('#set-mvolume') as HTMLInputElement).oninput = upd;
     (this.page.querySelector('#set-volume') as HTMLInputElement).onchange = () => { upd(); play('dice', 0.8); };
@@ -322,114 +354,20 @@ export class MenuPages {
     const list = circles.map(circle => `<div class="mc-group">${circle}</div>` + CAMPAIGN.filter(c => c.circle === circle).map(c => {
       const sel = c.map?.id === m.id;
       return `<div class="mapcard ${c.map ? 'playable' : 'locked'} ${sel ? 'sel' : ''}" ${c.map ? `data-map="${c.map.id}"` : ''}>
-        <div class="mc-name">${c.name}</div>${c.map ? `<span class="mc-ok">${sel ? 'Vendo' : 'Ver'}</span>` : '<span class="mc-soon">Em breve</span>'}
+        ${c.map ? `<img class="mc-thumb" src="${mapArtUrl(c.map.id)}" alt="" loading="lazy"/>` : ''}<div class="mc-name">${c.name}${c.map ? ` ${difficultyBadge(c.map)}` : ''}</div>
       </div>`;
     }).join('')).join('');
-    const types = new Map<string, number>();
-    for (const x of m.monsters) types.set(x.type, (types.get(x.type) ?? 0) + 1);
-    const closed = m.doors.filter(d => !d.open).length, open = m.doors.length - closed;
-    const missionMarks = m.missionMarkers.length + (m.missionMarkersByArea?.length ?? 0);
     this.open(this.tab ? 'Biblioteca' : 'Mapas', `
       <div class="maps">
         <div class="maplist">${list}</div>
-        <div class="mapdetail">
-          <h3>${m.name} <small>${m.circle} · Monstros Nível ${m.level ?? '1'}</small></h3>
-          <canvas id="minimap" width="560" height="560"></canvas>
-          <div class="legend">
-            <span><i style="background:#e9dcbf"></i>Rua</span><span><i style="background:#c99459"></i>Sala</span><span><i style="background:#7da23a"></i>Bloqueado</span>
-            <span><i style="background:#d98a3c"></i>Área Inicial</span><span><i class="ln wall"></i>Parede</span><span><i class="ln door"></i>Porta fechada</span><span><i class="ln open"></i>Porta aberta</span><span><i class="ln lock"></i>Porta trancada</span>
-          </div>
-          <div class="mapinfo">
-            <div><b>Tabuleiros:</b> ${m.boards.map(b => b.code).join(', ')}</div>
-            <div><b>Componentes:</b> ${closed} portas fechadas · ${open} abertas · ${m.portals.length} portais · ${m.exploration.length} marcadores de Exploração · ${m.entryMarkers.length} Entradas de Monstro · ${missionMarks} marcadores de Missão</div>
-            <div><b>Monstros:</b> ${[...types].map(([t, n]) => `${n} ${MONSTERS[t].name}`).join(' · ')}</div>
-            <div><b>Missões contra o Jogo:</b> ${m.missions.pve.map(x => `<i>${x.name}</i> — ${x.text}`).join('<br/>')}</div>
-            <div><b>Missões contra Jogador:</b> ${m.pvp === false ? 'nenhuma' : 'Matar um Herói de cada Guilda adversária.'}</div>
-            ${m.missions.rewards.length ? `<div><b>Recompensa:</b> ${m.missions.rewards.map(r => CARDS[r].name).join(', ')} — ${CARDS[m.missions.rewards[0]].text}</div>` : ''}
-            <div><b>Para vencer:</b> ${m.missionsToWin ? `${m.missionsToWin} Missão` : '2 Missões (2 jogadores) ou 3 Missões com pelo menos 1 contra o Jogo (3-4 jogadores)'}</div>
-            ${(m.notes ?? []).map(n => `<div class="mi-note">• ${n}</div>`).join('')}
-          </div>
-        </div>
+        <div class="mapdetail">${mapSheet(m)}</div>
       </div>`);
-    drawMinimap(this.page.querySelector('#minimap') as HTMLCanvasElement, m);
-    this.page.querySelectorAll<HTMLElement>('[data-map]').forEach(el => { el.onclick = () => this.showMaps(el.dataset.map!); });
+    paintMapSheets(this.page);
+    this.page.querySelectorAll<HTMLElement>('[data-map]').forEach(el => { el.onclick = () => { const y = this.page.scrollTop; this.showMaps(el.dataset.map!); this.page.scrollTop = y; }; });
   }
 }
 
-/** Mapa visto de cima, no estilo do Livro de Campanha. */
-export function drawMinimap(cv: HTMLCanvasElement, m: MapDef) {
-  const ctx = cv.getContext('2d')!;
-  const S = Math.floor(Math.min(cv.width, cv.height) / m.cols);
-  ctx.fillStyle = '#d9d0e6';
-  ctx.fillRect(0, 0, cv.width, cv.height);
-  const exists = new Set<string>();
-  for (const b of m.boards) for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) exists.add(key({ c: b.c + c, r: b.r + r }));
-  const pillars = new Set(m.pillars.map(key));
-  const rooms = new Set(m.rooms.map(key));
-  const start = new Map<string, number>();
-  m.startAreas.forEach((cells, i) => cells.forEach(c => start.set(key(c), i)));
-  for (const k of exists) {
-    const [c, r] = k.split(',').map(Number);
-    ctx.fillStyle = pillars.has(k) ? '#7da23a' : start.has(k) ? '#d98a3c' : rooms.has(k) ? '#c99459' : '#e9dcbf';
-    ctx.fillRect(c * S, r * S, S, S);
-    ctx.strokeStyle = 'rgba(80,55,25,0.35)';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(c * S + 0.5, r * S + 0.5, S - 1, S - 1);
-    if (!pillars.has(k)) { ctx.fillStyle = 'rgba(80,55,25,0.35)'; ctx.beginPath(); ctx.arc(c * S + S / 2, r * S + S / 2, 2, 0, 7); ctx.fill(); }
-  }
-  // rótulos das áreas iniciais
-  ctx.font = `bold ${Math.round(S * 0.2)}px "Baloo 2", sans-serif`;
-  ctx.textAlign = 'center';
-  m.startAreas.forEach((cells, i) => {
-    const cx = cells.reduce((s, c) => s + c.c + 0.5, 0) / cells.length, cy = cells.reduce((s, c) => s + c.r + 0.5, 0) / cells.length;
-    ctx.fillStyle = '#fff3e0';
-    ctx.fillText(`ÁREA INICIAL J${i + 1}`, cx * S, cy * S + 5);
-  });
-  // paredes e portas
-  const edge = (a: { c: number; r: number }, b: { c: number; r: number }) => {
-    if (a.r === b.r) { const x = Math.max(a.c, b.c) * S; return [x, a.r * S, x, (a.r + 1) * S]; }
-    const y = Math.max(a.r, b.r) * S; return [a.c * S, y, (a.c + 1) * S, y];
-  };
-  ctx.lineCap = 'round';
-  for (const [a, b] of m.walls) {
-    const [x0, y0, x1, y1] = edge(a, b);
-    ctx.strokeStyle = '#6e6a62'; ctx.lineWidth = 6;
-    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
-  }
-  for (const d of m.doors) {
-    const [x0, y0, x1, y1] = edge(d.a, d.b);
-    const ix = (x1 - x0) * 0.12, iy = (y1 - y0) * 0.12;
-    ctx.strokeStyle = d.locked ? '#7a3fb0' : d.open ? '#3fa34d' : '#d8432f'; ctx.lineWidth = 9;
-    ctx.beginPath(); ctx.moveTo(x0 + ix, y0 + iy); ctx.lineTo(x1 - ix, y1 - iy); ctx.stroke();
-    ctx.strokeStyle = d.open ? '#cfe9b0' : '#8a5a2b'; ctx.lineWidth = 4;
-    ctx.stroke();
-  }
-  const icon = (c: { c: number; r: number }, dx: number, dy: number, color: string, txt: string) => {
-    const x = (c.c + 0.5 + dx) * S, y = (c.r + 0.5 + dy) * S;
-    ctx.beginPath(); ctx.arc(x, y, S * 0.15, 0, 7);
-    ctx.fillStyle = color; ctx.fill(); ctx.strokeStyle = '#2a1a12'; ctx.lineWidth = 1.5; ctx.stroke();
-    ctx.fillStyle = '#fff'; ctx.font = `bold ${Math.round(S * 0.14)}px "Baloo 2", sans-serif`; ctx.fillText(txt, x, y + S * 0.05);
-  };
-  for (const p of m.portals) icon(p.cell, 0.22, -0.22, p.color === 'magenta' ? '#c03a9a' : '#2fb3b8', '◎');
-  for (const e of m.entryMarkers) icon(e, -0.24, 0.24, '#d9a92c', '⚑');
-  for (const x of m.exploration) icon(x, -0.22, -0.22, '#6a3fa0', '?');
-  for (const mm of m.missionMarkers) icon(mm.cell, -0.24, -0.02, GUILDS[mm.color as keyof typeof GUILDS]?.color ?? '#e0b43a', '★');
-  for (const c of m.missionMarkersByArea ?? []) icon(c, -0.24, -0.02, '#e0b43a', '★');
-  for (const lb of m.labels ?? []) {
-    const cx = lb.cells.reduce((a, c) => a + c.c + 0.5, 0) / lb.cells.length, cy = lb.cells.reduce((a, c) => a + c.r + 0.5, 0) / lb.cells.length;
-    ctx.fillStyle = '#4a2a6a'; for (const c of lb.cells) ctx.fillRect(c.c * S + 2, c.r * S + 2, S - 4, S - 4);
-    ctx.fillStyle = '#fff'; ctx.font = `bold ${Math.round(S * 0.16)}px "Baloo 2", sans-serif`; ctx.fillText(lb.text, cx * S, cy * S + 4);
-  }
-  const seen = new Map<string, number>();
-  for (const mo of m.monsters) {
-    const k = key(mo.cell);
-    const n = seen.get(k) ?? 0;
-    seen.set(k, n + 1);
-    const md = MONSTERS[mo.type];
-    const col = md.category.startsWith('Vilão') ? (md.category === 'Vilão Maior' ? '#2a3a8a' : '#a0285a') : md.category === 'Lacaio Maior' ? '#e06a1c' : md.attackType === 'ranged' ? '#5aa02c' : '#c8382c';
-    icon(mo.cell, 0.12 + n * 0.2, 0.2 - n * 0.06, col, md.abbr);
-  }
-}
+export { drawMinimap } from './mapInfo';
 
 const RULES_HTML = `<div class="rules">
   <section><h3>Objetivo</h3><p>Cumprir Missões antes das outras Guildas. Com 2 jogadores vence quem cumprir <b>2 Missões</b>; com 3-4, <b>3 Missões</b> com pelo menos <b>1 contra o Jogo</b>. Na campanha, 6 cenários: 3 do Círculo Exterior, 2 do Interior e o Confronto Final.</p></section>

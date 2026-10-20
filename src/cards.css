@@ -2,13 +2,13 @@
 .acard {
   --lv: #3a7bc8;
   --stone: #9aa0a6;
-  position: relative; display: flex; flex-direction: column; gap: 4px; padding: 7px; border-radius: 14px; cursor: default;
+  position: relative; display: flex; flex-direction: column; gap: 4px; padding: 7px; border-radius: 14px; cursor: var(--cur-default, default);
   background:
     linear-gradient(160deg, color-mix(in srgb, var(--lv) 30%, #eef0f2), color-mix(in srgb, var(--lv) 55%, #9aa0a6) 50%, color-mix(in srgb, var(--lv) 60%, #3a3f45));
   border: 2px solid color-mix(in srgb, var(--lv) 50%, #222); box-shadow: inset 0 0 0 2px rgba(255,255,255,.35), 0 6px 14px rgba(0,0,0,.45);
   color: #fff; font-size: 12px; transition: transform .15s, box-shadow .15s;
 }
-.acard[data-i], .acard[data-h], .acard[data-hero] { cursor: pointer; }
+.acard[data-i], .acard[data-h], .acard[data-hero] { cursor: var(--cur-pointer, pointer); }
 .acard[data-i]:hover, .acard[data-h]:hover, .acard[data-hero]:hover { transform: translateY(-3px); }
 .acard.sel, .acard.picked { box-shadow: 0 0 0 4px #ffe14d, 0 0 18px #ffe14d; }
 .acard.disc { opacity: .5; filter: grayscale(.6); }
@@ -117,3 +117,21 @@
 .acard.hero .ac-ribbon { flex: none; }
 .acard.hero .ac-text { flex: 1 1 0; min-height: 0; overflow: hidden; }
 .acard.hero .hc-meds { flex: none; height: 46px; align-items: center; }
+
+/* arte das cartas de item (public/cards): magias preenchem o quadro; armas com fundo transparente */
+.ac-art.fill { overflow: hidden; }
+.ac-img { pointer-events: none; }
+.ac-img.fill { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.ac-img.icon { max-width: 84%; max-height: 108px; width: auto; height: auto; object-fit: contain; filter: drop-shadow(0 5px 5px rgba(0,0,0,.45)); }
+.ac-art .ac-tl { z-index: 2; }
+/* Rerrolagem / Defesa / Vida embaixo, na caixa de texto (como nas cartas oficiais) */
+.ac-bmeds { display: flex; justify-content: center; gap: 8px; margin-bottom: 3px; }
+.ac-bmeds .ac-bmed { width: 32px; height: 32px; }
+
+/* ✷ no texto das cartas = ícone do dado crítico */
+.ic-crit { display: inline-block; width: 1.25em; height: 1.25em; vertical-align: -0.28em; margin: 0 1px; }
+.ic-crit .dface { width: 100%; height: 100%; display: block; border-radius: 3px; }
+/* ajuste de tamanho por arte */
+.ac-img.icon.art-curse { max-height: 128px; max-width: 80%; }
+.ac-img.icon.art-adaga_aparadora { max-width: 70%; max-height: 88px; }
+.ac-img.icon.art-anel_lua { max-width: 66%; max-height: 82px; }

@@ -1,7 +1,7 @@
 import { entryPlaque } from './dice';
-import { play } from '../audio/sfx';
+import { play, playOnce } from '../audio/sfx';
 import { CARDS } from '../engine/cards';
-import { drawTokenImage } from './tokens';
+import { drawTokenImage, tokenImage, tokenImageId } from './tokens';
 import { key, sameCell } from '../engine/board';
 import { GUILDS, MONSTERS } from '../engine/data';
 import type { Game } from '../engine/game';
@@ -186,12 +186,18 @@ export class Renderer {
     this.cam.y = h / 2 - cy * this.cam.zoom;
   }
 
-  flash: { cells: Cell[]; t0: number } | null = null;
-  /** Pisca os Espaços e enquadra a câmera para mostrá-los. */
-  flashCells(cells: Cell[]) {
-    this.flash = { cells, t0: this.t };
-    this.fitCells(cells);
+  flash: { cells: Cell[]; dest: Cell[]; t0: number } | null = null;
+  /** Marcações dos jogadores (Ctrl + clique): Espaço piscando e seta na cor da Guilda. */
+  pings: { cell: Cell; color: string; name: string; t0: number }[] = [];
+  addPing(cell: Cell, color: string, name: string) {
+    this.pings = [...this.pings.filter(p => this.t - p.t0 < 3500 && !(p.cell.c === cell.c && p.cell.r === cell.r)), { cell, color, name, t0: this.t }];
   }
+  /** Pisca os Espaços (dourado = objetivo, verde = destino) e enquadra a câmera para mostrá-los. */
+  flashCells(cells: Cell[], dest: Cell[] = []) {
+    this.flash = { cells, dest, t0: this.t };
+    this.fitCells([...cells, ...dest]);
+  }
+  private static FLASH_MS = 6500;
 
   /** Enquadra a câmera para mostrar todos os Espaços. */
   fitCells(cells: Cell[]) {
@@ -395,7 +401,7 @@ export class Renderer {
         if (dx !== 0) u.flip = dx < 0;
         // posicionamento inicial: todos olham para o meio do tabuleiro; no jogo, para onde estão indo
         if (this.game.s.deploying?.length) u.dir = this.centerDir(e.to);
-        else if (!e.portal) { u.dir = dirFromStep(e.to.c - e.from.c, e.to.r - e.from.r); play('foot-step', 0.6); }
+        else if (!e.portal) { u.dir = dirFromStep(e.to.c - e.from.c, e.to.r - e.from.r); if (e.push) playOnce('rajada-de-vento', 1500); else play('foot-step', 0.6); }
         u.cell = { ...e.to };
         if (e.portal) { dur = 520 / this.speed; play('teletransport', 0.8); }
         break;
@@ -439,24 +445,27 @@ export class Renderer {
       {
         const kind = this.attackKind(e, a.defId);
         const sp = this.speed;
-        if (e.attackType === 'melee' || sameCell(a.cell, t.cell)) {
+        // o tipo da animação vem da carta usada (Próximo = investida, Distância = projétil), mesmo no mesmo Espaço
+        if (e.attackType === 'melee') {
           // investida: corre até encostar no inimigo e volta
           let dx = pt.x - pa.x, dy = pt.y - pa.y;
           const d = Math.hypot(dx, dy);
           if (d < 8) { dx = (pt.x < pa.x ? -1 : 1) * 26; dy = 0; } else { const k = Math.min(0.72, Math.max(0.35, (d - 34) / d)); dx *= k; dy *= k; }
           a.lunge = { dx, dy, t0: now + 150 / sp, dur: 620 / sp };
-          setTimeout(() => play('atack-sword'), 330 / sp);
+          setTimeout(() => play(e.cleave ? 'cleave' : 'atack-sword'), 330 / sp);
         } else {
           for (const tg of e.targets) {
             const tv = this.units.get(tg.id)!;
             const p2 = g2s(tv.pos.gx, tv.pos.gy);
             const from = { x: pa.x, y: pa.y - 40 }, to = { x: p2.x, y: p2.y - 36 };
+            // mesmo Espaço (ou colados): afasta as pontas para o tiro aparecer num arco
+            if (Math.hypot(to.x - from.x, to.y - from.y) < 40) { const s = to.x >= from.x ? 1 : -1; from.x -= 30 * s; to.x += 30 * s; }
             const dist = Math.hypot(to.x - from.x, to.y - from.y);
             this.projectiles.push({ from, to, t0: now + 250 / sp, dur: Math.min(900, 380 + dist * 0.35) / sp, kind, arc: Math.max(50, Math.min(220, dist * 0.5)) });
           }
           setTimeout(() => play(kind === 'orb' ? 'atack-magic' : 'atack-bow'), 230 / sp);
         }
-        if (e.attackType === 'melee' || sameCell(a.cell, t.cell)) return 820 / sp;
+        if (e.attackType === 'melee') return 820 / sp;
         const far = e.targets.map(tg => { const tv = this.units.get(tg.id)!; const p2 = g2s(tv.pos.gx, tv.pos.gy); return Math.hypot(p2.x - pa.x, p2.y - pa.y); });
         return (250 + Math.min(900, 380 + Math.max(...far) * 0.35)) / sp;
       }
@@ -649,6 +658,8 @@ export class Renderer {
     }
     this.drawGroundOverlays();
     this.drawSprites();
+    this.drawFlashArrows();
+    this.drawPings();
     this.drawFx();
     this.drawPointers();
     // luz quente + vinheta (atmosfera do Dofus)
@@ -663,6 +674,65 @@ export class Renderer {
     vig.addColorStop(1, 'rgba(10,20,5,0.42)');
     ctx.fillStyle = vig;
     ctx.fillRect(0, 0, W, H);
+  }
+
+  /** Marcações: anel pulsando no Espaço e seta pulando, na cor de quem marcou (3,5 s). */
+  private drawPings() {
+    if (!this.pings.length) return;
+    const ctx = this.ctx;
+    this.pings = this.pings.filter(p => this.t - p.t0 < 3500);
+    for (const p of this.pings) {
+      const k = (this.t - p.t0) / 1000;
+      const fade = Math.min(1, Math.max(0, (3.5 - k) / 0.6));
+      const pulse = 0.5 + 0.5 * Math.sin(k * 10);
+      ctx.save();
+      ctx.globalAlpha = fade;
+      // anéis expandindo no chão
+      for (let i = 0; i < 2; i++) {
+        const s = ((k * 1.2 + i * 0.5) % 1);
+        diamondPath(ctx, p.cell.c + 0.5 - 0.5 * (0.4 + s * 0.6), p.cell.r + 0.5 - 0.5 * (0.4 + s * 0.6), 0.4 + s * 0.6, 0.4 + s * 0.6);
+        ctx.strokeStyle = p.color; ctx.globalAlpha = fade * (1 - s); ctx.lineWidth = 8; ctx.stroke();
+      }
+      ctx.globalAlpha = fade;
+      diamondPath(ctx, p.cell.c + 0.04, p.cell.r + 0.04, 0.92, 0.92);
+      ctx.fillStyle = p.color; ctx.globalAlpha = fade * (0.25 + pulse * 0.25); ctx.fill();
+      ctx.globalAlpha = fade; ctx.strokeStyle = '#fff'; ctx.lineWidth = 4; ctx.stroke();
+      // seta pulando com o nome
+      const c = g2s(p.cell.c + 0.5, p.cell.r + 0.5);
+      const y = c.y - 170 - Math.abs(Math.sin(k * 6)) * 30;
+      ctx.translate(c.x, y);
+      ctx.beginPath();
+      ctx.moveTo(-24, -34); ctx.lineTo(24, -34); ctx.lineTo(24, 0); ctx.lineTo(44, 0); ctx.lineTo(0, 46); ctx.lineTo(-44, 0); ctx.lineTo(-24, 0); ctx.closePath();
+      ctx.fillStyle = p.color; ctx.fill();
+      ctx.lineWidth = 6; ctx.strokeStyle = '#fff'; ctx.stroke();
+      ctx.font = '800 26px "Baloo 2", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+      ctx.lineWidth = 6; ctx.strokeStyle = 'rgba(0,0,0,.75)'; ctx.strokeText(p.name, 0, -42);
+      ctx.fillStyle = '#fff'; ctx.fillText(p.name, 0, -42);
+      ctx.restore();
+    }
+  }
+
+  /** Setas pulando acima dos Espaços destacados de uma Missão. */
+  private drawFlashArrows() {
+    const f = this.flash;
+    if (!f || this.t - f.t0 >= Renderer.FLASH_MS) return;
+    const ctx = this.ctx;
+    const k = (this.t - f.t0) / 1000;
+    const fade = Math.min(1, Math.max(0, (Renderer.FLASH_MS / 1000 - k) / 0.8));
+    const arrow = (c: Cell, col: string) => {
+      const p = g2s(c.c + 0.5, c.r + 0.5);
+      const y = p.y - 150 - Math.abs(Math.sin(k * 5 + c.c)) * 26;
+      ctx.save();
+      ctx.globalAlpha = fade;
+      ctx.translate(p.x, y);
+      ctx.beginPath();
+      ctx.moveTo(-22, -30); ctx.lineTo(22, -30); ctx.lineTo(22, 0); ctx.lineTo(40, 0); ctx.lineTo(0, 40); ctx.lineTo(-40, 0); ctx.lineTo(-22, 0); ctx.closePath();
+      ctx.fillStyle = col; ctx.fill();
+      ctx.lineWidth = 6; ctx.strokeStyle = '#2a1606'; ctx.stroke();
+      ctx.restore();
+    };
+    for (const c of f.dest) arrow(c, '#3fd37a');
+    for (const c of f.cells) arrow(c, '#ffc531');
   }
 
   /** Setas do mouse dos outros jogadores, com o nome. */
@@ -764,6 +834,18 @@ export class Renderer {
       ctx.setLineDash([10, 7]);
       ctx.stroke();
       ctx.setLineDash([]);
+      // Arena: quantas vezes cada Guilda já marcou este marcador (terminou a ativação em cima dele)
+      const arena = this.game.s.arena;
+      if (arena) {
+        const marks = this.game.s.guildOrder.map(gid => ({ gid, n: (arena[gid] ?? []).filter(x => x === k).length })).filter(m => m.n);
+        marks.forEach((m, i) => {
+          const p = g2s(c + 0.78, r + 0.22 + i * 0.16);
+          ctx.fillStyle = GUILDS[m.gid as keyof typeof GUILDS].color; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5;
+          ctx.beginPath(); ctx.arc(p.x, p.y, 15, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+          ctx.fillStyle = '#fff'; ctx.font = '900 15px "Baloo 2", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillText(`×${m.n}`, p.x, p.y + 1); ctx.textBaseline = 'alphabetic';
+        });
+      }
     }
     // portais
     for (const p of this.game.map.portals) {
@@ -788,17 +870,25 @@ export class Renderer {
     }
     // destaques de movimento (azul Dofus)
     // objetivos de Missão piscando
-    if (this.flash && this.t - this.flash.t0 < 4200) {
+    if (this.flash && this.t - this.flash.t0 < Renderer.FLASH_MS) {
       const k = (this.t - this.flash.t0) / 1000;
-      const a = (0.5 + 0.5 * Math.sin(k * 9)) * (k > 3.2 ? 1 - (k - 3.2) : 1);
-      for (const c of this.flash.cells) {
-        diamondPath(ctx, c.c + 0.02, c.r + 0.02, 0.96, 0.96);
-        ctx.fillStyle = `rgba(255,225,77,${0.15 + a * 0.35})`;
-        ctx.fill();
-        ctx.strokeStyle = `rgba(255,240,150,${0.5 + a * 0.5})`;
-        ctx.lineWidth = 6;
-        ctx.stroke();
-      }
+      const fade = Math.min(1, Math.max(0, (Renderer.FLASH_MS / 1000 - k) / 0.8));
+      const a = (0.5 + 0.5 * Math.sin(k * 8)) * fade;
+      const paint = (cells: Cell[], fill: string, line: string) => {
+        for (const c of cells) {
+          diamondPath(ctx, c.c + 0.03, c.r + 0.03, 0.94, 0.94);
+          ctx.fillStyle = `rgba(${fill},${(0.3 + a * 0.4) * fade})`;
+          ctx.fill();
+          ctx.strokeStyle = `rgba(20,10,0,${0.55 * fade})`;
+          ctx.lineWidth = 12;
+          ctx.stroke();
+          ctx.strokeStyle = `rgba(${line},${(0.65 + a * 0.35) * fade})`;
+          ctx.lineWidth = 7;
+          ctx.stroke();
+        }
+      };
+      paint(this.flash.dest, '60,220,110', '170,255,190');
+      paint(this.flash.cells, '255,170,0', '255,236,120');
     }
     const purple = this.hl.moveColor === 'purple', green = this.hl.moveColor === 'green';
     for (const [k] of this.hl.move) {
@@ -1083,6 +1173,18 @@ export class Renderer {
       ctx.beginPath(); ctx.arc(-bw / 2 - 9, top + 2, 8, 0, Math.PI * 2); ctx.fill();
       ctx.lineWidth = 2; ctx.strokeStyle = '#1b0f08'; ctx.stroke();
       ctx.fillStyle = '#fff'; ctx.fillText(String(u.num), -bw / 2 - 9, top + 6);
+    }
+    // marcador de Missão carregado (escolta, Tomos…): aparece acima da cabeça
+    const carried = u.kind === 'hero' ? (this.game.s.units[u.id]?.tokens ?? []).filter(t => t.type === 'missao') : [];
+    carried.forEach((t, i) => {
+      const img = tokenImage(tokenImageId(t));
+      const x = bw / 2 + 14 + i * 20, y = top - 8 + Math.sin(tt * 3 + i) * 2;
+      if (img) { ctx.drawImage(img, x - 15, y - 15, 30, 30); }
+      else { ctx.fillStyle = '#ffd34d'; ctx.beginPath(); ctx.arc(x, y, 9, 0, Math.PI * 2); ctx.fill(); }
+    });
+    if (carried.length) {
+      ctx.font = '900 11px "Baloo 2", sans-serif'; ctx.lineWidth = 3; ctx.strokeStyle = '#1b0f08'; ctx.textAlign = 'center';
+      ctx.strokeText('★ carregando', bw / 2 + 14, top - 26); ctx.fillStyle = '#ffe9a8'; ctx.fillText('★ carregando', bw / 2 + 14, top - 26);
     }
     if (active) {
       const ay = top - 22 + Math.sin(tt * 5) * 3;

@@ -27,10 +27,14 @@ export interface Lobby {
   code: string; seats: Seat[]; started: boolean; mapId?: string;
   /** Preparação (recrutamento, votação, equipamento). Cada jogador recebe a sua versão, com as cartas dos outros escondidas. */
   setup?: OnlineSetup;
+  /** Campanha online em andamento (6 cenários). */
+  campaign?: boolean;
 }
 
 /** Jogadas da preparação. */
-export type SetupMsg = { t: 'draft'; hero: string } | { t: 'vote'; map: string } | { t: 'equip'; inv: Record<string, string[]> };
+export type SetupMsg = { t: 'draft'; hero: string } | { t: 'vote'; map: string } | { t: 'equip'; inv: Record<string, string[]> }
+  | { t: 'upPick'; ids: string[] } | { t: 'upBuy'; ids: string[] } | { t: 'upArr'; inv: Record<string, string[]> } | { t: 'pickmap'; map: string };
+const SETUP_MSGS = ['draft', 'vote', 'equip', 'upPick', 'upBuy', 'upArr', 'pickmap'];
 
 export type Msg =
   | { t: 'hello'; clientId: string; name: string; heroes: string[] }
@@ -43,7 +47,9 @@ export type Msg =
   | { t: 'chat'; from: string; text: string; color?: string }
   | { t: 'kicked'; reason: string }
   | SetupMsg
-  | { t: 'view'; guild?: GuildId; c: [number, number, number]; m: [number, number] | null; sel?: string | null };
+  | { t: 'view'; guild?: GuildId; c: [number, number, number]; m: [number, number] | null; sel?: string | null }
+  /** Marcação no tabuleiro (Ctrl + clique): todos veem a seta na cor de quem marcou. */
+  | { t: 'ping'; guild?: GuildId; cell: { c: number; r: number } };
 
 export function clientId(): string {
   try {
@@ -82,6 +88,8 @@ export interface SessionEvents {
   chat(from: string, text: string, color?: string): void;
   /** Câmera (centro x, y e zoom) e mouse (mundo) do jogador da vez. */
   view?(guild: GuildId, c: [number, number, number], m: [number, number] | null, sel?: string | null): void;
+  /** Alguém marcou um Espaço (Ctrl + clique). */
+  ping?(guild: GuildId, cell: { c: number; r: number }): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -163,13 +171,17 @@ export class HostSession {
         if (m.guild && !this.lobby.seats.some(s => s.guild === m.guild)) seat.guild = m.guild;
         if (m.team !== undefined) seat.team = m.team.trim().slice(0, 20) || undefined;
         this.pushLobby();
-      } else if ((m.t === 'draft' || m.t === 'vote' || m.t === 'equip') && this.lobby.setup && !this.lobby.started) {
-        this.onSetupMsg(seat.guild, m);
+      } else if (SETUP_MSGS.includes(m.t) && this.lobby.setup && !this.lobby.started) {
+        this.onSetupMsg(seat.guild, m as SetupMsg);
       } else if (m.t === 'action') {
         const why = this.onRemoteAction(seat.guild, m.action);
         if (why) conn.send({ t: 'reject', reason: why } satisfies Msg);
       } else if (m.t === 'chat') {
         this.chatAll(seat.name, m.text.slice(0, 200), colorOf(seat.guild));
+      } else if (m.t === 'ping' && this.lobby.started) {
+        const out: Msg = { t: 'ping', guild: seat.guild, cell: m.cell };
+        for (const [id, c] of this.conns) if (id !== cid && c.open) c.send(out);
+        this.ev.ping?.(seat.guild, m.cell);
       } else if (m.t === 'view' && this.lobby.started) {
         const out: Msg = { t: 'view', guild: seat.guild, c: m.c, m: m.m, sel: m.sel };
         for (const [id, c] of this.conns) if (id !== cid && c.open) c.send(out);
@@ -261,6 +273,7 @@ export class HostSession {
   sendView(c: [number, number, number], m: [number, number] | null, sel?: string | null) {
     this.broadcast({ t: 'view', guild: this.lobby.seats[0].guild, c, m, sel });
   }
+  sendPing(cell: { c: number; r: number }) { this.broadcast({ t: 'ping', guild: this.lobby.seats[0].guild, cell }); }
 
   close() { try { this.broadcast({ t: 'kicked', reason: 'O anfitrião encerrou a sala.' }); } catch { /* */ } setTimeout(() => this.peer?.destroy(), 300); }
 }
@@ -315,6 +328,7 @@ export class ClientSession {
         case 'reject': this.ev.reject(m.reason); break;
         case 'chat': this.ev.chat(m.from, m.text, m.color); break;
         case 'view': if (m.guild) this.ev.view?.(m.guild, m.c, m.m, m.sel); break;
+        case 'ping': if (m.guild) this.ev.ping?.(m.guild, m.cell); break;
         case 'kicked': this.closed = true; this.ev.status(m.reason, 'error'); this.peer.destroy(); break;
       }
     });
@@ -330,6 +344,7 @@ export class ClientSession {
   sendAction(a: Action) { this.send({ t: 'action', action: a }); }
   sendSetup(m: SetupMsg) { this.send(m); }
   sendView(c: [number, number, number], m: [number, number] | null, sel?: string | null) { this.send({ t: 'view', c, m, sel }); }
+  sendPing(cell: { c: number; r: number }) { this.send({ t: 'ping', cell }); }
   setMine(p: { heroes?: string[]; name?: string; guild?: GuildId; team?: string }) {
     if (p.heroes) this.heroes = p.heroes;
     if (p.name) this.name = p.name;

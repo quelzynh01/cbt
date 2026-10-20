@@ -1140,6 +1140,12 @@ function opaqueBox(s: Spr): [number, number, number, number] {
 }
 
 /** Corpo inteiro (galeria / cartas / tela de batalha). */
+/** Ajuste da figura no cartão: `scale` multiplica o tamanho; `wide` deixa a figura passar da largura (a borda corta a arma). */
+const CARD_FIT: Record<string, { scale: number; wide: number }> = {
+  goblin: { scale: 0.8, wide: 1 },
+  capitao_orc: { scale: 1, wide: 1.45 },
+};
+
 export function drawFull(canvas: HTMLCanvasElement, id: string, flip = false, bg?: string) {
   const ctx = canvas.getContext('2d')!;
   const w = canvas.width, h = canvas.height;
@@ -1156,7 +1162,9 @@ export function drawFull(canvas: HTMLCanvasElement, id: string, flip = false, bg
   if (hasSprite(id)) {
     // recorta pela área visível: imagens com muita margem (ex.: orcs) ficariam pequenas
     const [bx, by, bw, bh] = opaqueBox(s);
-    const k = Math.min((h - 14) / bh, (w - 10) / bw);
+    // ajuste por figura: o Goblin é baixinho; o Capitão Orc segura a espada aberta (largo) e ficaria pequeno
+    const fit = CARD_FIT[id] ?? { scale: 1, wide: 1 };
+    const k = Math.min((h - 14) / bh, (w - 10) * fit.wide / bw) * fit.scale;
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(s.cv, bx, by, bw, bh, (w - bw * k) / 2, h - 6 - bh * k, bw * k, bh * k);
     ctx.restore();

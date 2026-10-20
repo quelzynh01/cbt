@@ -13,6 +13,7 @@ export const TEMPLO_DO_AMANHECER: MapDef = {
   id: 'templo-do-amanhecer-crepuscular',
   name: 'O Templo do Amanhecer Crepuscular',
   circle: 'Confronto Final',
+  difficulty: 'muito',
   level: '6',
   cols: 9,
   rows: 9,

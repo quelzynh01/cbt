@@ -15,6 +15,7 @@ export const ARENA_DO_SOL: MapDef = {
   id: 'arena-do-sol-brilhante',
   name: 'Arena do Sol Brilhante',
   circle: 'Círculo Exterior',
+  difficulty: 'facil',
   level: '1',
   cols: 9,
   rows: 9,

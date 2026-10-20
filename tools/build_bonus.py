@@ -1,4 +1,4 @@
-"""Recorta os medalhões 1..10 das folhas de ref/dados/+*.jpg (fundo verde: Defesa, Vida, Rerrolagem, dados de ataque,
+"""Recorta os medalhões 1..10 (Vida até 20) das folhas de ref/dados/+*.jpg (fundo verde: Defesa, Vida, Rerrolagem, dados de ataque,
 moeda, caveira de Extermínio e movimento)
 e salva em public/bonus/<tipo><n>.webp."""
 import os
@@ -10,7 +10,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, 'ref', 'dados')
 OUT = os.path.join(ROOT, 'public', 'bonus')
 SHEETS = {'+defesas': 'def', '+vidas': 'hp', '+re-rolls': 'rr', '+ataque-melee': 'melee', '+ataque-ranged': 'ranged',
-          '+custo-ou-premio': 'coin', '+morte-sem-retaliacao': 'skull', '+movimento': 'move'}
+          '+custo-ou-premio': 'coin', '+morte-sem-retaliacao': 'skull', '+movimento': 'move', '+vidas2': 'hp'}
+# folhas de continuação: começam neste número (+vidas2 = Vida 11..20)
+START = {'+vidas2': 11}
 SIZE = 128
 
 
@@ -42,7 +44,7 @@ def main():
             side = max(im.size)
             sq = Image.new('RGBA', (side, side), (0, 0, 0, 0))
             sq.paste(im, ((side - im.width) // 2, (side - im.height) // 2))
-            sq.resize((SIZE, SIZE), Image.LANCZOS).save(os.path.join(OUT, f'{kind}{i + 1}.webp'), 'WEBP', quality=90, method=6)
+            sq.resize((SIZE, SIZE), Image.LANCZOS).save(os.path.join(OUT, f'{kind}{i + START.get(fname, 1)}.webp'), 'WEBP', quality=90, method=6)
         print(kind, len(boxes))
 
 

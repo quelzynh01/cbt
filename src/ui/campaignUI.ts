@@ -6,11 +6,12 @@ import {
 } from '../campaign/campaign';
 import { CARDS, CURSES } from '../engine/cards';
 import { GUILDS, HEROES } from '../engine/data';
-import { CAMPAIGN, MAPS } from '../engine/maps';
+import { CAMPAIGN, MAPS, difficultyBadge } from '../engine/maps';
 import { TITLES, TITLE_TEXT } from '../engine/titles';
 import { drawFace } from '../render/chibi';
 import { heroCard, itemCard, paintCardArt } from './cardview';
-import { drawMinimap } from './menu';
+import { attachMapPeek, closeMapPeek, mapChoiceCard } from './mapInfo';
+import { bindInvEditor, invEditorHtml, poolErrors, type InvItem, type InvOptions } from './inventoryEditor';
 import { fmtTime, getSettings } from './settings';
 import type { MenuPages } from './menu';
 
@@ -40,13 +41,19 @@ export class CampaignUI {
 
   close() { this.page.classList.add('hidden'); this.home.classList.remove('hidden'); }
 
+  private lastTitle = '';
   private show(title: string, body: string, back = true) {
     this.home.classList.add('hidden');
+    const same = title === this.lastTitle && !this.page.classList.contains('hidden');
+    const y = this.page.scrollTop;
+    this.lastTitle = title;
     this.page.classList.remove('hidden');
     this.page.innerHTML = `<div class="mp-head">${back ? '<button class="mp-back">← Menu</button>' : ''}<h2>${title}</h2></div><div class="mp-body">${body}</div>`;
     const b = this.page.querySelector('.mp-back') as HTMLElement | null;
     if (b) b.onclick = () => this.close();
-    this.page.scrollTop = 0;
+    closeMapPeek();
+    attachMapPeek(this.page);
+    this.page.scrollTop = same ? y : 0;
   }
 
   private save() { saveCampaign(this.c); }
@@ -54,7 +61,7 @@ export class CampaignUI {
   /** Entrada: continua a campanha salva ou mostra a criação. */
   open() {
     this.c = loadCampaign();
-    if (!this.c) return this.setup();
+    if (!this.c) return this.editions();
     useCampaignNames(this.c);
     if (this.c.phase === 'setup') return this.setupFlow();
     if (this.c.phase === 'upgrade') return this.upgrade();
@@ -63,6 +70,18 @@ export class CampaignUI {
   }
 
   // ---------------------------------------------------------------- criação
+  /** Escolha da edição da campanha (só a Clássica existe por enquanto). */
+  private editions() {
+    const eds = [
+      { id: 'classic', name: 'CBT', sub: 'Clássico', icon: '⚔️', text: 'A campanha original: 11 cenários pela cidade de Arcadia, do Círculo Exterior ao Templo do Amanhecer Crepuscular.', ok: true },
+      { id: 'inferno', name: 'CBT Inferno', sub: 'Em breve', icon: '🔥', text: 'Nova campanha com novos cenários. Em desenvolvimento.', ok: false },
+      { id: 'grave', name: 'CBT Beyond the Grave', sub: 'Em breve', icon: '💀', text: 'Nova campanha com novos cenários. Em desenvolvimento.', ok: false },
+    ];
+    this.show('Nova Campanha', `<div class="ed-list">${eds.map(e => `<button class="ed-card ed-${e.id} ${e.ok ? '' : 'soon'}" data-ed="${e.id}" ${e.ok ? '' : 'disabled'}>
+        <span class="ed-icon">${e.icon}</span><b>${e.name}</b><span class="ed-sub">${e.ok ? e.sub : '🔒 Em breve'}</span><small>${e.text}</small></button>`).join('')}</div>`);
+    this.page.querySelectorAll<HTMLElement>('[data-ed="classic"]').forEach(b => { b.onclick = () => this.setup(); });
+  }
+
   private setup() {
     this.show('Nova Campanha', `
       <div class="cp-box">
@@ -76,12 +95,13 @@ export class CampaignUI {
         <p>Entre os cenários: <b>Maldições Mortais</b>, <b>Fase de Melhorias</b> e <b>Títulos</b>. O vencedor de cada cenário escolhe o próximo.</p>
         <label class="lb-field">Nome da sua Guilda <input id="cp-name" maxlength="20" placeholder="Azul (opcional)"/></label>
         <label class="lb-field">Dificuldade da IA <select id="cp-ai"><option value="normal">Normal</option><option value="hard" ${getSettings().ai === 'hard' ? 'selected' : ''}>Difícil</option></select></label>
+        <label class="set-opt"><input type="checkbox" id="cp-cap"/> <b>Dados ilimitados</b> — sem limite de dados por rolagem (o padrão é no máximo 8 dados de ataque e 6 de defesa, contando críticos e rerrolagens, como os dados físicos da caixa)</label>
         <label class="lb-field">Adversários (IA) <select id="cp-opp"><option value="1">1</option><option value="2">2</option><option value="3" selected>3</option></select></label>
         <button class="primary cp-big" id="cp-start">🏰 Começar campanha</button>
       </div>`);
     (this.page.querySelector('#cp-start') as HTMLElement).onclick = () => {
       const n = Number((this.page.querySelector('#cp-opp') as HTMLSelectElement).value);
-      this.c = newCampaign(n, (this.page.querySelector('#cp-name') as HTMLInputElement).value, (this.page.querySelector('#cp-ai') as HTMLSelectElement).value as 'normal' | 'hard');
+      this.c = newCampaign(n, (this.page.querySelector('#cp-name') as HTMLInputElement).value, (this.page.querySelector('#cp-ai') as HTMLSelectElement).value as 'normal' | 'hard', (this.page.querySelector('#cp-cap') as HTMLInputElement).checked);
       this.c.chooser = human(this.c).id;
       this.save();
       this.setupFlow();
@@ -90,7 +110,7 @@ export class CampaignUI {
 
   /** Preparação: recrutamento, votação e equipamento inicial. */
   private pickHero: string | null = null;
-  private equipDraft: Record<string, string> | null = null;
+  private equipItems: InvItem[] | null = null;
   setupFlow() {
     const c = this.c!;
     const st = c.setup!;
@@ -129,10 +149,9 @@ export class CampaignUI {
         this.show('Campanha · Votação do mapa', `
           <div class="cp-step"><h3>Vote no primeiro cenário</h3>
           <p>Todos votam; se empatar, o mapa é sorteado entre os mais votados. (Recomendado para iniciantes: Distrito dos Martelos.)</p>
-          <div class="cp-votes">${av.map(id => `<div class="cp-vote" data-v="${id}"><canvas width="220" height="220"></canvas><b>${MAPS[id].name}</b><small>${MAPS[id].missions.pve.map(m => m.name).join(' · ')}</small></div>`).join('')}</div>
+          <div class="cp-votes">${av.map(id => mapChoiceCard(MAPS[id], { attrs: `data-v="${id}"`, sub: MAPS[id].missions.pve.map(m => m.name).join(' · ') })).join('')}</div>
           <h4>Guildas</h4>${guildsHtml}</div>`);
         this.page.querySelectorAll<HTMLElement>('[data-v]').forEach(el => {
-          drawMinimap(el.querySelector('canvas')!, MAPS[el.dataset.v!]);
           el.onclick = () => { voteMap(c, el.dataset.v!); this.save(); this.setupFlow(); };
         });
         return;
@@ -145,29 +164,26 @@ export class CampaignUI {
       (this.page.querySelector('#cp-ok') as HTMLElement).onclick = () => { st.step = 'equip'; this.save(); this.setupFlow(); };
       return;
     }
-    // equipamento inicial
-    if (!this.equipDraft) {
-      const base: Record<string, string> = {};
+    // equipamento inicial: os espaços de cada Herói; clique num espaço ou numa carta para escolher
+    if (!this.equipItems) {
       const order = me.heroes.slice();
-      STARTER_CARDS.forEach((cid, i) => { base[cid] = order[i % order.length]; });
-      this.equipDraft = base;
+      this.equipItems = STARTER_CARDS.map((cid, i) => ({ id: cid, to: order[i % order.length] }));
     }
-    const d = this.equipDraft;
-    const inv = Object.fromEntries(me.heroes.map(h => [h, STARTER_CARDS.filter(cid => d[cid] === h)]));
-    const errs = validateInventory(c, me, inv);
+    const items = this.equipItems;
+    const inv = Object.fromEntries(me.heroes.map(h => [h, items.filter(x => x.to === h).map(x => x.id)]));
+    const errs = [...validateInventory(c, me, inv), ...poolErrors(items, false)];
+    const opts: InvOptions = { heroes: me.heroes, color: GUILDS[me.id].color, discard: false, slots: (h, cards) => heroSlots(c, me, h, cards), curse: h => me.curses[h] ? CURSES[me.curses[h]].name : null };
     this.show('Campanha · Equipamento inicial', `
-      <div class="cp-step"><h3>Distribua as 5 cartas iniciais entre seus Heróis</h3>
-      <p>Cada Herói tem 4 espaços de inventário. Mapa: <b>${MAPS[st.map!].name}</b>.</p>
-      <div class="cp-cols">${me.heroes.map(h => `<div class="cp-col"><h4>${HEROES[h].name} <small>${inv[h].length}/4</small></h4>
-        <div class="cc-kind">${HEROES[h].abilityName} — ${HEROES[h].abilityText}</div>
-        ${inv[h].map(cid => `<div class="cp-slot">${cardHtml(cid)}<select data-c="${cid}">${me.heroes.map(x => `<option value="${x}" ${x === h ? 'selected' : ''}>${HEROES[x].name}</option>`).join('')}</select></div>`).join('')}</div>`).join('')}</div>
+      <div class="cp-step"><h3>Equipe seus Heróis</h3>
+      <p>Clique num <b>espaço vazio</b> ou numa <b>carta</b> para escolher qual carta vai nele (trocar entre Heróis também). Mapa: <b>${MAPS[st.map!].name}</b>.</p>
+      ${invEditorHtml(items, opts)}
       ${errs.length ? `<div class="lb-warn">${errs.join('<br/>')}</div>` : ''}
       <button class="primary cp-big" id="cp-ok" ${errs.length ? 'disabled' : ''}>Equipar e ir para o mapa ▶</button></div>`);
-    this.page.querySelectorAll<HTMLSelectElement>('[data-c]').forEach(sel => { sel.onchange = () => { d[sel.dataset.c!] = sel.value; this.setupFlow(); }; });
+    bindInvEditor(this.page, items, opts, () => this.setupFlow());
     (this.page.querySelector('#cp-ok') as HTMLElement).onclick = () => {
       const map = st.map!;
       if (finishEquip(c, inv).length) return;
-      this.equipDraft = null;
+      this.equipItems = null;
       this.save();
       this.onPlay(map);
     };
@@ -187,7 +203,7 @@ export class CampaignUI {
         const res = s.map ? c.played.find(p => p.mapId === s.map!.id) : null;
         const can = s.map && av.includes(s.map.id);
         const status = res ? `<span class="cp-done" style="--gc:${GUILDS[res.winner].color}">✓ ${guildName(res.winner)}</span>` : !s.map ? '<span class="mc-soon">Em breve</span>' : can ? '<span class="mc-ok">Disponível</span>' : '<span class="mc-soon">—</span>';
-        return `<div class="cp-scen ${can ? 'can' : ''} ${aiPick === s.map?.id ? 'ai-pick' : ''}" ${can && chooserIsMe ? `data-map="${s.map!.id}"` : ''}><b>${s.name}</b>${status}</div>`;
+        return `<div class="cp-scen ${can ? 'can' : ''} ${aiPick === s.map?.id ? 'ai-pick' : ''}" ${can && chooserIsMe ? `data-map="${s.map!.id}"` : ''} ${s.map ? `data-peek="${s.map.id}"` : ''}><b>${s.name}</b>${s.map ? difficultyBadge(s.map, can ? scenarioLevel(c) : undefined) : ''}${status}</div>`;
       }).join('');
       return `<div class="cp-circle"><h3>${ci} <small>${pr[ci]}/${CIRCLE_NEED[ci]}</small></h3>${items}</div>`;
     }).join('');
@@ -216,7 +232,7 @@ export class CampaignUI {
     if (go && aiPick) go.onclick = () => this.onPlay(aiPick);
     (this.page.querySelector('#cp-reset') as HTMLElement).onclick = () => {
       if (!confirm('Abandonar a campanha atual? O progresso será perdido.')) return;
-      this.c = null; this.save(); this.setup();
+      this.c = null; this.save(); this.editions();
     };
   }
 
@@ -286,30 +302,21 @@ export class CampaignUI {
     if (!this.arrangeState) {
       this.arrangeState = [
         ...me.heroes.flatMap(h => (me.inventory[h] ?? []).map(id => ({ id, to: h }))),
-        ...(up.bought[me.id] ?? []).map(id => ({ id, to: me.heroes.find(h => heroSlots(c, me, h).used < 4) ?? 'descartar' })),
+        // compradas: entram num Herói com espaço; senão ficam "sem Herói" para você escolher
+        ...(up.bought[me.id] ?? []).map(id => ({ id, to: me.heroes.find(h => heroSlots(c, me, h).used < 4) ?? 'pool' })),
       ];
     }
     const st = this.arrangeState;
     const inv = Object.fromEntries(me.heroes.map(h => [h, st.filter(x => x.to === h).map(x => x.id)]));
-    const errs = validateInventory(c, me, inv);
-    const opts = (cur: string) => [...me.heroes.map(h => `<option value="${h}" ${cur === h ? 'selected' : ''}>${HEROES[h].name}</option>`), `<option value="descartar" ${cur === 'descartar' ? 'selected' : ''}>✕ Descartar</option>`].join('');
-    const cols = me.heroes.map(h => {
-      const sl = heroSlots(c, me, h, inv[h]);
-      return `<div class="cp-col"><h4>${HEROES[h].name} <small class="${sl.used > sl.max ? 'bad' : ''}">${sl.used}/${sl.max}${sl.magicExtra ? ` (+${sl.magicExtra} Mágicas)` : ''}</small></h4>
-        ${me.curses[h] ? `<div class="cp-curse">☠ ${CURSES[me.curses[h]].name} — ${esc(CURSES[me.curses[h]].text)}</div>` : ''}
-        ${st.map((x, i) => x.to === h ? `<div class="cp-slot">${cardHtml(x.id)}<select data-k="${i}">${opts(x.to)}</select></div>` : '').join('')}</div>`;
-    }).join('');
-    const disc = st.map((x, i) => x.to === 'descartar' ? `<div class="cp-slot">${cardHtml(x.id, 'disc')}<select data-k="${i}">${opts(x.to)}</select></div>` : '').join('');
+    const errs = [...validateInventory(c, me, inv), ...poolErrors(st, true)];
+    const opts: InvOptions = { heroes: me.heroes, color: GUILDS[me.id].color, discard: true, slots: (h, cards) => heroSlots(c, me, h, cards), curse: h => me.curses[h] ? CURSES[me.curses[h]].name : null };
     this.show('Fase de Melhorias · Inventário', `
-      <div class="cp-step"><h3>3. Distribua as cartas entre seus Heróis</h3>
-      <p>Cada Herói tem 4 espaços (o Tomo da Iluminação dá +2 para cartas Mágicas; algumas Maldições ocupam 1). A Guilda pode ter até 12 cartas; 1 armadura por Herói; 1 Bomba por Guilda.</p>
-      <div class="cp-cols">${cols}</div>
-      ${disc ? `<h4>Descartadas</h4><div class="cp-cols"><div class="cp-col">${disc}</div></div>` : ''}
+      <div class="cp-step"><h3>3. Equipe seus Heróis</h3>
+      <p>Clique num <b>espaço vazio</b> ou numa <b>carta</b> para escolher a carta (troca entre Heróis, tira ou descarta). Cada Herói tem 4 espaços (o Tomo da Iluminação dá +2 para Mágicas; algumas Maldições ocupam 1). Até 12 cartas na Guilda; 1 armadura por Herói; 1 Bomba por Guilda.</p>
+      ${invEditorHtml(st, opts)}
       ${errs.length ? `<div class="lb-warn">${errs.join('<br/>')}</div>` : ''}
       <button class="primary cp-big" id="cp-ok" ${errs.length ? 'disabled' : ''}>Concluir Fase de Melhorias</button></div>`, false);
-    this.page.querySelectorAll<HTMLSelectElement>('[data-k]').forEach(sel => {
-      sel.onchange = () => { st[Number(sel.dataset.k)].to = sel.value; this.arrange(); };
-    });
+    bindInvEditor(this.page, st, opts, () => this.arrange());
     (this.page.querySelector('#cp-ok') as HTMLElement).onclick = () => {
       const e = finishArrange(c, inv);
       if (e.length) return;
@@ -338,7 +345,7 @@ export class CampaignUI {
         <p>Medalhas: ${c.guilds.map(g => `${guildName(g.id)} ${count(g.id)}`).join(' · ')}</p>
         <button class="primary cp-big" id="cp-new">Nova campanha</button>
       </div>`);
-    (this.page.querySelector('#cp-new') as HTMLElement).onclick = () => { this.c = null; this.save(); this.setup(); };
+    (this.page.querySelector('#cp-new') as HTMLElement).onclick = () => { this.c = null; this.save(); this.editions(); };
   }
 
   /** Chamado ao terminar um cenário da campanha. */

@@ -93,7 +93,7 @@ export class SimpleAI {
     const a = this.queue.shift();
     if (!a) {
       // Bênção de Hobsbawm: ataque Mágico sem Movimento -> ativa outro Aliado em Linha de Visão
-      if (g.s.blessing) {
+      if (g.s.blessing || g.s.warCry) {
         let best: Plan | null = null;
         for (const ally of g.heroesOf(g.currentGuild().id)) {
           if (!g.canBless(ally.id)) continue;
@@ -142,7 +142,7 @@ export class SimpleAI {
     const dead = heroes.filter(h => !h.alive).length;
     let best: Plan | null = null;
     for (const h of heroes) {
-      if (!h.alive || !h.cell) continue;
+      if (!h.alive || !h.cell || h.spent) continue;
       const p = this.planHero(g, h, this.goalDistances(g, guild.id, h));
       if (p) p.value += this.noise();
       if (p && (!best || p.value > best.value)) best = p;

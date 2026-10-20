@@ -16,6 +16,7 @@ export const DISTRITO_DOS_MARTELOS: MapDef = {
   id: 'distrito-dos-martelos',
   name: 'Distrito dos Martelos',
   circle: 'Círculo Exterior',
+  difficulty: 'facil',
   level: '1',
   notes: ['Só 2 jogadores podem completar "Encontrar as Armas Perdidas" (2 cartas Quebra-Crânio).'],
   cols: 9,

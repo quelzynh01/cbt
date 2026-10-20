@@ -12,6 +12,7 @@ export const COVIL_DOS_ORCS: MapDef = {
   id: 'covil-dos-orcs',
   name: 'Covil dos Orcs',
   circle: 'Círculo Exterior',
+  difficulty: 'dificil',
   level: '1',
   cols: 9,
   rows: 6,

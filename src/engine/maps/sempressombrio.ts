@@ -16,6 +16,7 @@ export const SEMPRESSOMBRIO: MapDef = {
   id: 'distrito-sempressombrio',
   name: 'Distrito Sempressombrio',
   circle: 'Círculo Interior',
+  difficulty: 'dificil',
   level: '4-5',
   cols: 9,
   rows: 9,

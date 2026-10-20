@@ -1,5 +1,10 @@
 import { ALL_HEROES, HEROES, distributeStartingGear } from '../engine/data';
 import { MAPS } from '../engine/maps';
+import type { Game } from '../engine/game';
+import { CARDS } from '../engine/cards';
+import {
+  type CampaignState, aiChoice, arrangeGuild, availableScenarios, cardValue, closeUpgrade, draftPickAll, finishBuy, recordResult, validateInventory,
+} from '../campaign/campaign';
 import type { GuildId } from '../engine/types';
 import { pickHero, type AILevel } from '../ai/ai';
 
@@ -17,7 +22,19 @@ export const HIDDEN = '?';
 export interface SeatInfo { guild: GuildId; ai: boolean }
 
 export interface OnlineSetup {
-  step: 'draft' | 'vote' | 'equip' | 'done';
+  /** Partida única ou campanha (6 cenários com Fase de Melhorias entre eles). */
+  mode: 'single' | 'campaign';
+  /** Dados ilimitados (sem a opção, no máximo 8 dados de ataque e 6 de defesa por rolagem). */
+  unlimitedDice: boolean;
+  step: 'draft' | 'vote' | 'equip' | 'done' | 'upgrade-draft' | 'upgrade-buy' | 'upgrade-arrange' | 'choose' | 'final';
+  /** Campanha online (estado completo, como no modo campanha). */
+  camp?: CampaignState;
+  /** Fase de Melhorias: escolhas de cada Guilda humana nesta etapa (null = ainda escolhendo). */
+  upPick: Partial<Record<GuildId, string[] | null>>;
+  upBuy: Partial<Record<GuildId, string[] | null>>;
+  upArr: Partial<Record<GuildId, Record<string, string[]> | null>>;
+  /** Próximo cenário escolhido pelo vencedor. */
+  nextMap?: string;
   round: number;
   order: GuildId[];
   hands: Partial<Record<GuildId, string[]>>;
@@ -42,12 +59,13 @@ function shuffle<T>(a: T[], rnd: () => number): T[] {
   return r;
 }
 
-export function newSetup(seats: SeatInfo[], aiLevel: AILevel, rnd: () => number = Math.random): OnlineSetup {
+export function newSetup(seats: SeatInfo[], aiLevel: AILevel, rnd: () => number = Math.random, mode: 'single' | 'campaign' = 'single', unlimitedDice = false): OnlineSetup {
   const order = seats.map(s => s.guild);
   const size = order.length <= 3 ? 4 : 3;
   const pool = shuffle(ALL_HEROES, rnd);
   const st: OnlineSetup = {
     step: 'draft', round: 0, order, hands: {}, choice: {}, picks: {}, votes: {}, equip: {}, tick: 0, aiLevel,
+    mode, unlimitedDice, upPick: {}, upBuy: {}, upArr: {},
   };
   for (const g of order) { st.hands[g] = pool.splice(0, size); st.choice[g] = null; st.picks[g] = []; }
   return st;
@@ -60,8 +78,13 @@ export function chooseHero(st: OnlineSetup, g: GuildId, hero: string): boolean {
   return true;
 }
 
+/** Mapas que podem ser votados (na campanha, só os do Círculo Exterior). */
+export function votableMaps(st: OnlineSetup): string[] {
+  return st.mode === 'campaign' ? Object.values(MAPS).filter(m => m.circle === 'Círculo Exterior').map(m => m.id) : Object.keys(MAPS);
+}
+
 export function voteMap(st: OnlineSetup, g: GuildId, map: string): boolean {
-  if (st.step !== 'vote' || !MAPS[map]) return false;
+  if (st.step !== 'vote' || !MAPS[map] || !votableMaps(st).includes(map)) return false;
   st.votes[g] = map;
   return true;
 }
@@ -112,7 +135,7 @@ export function advance(st: OnlineSetup, seats: SeatInfo[], rnd: () => number = 
     }
   }
   if (st.step === 'vote') {
-    const maps = Object.keys(MAPS);
+    const maps = votableMaps(st);
     for (const g of all) if (isAI(g) && !st.votes[g]) {
       // IA prefere os mapas do Círculo Exterior (cenários mais curtos)
       const outer = maps.filter(m => MAPS[m].circle === 'Círculo Exterior');
@@ -138,6 +161,124 @@ export function advance(st: OnlineSetup, seats: SeatInfo[], rnd: () => number = 
     for (const g of all) if (isAI(g) && !st.equip[g]) { st.equip[g] = distributeStartingGear(st.picks[g]!); changed = true; }
     if (all.every(g => st.equip[g])) { st.step = 'done'; st.tick++; st.news = 'Todos prontos! A partida vai começar.'; changed = true; }
   }
+  if (st.camp && advanceCampaign(st, seats)) changed = true;
+  return changed;
+}
+
+// ------------------------------------------------------------------ campanha online
+/** Cria a campanha com os Heróis recrutados e o equipamento inicial (depois da mesa). */
+export function startCampaign(st: OnlineSetup, seats: (SeatInfo & { team?: string })[]) {
+  const c: CampaignState = {
+    version: 1, guilds: [], played: [], chooser: st.order[0], phase: 'choose', seed: (Date.now() ^ (Math.random() * 1e9)) | 0,
+    elapsed: 0, aiLevel: st.aiLevel, unlimitedDice: st.unlimitedDice, voted: st.map,
+  };
+  for (const g of st.order) {
+    const s = seats.find(x => x.guild === g);
+    c.guilds.push({ id: g, controller: s?.ai ? 'ai' : 'human', heroes: st.picks[g]!.slice(), inventory: JSON.parse(JSON.stringify(st.equip[g] ?? {})), saved: 0, titles: [], curses: {}, ...(s?.team ? { name: s.team } : {}) });
+  }
+  st.camp = c;
+}
+
+/** Fim de um cenário: registra o resultado e abre a Fase de Melhorias (ou o final). */
+export function scenarioOver(st: OnlineSetup, game: Game) {
+  const c = st.camp!;
+  recordResult(c, game);
+  st.tick++;
+  if (c.phase === 'done') { st.step = 'final'; st.news = 'Fim da campanha!'; return; }
+  st.step = 'upgrade-draft';
+  st.nextMap = undefined;
+  st.upPick = {}; st.upBuy = {}; st.upArr = {};
+  for (const g of c.guilds) if (g.controller === 'human') st.upPick[g.id] = null;
+  st.news = `Cenário concluído! Fase de Melhorias (nível ${c.upgrade!.level}).`;
+}
+
+export function upgradePick(st: OnlineSetup, g: GuildId, ids: string[]): boolean {
+  const up = st.camp?.upgrade;
+  if (st.step !== 'upgrade-draft' || !up) return false;
+  const hand = up.hands[g] ?? [];
+  if (ids.length !== Math.min(2, hand.length) || ids.some(id => !hand.includes(id)) || new Set(ids).size !== ids.length) return false;
+  st.upPick[g] = ids;
+  return true;
+}
+export function upgradeBuy(st: OnlineSetup, g: GuildId, ids: string[]): boolean {
+  const up = st.camp?.upgrade;
+  if (st.step !== 'upgrade-buy' || !up) return false;
+  const picked = up.picked[g] ?? [];
+  if (ids.length > 3 || ids.some(id => !picked.includes(id))) return false;
+  if (ids.reduce((s, id) => s + CARDS[id].cost, 0) > (up.coins[g] ?? 0)) return false;
+  st.upBuy[g] = ids;
+  return true;
+}
+export function upgradeArrange(st: OnlineSetup, g: GuildId, inv: Record<string, string[]>): boolean {
+  const c = st.camp;
+  const cg = c?.guilds.find(x => x.id === g);
+  if (st.step !== 'upgrade-arrange' || !c || !cg) return false;
+  // só cartas que a Guilda tem (inventário + compradas)
+  const have = [...Object.values(cg.inventory).flat(), ...(c.upgrade!.bought[g] ?? [])].sort();
+  const want = Object.values(inv).flat().sort();
+  const left = have.slice();
+  for (const id of want) { const i = left.indexOf(id); if (i < 0) return false; left.splice(i, 1); }
+  if (Object.keys(inv).some(h => !cg.heroes.includes(h)) || validateInventory(c, cg, inv).length) return false;
+  st.upArr[g] = inv;
+  return true;
+}
+export function pickNextMap(st: OnlineSetup, g: GuildId, map: string): boolean {
+  const c = st.camp;
+  if (st.step !== 'choose' || !c || c.chooser !== g || !availableScenarios(c).includes(map)) return false;
+  st.nextMap = map;
+  return true;
+}
+
+function advanceCampaign(st: OnlineSetup, seats: SeatInfo[]): boolean {
+  const c = st.camp!;
+  const up = c.upgrade;
+  // vaga que virou IA (jogador caiu) também joga sozinha
+  const auto = (g: GuildId) => seats.find(s => s.guild === g)?.ai ?? true;
+  const humans = c.guilds.filter(g => g.controller === 'human');
+  let changed = false;
+  if (st.step === 'upgrade-draft' && up) {
+    for (const g of humans) if (auto(g.id) && !st.upPick[g.id]) {
+      st.upPick[g.id] = (up.hands[g.id] ?? []).slice().sort((a, b) => cardValue(b) - cardValue(a)).slice(0, 2);
+    }
+    if (humans.every(g => st.upPick[g.id])) {
+      draftPickAll(c, Object.fromEntries(humans.map(g => [g.id, st.upPick[g.id]!])));
+      st.tick++;
+      for (const g of humans) st.upPick[g.id] = null;
+      if (up.step === 'buy') {
+        st.step = 'upgrade-buy';
+        for (const g of humans) st.upBuy[g.id] = null;
+        st.news = 'Escolha de cartas concluída. Hora de comprar!';
+      } else st.news = `Rodada ${up.round} concluída: as mãos passaram para a esquerda.`;
+      changed = true;
+    }
+  }
+  if (st.step === 'upgrade-buy' && up) {
+    for (const g of humans) if (auto(g.id) && !st.upBuy[g.id]) st.upBuy[g.id] = [];
+    if (humans.every(g => st.upBuy[g.id])) {
+      for (const g of humans) finishBuy(c, g, st.upBuy[g.id]!);
+      st.step = 'upgrade-arrange';
+      st.tick++;
+      for (const g of humans) st.upArr[g.id] = null;
+      st.news = 'Compras feitas. Distribuam as cartas entre os Heróis.';
+      changed = true;
+    }
+  }
+  if (st.step === 'upgrade-arrange' && up) {
+    for (const g of humans) if (auto(g.id) && !st.upArr[g.id]) st.upArr[g.id] = JSON.parse(JSON.stringify(g.inventory));
+    if (humans.every(g => st.upArr[g.id])) {
+      for (const g of humans) arrangeGuild(c, g, st.upArr[g.id]!);
+      closeUpgrade(c);
+      st.step = 'choose';
+      st.tick++;
+      st.news = 'Fase de Melhorias concluída! O vencedor escolhe o próximo cenário.';
+      changed = true;
+    }
+  }
+  if (st.step === 'choose') {
+    const chooser = c.guilds.find(g => g.id === c.chooser);
+    if (!st.nextMap && (!chooser || chooser.controller === 'ai' || auto(chooser.id))) { st.nextMap = aiChoice(c) ?? undefined; changed = true; }
+    if (st.nextMap && st.step === 'choose') { st.step = 'done'; st.tick++; st.news = `Próximo cenário: ${MAPS[st.nextMap].name}.`; changed = true; }
+  }
   return changed;
 }
 
@@ -152,6 +293,14 @@ export function redact(st: OnlineSetup, me: GuildId | null): OnlineSetup {
     if (r.step === 'draft') r.picks[g] = r.picks[g]!.map(() => HIDDEN);
     if (r.step === 'vote' && r.votes[g]) r.votes[g] = HIDDEN;
     if (r.equip[g]) r.equip[g] = {};
+    if (r.upPick[g]) r.upPick[g] = [HIDDEN];
+    if (r.upBuy[g]) r.upBuy[g] = [HIDDEN];
+    if (r.upArr[g]) r.upArr[g] = {};
+    const up = r.camp?.upgrade;
+    if (up) {
+      if (up.hands[g]) up.hands[g] = up.hands[g]!.map(() => HIDDEN);
+      if (up.picked[g] && r.step === 'upgrade-draft') up.picked[g] = up.picked[g]!.map(() => HIDDEN);
+    }
   }
   return r;
 }

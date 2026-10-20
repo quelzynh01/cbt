@@ -1,6 +1,8 @@
 import { CARDS, CURSES } from '../engine/cards';
 import { HEROES, MONSTERS } from '../engine/data';
+import { CARD_ART } from './cardArt';
 import { drawFull } from '../render/chibi';
+import { dieImg } from '../render/dice';
 
 // Cartas no estilo do jogo de tabuleiro: moldura de pedra, título em pergaminho, medalhões e caixa de texto.
 // A cor de fundo indica o nível (itens e monstros).
@@ -36,14 +38,17 @@ const title = (name: string, sub = '') => {
 /** Medalhão de bônus +1..+10 (public/bonus, tools/build_bonus.py). */
 export function bonusImg(kind: 'def' | 'hp' | 'rr', n: number, cls = 'bonus'): string {
   const name = kind === 'def' ? 'Defesa' : kind === 'hp' ? 'Vida' : 'Rerrolagem';
-  if (n < 1 || n > 10) return `<span class="${cls}">+${n}</span>`;
+  if (n < 1 || n > medalMax(kind)) return `<span class="${cls}">+${n}</span>`;
   return `<img class="${cls}" src="${import.meta.env.BASE_URL}bonus/${kind}${n}.webp" title="+${n} ${name}" alt="+${n} ${name}" draggable="false"/>`;
 }
+
+/** Maior número com imagem de medalhão (Vida vai até 20). */
+const medalMax = (kind: string) => kind === 'hp' ? 20 : 10;
 
 type BadgeKind = 'def' | 'hp' | 'rr' | 'melee' | 'ranged' | 'coin' | 'skull' | 'move';
 /** Medalhão com o número (imagem de public/bonus, 1..10); fora disso usa o medalhão desenhado. `extra`: up/down, posição. */
 export function medal(kind: BadgeKind, n: number, title: string, extra = ''): string {
-  if (Number.isInteger(n) && n >= 1 && n <= 10) {
+  if (Number.isInteger(n) && n >= 1 && n <= medalMax(kind)) {
     return `<img class="bimg ${kind} ${extra}" src="${import.meta.env.BASE_URL}bonus/${kind}${n}.webp" title="${title}" alt="${n}" draggable="false"/>`;
   }
   const cls = kind === 'melee' || kind === 'ranged' ? `dice ${kind}` : kind;
@@ -74,15 +79,24 @@ export function itemCard(id: string, extra = '', attrs = '', qty = false, atkBon
   const lv = ITEM_LEVEL[d.level] ?? ITEM_LEVEL.I;
   const type = d.kind === 'attack' ? (d.attackType === 'melee' ? 'Ataque Próximo' : 'Ataque a Distância') : d.kind === 'boost' ? 'Ampliação' : 'Permanente';
   const bonus = [d.defBonus ? bonusImg('def', d.defBonus, 'ac-bmed') : '', d.hpBonus ? bonusImg('hp', d.hpBonus, 'ac-bmed') : '', d.rerolls ? bonusImg('rr', d.rerolls, 'ac-bmed') : ''].join('');
-  const text = `${d.text}${d.partial ? ' <i>(efeito ainda não implementado)</i>' : ''}`;
+  const text = `${richText(d.text)}${d.partial ? ' <i>(efeito ainda não implementado)</i>' : ''}`;
+  const art = CARD_ART[id];
   return `<div class="acard item ${extra}" style="--lv:${lv.color}" ${attrs} title="${(d.text || d.name).replace(/"/g, '&quot;')}">
     ${title(d.name)}
-    <div class="ac-art">${d.cost ? medal('coin', d.cost, `Custo: ${d.cost} moeda(s)`, 'ac-tl') : ''}${bonus ? `<div class="ac-tr">${bonus}</div>` : ''}<span class="ac-icon">${GROUP_ICON[d.group] ?? '✦'}</span></div>
+    <div class="ac-art ${art?.kind === 'fill' ? 'fill' : ''}">${d.cost ? medal('coin', d.cost, `Custo: ${d.cost} moeda(s)`, 'ac-tl') : ''}${art
+      ? artImg(art, `art-${art.img}`)
+      : `<span class="ac-icon">${GROUP_ICON[d.group] ?? '✦'}</span>`}</div>
     <div class="ac-type"><div><b>${type}</b><small>${d.group}</small></div>${d.kind === 'attack' ? medal(d.attackType === 'melee' ? 'melee' : 'ranged', d.dice + atkBonus, atkBonus ? `${d.dice + atkBonus} dados de ataque (carta: ${d.dice})` : `${d.dice} dados de ataque ${d.attackType === 'melee' ? 'Próximo' : 'a Distância'}`, atkBonus > 0 ? 'up' : atkBonus < 0 ? 'down' : '') : ''}</div>
-    <div class="ac-text ${textSize(d.text)}">${d.text ? `<p>${text}</p>` : '<p><i class="ac-none">Sem efeito especial</i></p>'}</div>
+    <div class="ac-text ${textSize(d.text)}">${bonus ? `<div class="ac-bmeds">${bonus}</div>` : ''}${d.text ? `<p>${text}</p>` : ''}</div>
     <div class="ac-code">${d.code} · ${lv.name}${qty && d.qty ? ` · ${d.qty}x` : ''}${d.scenario ? ` · ${d.scenario}` : ''}</div>
   </div>`;
 }
+
+/** Imagem da arte da carta (public/cards). */
+const artImg = (a: { img: string; kind: string }, cls = '') => `<img class="ac-img ${a.kind} ${cls}" src="${import.meta.env.BASE_URL}cards/${a.img}.webp" alt="" draggable="false"/>`;
+
+/** Texto de carta: o ✷ vira o ícone do dado crítico. */
+export const richText = (t = '') => t.replace(/✷/g, `<span class="ic-crit" title="Crítico">${dieImg('crit', true)}</span>`);
 
 const textSize = (t = '') => t.length > 110 ? 'xs' : t.length > 80 ? 'sm' : '';
 
@@ -92,9 +106,9 @@ export function curseCard(id: string, extra = '', attrs = ''): string {
   if (!c) return '';
   return `<div class="acard curse ${extra}" ${attrs}>
     ${title(c.name)}
-    <div class="ac-art curse-art">${med('curse ac-tl', c.value, 'Valor da Maldição')}<span class="ac-icon">💀</span></div>
+    <div class="ac-art curse-art">${med('curse ac-tl', c.value, 'Valor da Maldição')}${CARD_ART[`curse:${id}`] ? artImg(CARD_ART[`curse:${id}`], 'art-curse') : '<span class="ac-icon">💀</span>'}</div>
     <div class="ac-type"><div><b>Maldição Mortal</b><small>${c.slot ? 'Ocupa um espaço de carta' : 'Efeito permanente'}</small></div></div>
-    <div class="ac-text ${textSize(c.text)}"><p>${c.text}</p></div>
+    <div class="ac-text ${textSize(c.text)}"><p>${richText(c.text)}</p></div>
     <div class="ac-code">T-${String(c.value).padStart(2, '0')} · ${c.qty}x no baralho</div>
   </div>`;
 }
@@ -109,7 +123,7 @@ export function heroCard(id: string, extra = '', attrs = '', foot = '', badge = 
       <div class="hc-left">
         <div class="hc-meds">${medal('def', def, diff(def, h.defense, 'Defesa'), `big${cmp(def, h.defense)}`)}${medal('hp', hp, live ? `Vida atual: ${hp}/${live.maxHp ?? h.hp} (carta: ${h.hp})` : 'Vida', `big${cmp(hp, h.hp)}`)}${rr ?medal('rr', rr, `Rerrolagem: ${rr}`, `big${cmp(rr, 0)}`) : ''}${live?.atk ?medal('melee', live.atk, `+${live.atk} dado(s) em todos os ataques`, 'big up') : ''}</div>
         <div class="ac-ribbon"><small>Habilidade</small><b>${h.abilityName}</b></div>
-        <div class="ac-text ${textSize(h.abilityText)}"><p>${h.abilityText}${h.implemented === false ? ' <i>(a confirmar)</i>' : ''}</p></div>
+        <div class="ac-text ${textSize(h.abilityText)}"><p>${richText(h.abilityText)}${h.implemented === false ? ' <i>(a confirmar)</i>' : ''}</p></div>
       </div>
       <canvas class="hc-artc" width="200" height="230" data-art="${id}"></canvas>
     </div>
@@ -130,7 +144,7 @@ export function monsterCard(id: string, extra = '', attrs = '', live?: LiveStats
       <canvas width="320" height="328" data-art="${id}"></canvas>
     </div>
     <div class="ac-type">${medal('move', m.move, `Movimento: ${m.move}`)}<div><b>${m.attackType === 'melee' ? 'Ataque Próximo' : 'Ataque a Distância'}</b><small>${m.attackName}</small></div>${medal(m.attackType === 'melee' ? 'melee' : 'ranged', m.dice, `${m.dice} dados de ataque`)}</div>
-    <div class="ac-text ${textSize(m.abilityText)}"><p>${m.abilityText || '<i class="ac-none">Sem habilidade especial</i>'}</p></div>
+    <div class="ac-text ${textSize(m.abilityText)}">${m.abilityText ? `<p>${richText(m.abilityText)}</p>` : ''}</div>
   </div>`;
 }
 

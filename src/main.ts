@@ -1,7 +1,13 @@
 import './style.css';
 import './menu.css';
+import './mapinfo.css';
 import './cards.css';
 import { Controller } from './ui/controller';
+import { DEFAULT_CURSOR, POINTER_CURSOR } from './render/cursors';
+
+// cursores do jogo em toda a interface
+document.documentElement.style.setProperty('--cur-default', DEFAULT_CURSOR);
+document.documentElement.style.setProperty('--cur-pointer', POINTER_CURSOR);
 import { MenuPages } from './ui/menu';
 import { OnlineLobby } from './ui/lobby';
 import { CampaignUI } from './ui/campaignUI';
@@ -52,7 +58,17 @@ function enterGame() {
 const lobby = new OnlineLobby(menu, pages);
 lobby.onStart = (state, l, session) => {
   enterGame();
-  getController().startOnline(state, l, session);
+  const ctl = getController();
+  ctl.onlineCampaign = session.isHost && lobby.isCampaign ? g => lobby.afterScenario(g) : null;
+  ctl.onLobbyBack = back => lobby.resume(back);
+  ctl.startOnline(state, l, session);
+};
+lobby.onReturn = () => {
+  controller?.stop();
+  document.getElementById('gameover')?.remove();
+  setMusic('menu');
+  hud.classList.add('hidden');
+  menu.classList.remove('hidden', 'over-game');
 };
 
 const camp = new CampaignUI(menu, pages);

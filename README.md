@@ -153,6 +153,16 @@ marcadores pegos num Espaço aparecem juntos: os virados para baixo giram ao mes
 
 Ao abrir o jogo há uma **tela de carregamento** (personagens, marcadores, dados e sons).
 
+**Fim da partida:** quem cumpre as Missões vê "Vitória garantida!", mas o placar e a tela final só aparecem quando o
+turno dessa Guilda termina.
+
+**Avisos para todos:** Cartas de Recompensa e Títulos aparecem no centro da tela. No mapa: o Herói que carrega um
+marcador de Missão mostra o marcador acima da cabeça ("★ carregando"); na Arena, cada marcador mostra quantas vezes cada
+Guilda já o marcou (×N na cor da Guilda). Na sua vez a tela ganha uma moldura na cor da sua Guilda.
+
+**Tela de combate:** uma tela por ataque — o ataque e a defesa ficam juntos; a Rerrolagem é escolhida nela mesma
+(clique nos dados). Se o Monstro revidar, abre outra tela: primeiro os dados dele, embaixo você rola a sua Defesa.
+
 ## Multiplayer Online (até 4 jogadores)
 
 Peer-to-peer, sem servidor pago: o navegador de quem **cria a sala** (anfitrião) roda as regras, rola os dados e
@@ -168,6 +178,9 @@ gratuito do PeerJS). Os outros jogadores só enviam as jogadas.
      o resto passa para a esquerda. Os Heróis dos outros só aparecem no fim.
    - **Votação do mapa** (votos escondidos até todos votarem; empate = sorteio).
    - **Equipamento inicial**: cada um distribui as 5 cartas iniciais entre seus Heróis.
+   - **Modo:** *Partida única* ou **Campanha (6 cenários)** — igual à campanha solo: entre os cenários todos voltam
+     para a mesa para as **Maldições Mortais** e a **Fase de Melhorias** (escolher 2 de 6 cartas em 3 rodadas, comprar
+     até 3, distribuir no inventário); quem venceu escolhe o próximo cenário; no fim, as Medalhas.
 4. A partida começa com o **posicionamento** na Área Inicial (todos ao mesmo tempo). Quem cair durante a mesa é
    substituído pela IA para ninguém ficar esperando.
 
@@ -246,6 +259,15 @@ movem) e escolha onde cada morto ressuscita (Área Inicial ou Perto de um Aliado
 A campanha fica salva no navegador. Cartas (`src/engine/cards.ts`), Monstros por nível, Maldições e Recompensas vêm dos
 CSVs em `ref/wiki/`. Cartas com efeito especial ainda não implementado aparecem marcadas.
 
+**Limite de dados** (campanha e sala online): no máximo **8 dados de ataque e 6 de defesa** por rolagem, contando
+críticos e rerrolagens — como os dados físicos da caixa.
+
+**Dificuldade dos mapas** (Livro de Campanha), mostrada embaixo do nome:
+
+| Fácil | Médio | Difícil | Muito difícil |
+|---|---|---|---|
+| Arena do Sol Brilhante · Distrito dos Martelos · Distrito do Alquimista | O Portão da Lua · Praça da Aurora Vermelha · O Pátio da Universidade · O Viveiro das Águias | Distrito Sempressombrio · A Mansão · Covil dos Orcs | O Templo do Amanhecer Crepuscular |
+
 ## Mapas (cenários)
 
 Os 11 cenários do Livro de Campanha estão jogáveis (transcritos das páginas do livro):
@@ -255,6 +277,12 @@ Os 11 cenários do Livro de Campanha estão jogáveis (transcritos das páginas 
 | Exterior | Distrito dos Martelos · Arena do Sol Brilhante · O Portão da Lua · O Viveiro das Águias · A Mansão · Covil dos Orcs |
 | Interior | Distrito do Alquimista · Praça da Aurora Vermelha · O Pátio da Universidade · Distrito Sempressombrio |
 | Final | O Templo do Amanhecer Crepuscular |
+
+**Ficha do cenário:** cada mapa tem uma ilustração (3x4) e os textos do Livro de Campanha (Beneficia / Beneficia-se de,
+Título, Missões, Carta de Recompensa, Preparação e Regras Especiais, Vantagens do Título), com a disposição dos tabuleiros
+embaixo. Aparece na Biblioteca (aba Mapas) e, nas telas de escolha (votação, próximo cenário, Modo Teste), abre pela lupa 🔍
+de cada mapa. Ilustrações e textos vêm de `ref/maps/` (fora do git) via `python tools/build_maps.py`,
+que gera `public/maps/<id>.webp` e `src/engine/maps/lore.ts`.
 
 Regras especiais novas: **Rei da Arena** (terminar a ativação nos marcadores de Missão), **escolta** (Águias até o portal azul,
 Resistência até o “!”, Realeza até a própria Área Inicial), **Sombra do Lorde Presas** invocada ao pisar nos marcadores
@@ -293,3 +321,16 @@ A arte dos Monstros é recortada pela área visível do sprite, para todos ocupa
 | Nível 4 | laranja | | | |
 | Nível 5 | vermelho | | | |
 | Recompensa | dourado | | | |
+
+**Efeitos especiais** (todos implementados): Tomo da Iluminação (+2 espaços para Ataques Mágicos), Coração de Anjos,
+Coroa de Sangue, Manto do Assassino, Lança do Feral (diagonal), Grito de Guerra, Rajada de Vento (empurra o alvo),
+Enxame da Morte. Cartas **ativáveis** têm uma faixa na própria carta: **⚡ Usar** (Apocalipse, Bastão da Celeridade,
+Escudo das Almas, Manto do Deslocamento, Das Boot / Die Booten) ou **🛡️ Armar** (Escudo do Rei, Escudo de Cavaleiro —
+armado, vale na próxima Defesa). "Exaustar o Herói" = o Herói não pode ser ativado até a Guilda Descansar (💤 na ficha).
+Testes: `cardfx` (23 casos).
+
+**Arte das cartas de item:** as imagens ficam em `ref/cards/<nome>.jpg` (fundo verde) e viram `public/cards/<id>.webp` com
+`python tools/build_cards.py` (gera também `src/ui/cardArt.ts`). Armas: fundo transparente sobre a cor da carta; Magias:
+a ilustração preenche o quadro. Cartas sem imagem continuam com o ícone do grupo. Os medalhões de Defesa, Vida e
+Rerrolagem ficam na caixa de texto, embaixo (como nas cartas oficiais). Para novas cartas, coloque o arquivo e adicione o
+nome na lista `ITEMS` do script.

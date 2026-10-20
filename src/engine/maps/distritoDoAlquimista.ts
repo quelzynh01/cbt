@@ -14,6 +14,7 @@ export const DISTRITO_DO_ALQUIMISTA: MapDef = {
   id: 'distrito-do-alquimista',
   name: 'Distrito do Alquimista',
   circle: 'Círculo Interior',
+  difficulty: 'facil',
   level: '4-5',
   cols: 9,
   rows: 9,

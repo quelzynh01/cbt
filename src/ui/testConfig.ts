@@ -18,6 +18,8 @@ export interface TestConfig {
 
 const STORE = 'cbt.test';
 export const MAX_SLOTS = 4;
+/** Espaços de um Herói com estas cartas (Tomo da Iluminação: +2). */
+export function slotsFor(cards: string[]): number { return MAX_SLOTS + cards.reduce((s, id) => s + (CARDS[id]?.fx.magicSlots ?? 0), 0); }
 
 export function defaultTestConfig(): TestConfig {
   const heroes = TEST_HUMAN_HEROES.slice();
@@ -41,7 +43,7 @@ export function normalizeTestConfig(c: Partial<TestConfig>): TestConfig {
   let heroes = Array.isArray(c.heroes) ? [...new Set(c.heroes.filter(h => HEROES[h]))].slice(0, 3) : d.heroes;
   for (const h of ALL_HEROES) if (heroes.length < 3 && !heroes.includes(h)) heroes = [...heroes, h];
   const gear = distributeStartingGear(heroes);
-  const cards = Object.fromEntries(heroes.map(h => [h, (c.cards?.[h] ?? gear[h]).filter(id => CARDS[id]).slice(0, MAX_SLOTS)]));
+  const cards = Object.fromEntries(heroes.map(h => [h, (c.cards?.[h] ?? gear[h]).filter(id => CARDS[id]).slice(0, slotsFor((c.cards?.[h] ?? gear[h]).filter(id => CARDS[id])))]));
   return { mapId, teams, heroes, cards };
 }
 

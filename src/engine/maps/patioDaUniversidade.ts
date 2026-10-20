@@ -13,6 +13,7 @@ export const PATIO_DA_UNIVERSIDADE: MapDef = {
   id: 'patio-da-universidade',
   name: 'O Pátio da Universidade',
   circle: 'Círculo Interior',
+  difficulty: 'medio',
   level: '4-5',
   cols: 9,
   rows: 9,

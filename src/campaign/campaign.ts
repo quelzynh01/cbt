@@ -74,6 +74,8 @@ export interface CampaignState {
   seed: number;
   /** Dificuldade das Guildas da IA. */
   aiLevel?: AILevel;
+  /** Dados ilimitados (sem a opção, no máximo 8 dados de ataque e 6 de defesa por rolagem). */
+  unlimitedDice?: boolean;
 }
 
 // ------------------------------------------------------------------ persistência
@@ -98,9 +100,9 @@ function shuffled<T>(c: CampaignState, a: T[]): T[] {
 }
 
 // ------------------------------------------------------------------ criação
-export function newCampaign(opponents: number, name?: string, aiLevel: AILevel = 'normal'): CampaignState {
+export function newCampaign(opponents: number, name?: string, aiLevel: AILevel = 'normal', unlimitedDice = false): CampaignState {
   const ids: GuildId[] = ['azul', 'vermelho', 'verde', 'laranja'];
-  const c: CampaignState = { version: 1, guilds: [], played: [], chooser: 'azul', phase: 'setup', seed: (Date.now() ^ (Math.random() * 1e9)) | 0, elapsed: 0, aiLevel };
+  const c: CampaignState = { version: 1, guilds: [], played: [], chooser: 'azul', phase: 'setup', seed: (Date.now() ^ (Math.random() * 1e9)) | 0, elapsed: 0, aiLevel, unlimitedDice };
   for (let i = 0; i <= opponents; i++) c.guilds.push({ id: ids[i], controller: i === 0 ? 'human' : 'ai', heroes: [], inventory: {}, saved: 0, titles: [], curses: {}, ...(i === 0 && name?.trim() ? { name: name.trim().slice(0, 20) } : {}) });
   useCampaignNames(c);
   // Recrutamento de Heróis (p.7): cada jogador recebe uma mão, escolhe 1 e passa o resto para a esquerda.
@@ -199,6 +201,7 @@ export function gameOptions(c: CampaignState) {
   else order = shuffled(c, order);
   return {
     fixedOrder: true,
+    unlimitedDice: !!c.unlimitedDice,
     level: scenarioLevel(c),
     titles: Object.fromEntries(c.guilds.map(g => [g.id, g.titles.slice()])),
     players: order.map(g => ({ guild: g.id, controller: g.controller, heroes: g.heroes, cards: g.inventory, curses: g.curses, name: g.name })),
@@ -273,7 +276,7 @@ function guildCardValue(c: CampaignState, g: CGuild, id: string): number {
   return cardValue(id) * (hard ? fit : 1 + (fit - 1) * 0.4) * afford + (hard ? 0 : (rnd(c) - 0.5) * 2.5);
 }
 
-function aiDraftPicks(c: CampaignState) {
+export function aiDraftPicks(c: CampaignState) {
   const up = c.upgrade!;
   for (const g of c.guilds) if (g.controller === 'ai') {
     const hand = up.hands[g.id]!;
@@ -317,7 +320,7 @@ export function draftPick(c: CampaignState, ids: string[]) {
   } else aiDraftPicks(c);
 }
 
-function aiBuy(c: CampaignState, g: CGuild) {
+export function aiBuy(c: CampaignState, g: CGuild) {
   const up = c.upgrade!;
   let coins = up.coins[g.id] ?? 0;
   const picked = up.picked[g.id]!.slice();
@@ -460,3 +463,38 @@ export function victoryRank(n: number): { title: string; text: string } {
 export const guildName = (id: GuildId) => { const n = teamName(id); return n.startsWith('Guilda ') || ['Azul', 'Vermelha', 'Verde', 'Laranja'].includes(n) ? `Guilda ${n.replace('Guilda ', '')}` : n; };
 /** Passa a usar os nomes dos times desta campanha. */
 export function useCampaignNames(c: CampaignState) { setGuildNames(Object.fromEntries(c.guilds.map(g => [g.id, g.name]))); }
+
+// ------------------------------------------------------------------ campanha online (vários jogadores humanos)
+
+/** Rodada do draft de cartas: cada Guilda humana escolheu 2 cartas (`picks`); as IAs já escolheram. Passa as mãos. */
+export function draftPickAll(c: CampaignState, picks: Partial<Record<GuildId, string[]>>) {
+  const up = c.upgrade!;
+  for (const g of c.guilds) {
+    if (g.controller !== 'human') continue;
+    const hand = up.hands[g.id]!;
+    for (const id of picks[g.id] ?? []) { const i = hand.indexOf(id); if (i >= 0) { hand.splice(i, 1); up.picked[g.id]!.push(id); } }
+  }
+  const order = c.guilds.map(g => g.id);
+  const prev = Object.fromEntries(order.map(id => [id, up.hands[id]!]));
+  order.forEach((id, i) => { up.hands[order[(i + 1) % order.length]] = prev[id]; });
+  up.round++;
+  if (up.round >= 3) {
+    up.step = 'buy';
+    for (const g of c.guilds) if (g.controller === 'ai') aiBuy(c, g);
+  } else aiDraftPicks(c);
+}
+
+/** Inventário final de uma Guilda humana (valida). */
+export function arrangeGuild(c: CampaignState, g: CGuild, inv: Record<string, string[]>): string[] {
+  const errs = validateInventory(c, g, inv);
+  if (errs.length) return errs;
+  g.inventory = inv;
+  c.upgrade!.bought[g.id] = [];
+  return [];
+}
+
+/** Todas as Guildas terminaram a Fase de Melhorias. */
+export function closeUpgrade(c: CampaignState) {
+  c.upgrade = undefined;
+  c.phase = 'choose';
+}

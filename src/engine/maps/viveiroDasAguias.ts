@@ -12,6 +12,7 @@ export const VIVEIRO_DAS_AGUIAS: MapDef = {
   id: 'viveiro-das-aguias',
   name: 'O Viveiro das Águias',
   circle: 'Círculo Exterior',
+  difficulty: 'medio',
   level: '1',
   cols: 9,
   rows: 6,

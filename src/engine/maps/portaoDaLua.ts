@@ -13,6 +13,7 @@ export const PORTAO_DA_LUA: MapDef = {
   id: 'portao-da-lua',
   name: 'O Portão da Lua',
   circle: 'Círculo Exterior',
+  difficulty: 'medio',
   level: '1',
   cols: 9,
   rows: 9,
