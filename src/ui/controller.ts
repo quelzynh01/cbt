@@ -239,21 +239,35 @@ export class Controller {
   private withDecisions(fn: () => boolean, done: (ok: boolean) => void) {
     const snap = JSON.stringify(this.game.s);
     const decided: number[][] = [];
+    // eventos que já foram animados antes de uma decisão (ex.: o ataque, antes de a Vingança pedir a sua Defesa)
+    let shown = 0;
     const attempt = () => {
       this.decisionQueue = decided.slice();
       try {
         const ok = fn();
         this.deciding = false;
+        if (shown) { const all = this.game.drain(); this.game.requeue(all.slice(shown)); }
         done(ok);
       } catch (e) {
         if (!(e instanceof NeedDecision)) throw e;
+        const evs = this.game.drain();
+        const fresh = evs.slice(shown);
         this.game.s = JSON.parse(snap);
-        this.game.drain();
         this.deciding = true;
         this.clearHighlights();
         this.hud.tooltip(null);
-        this.hud.setHint('Escolha os dados para rerrolar');
-        this.battle.askReroll(e.req).then(idx => { decided.push(idx); attempt(); });
+        const ask = () => {
+          this.hud.setHint('Escolha os dados para rerrolar');
+          this.battle.askReroll(e.req).then(idx => { decided.push(idx); attempt(); });
+        };
+        // o que aconteceu antes desta decisão é mostrado primeiro (na ordem do jogo)
+        if (fresh.some(x => x.t !== 'log')) {
+          shown = evs.length;
+          if (this.mode === 'host') (this.net as HostSession).update(fresh, JSON.parse(snap));
+          this.renderer.enqueue(fresh);
+          const waitIdle = () => { if (this.renderer.busy) requestAnimationFrame(waitIdle); else ask(); };
+          requestAnimationFrame(waitIdle);
+        } else ask();
       }
     };
     attempt();

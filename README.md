@@ -142,7 +142,9 @@ primeiro aparece o resultado; depois os dados escolhidos giram de novo (borda ve
 **Animações:** ao começar, todos olham para o meio do tabuleiro; andando olham para onde vão e atacando viram para o
 alvo. Corpo a corpo = investida até encostar no inimigo; a distância = projétil em arco com rastro. Depois vem a rolagem
 dos dados no centro da tela. Pegar/usar marcador e rolar dados seguram o jogo até a animação acabar.
-Ordem do ataque: primeiro rolam os dados (ataque e defesa) e, com o resultado, vem a investida/o projétil. Todos os
+Ordem do ataque: primeiro rolam os dados (ataque e defesa) e, com o resultado, vem a investida/o projétil. Se o
+Monstro sobreviver e revidar (Vingança), a sua Defesa só é rolada depois da animação do seu ataque — e a janela mostra
+os dados do ataque do Monstro antes. Todos os
 marcadores pegos num Espaço aparecem juntos: os virados para baixo giram ao mesmo tempo e os que já estavam à mostra
 (Missão, itens derrubados) só aparecem.
 

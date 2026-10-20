@@ -23,7 +23,9 @@ export interface PathNode {
 export interface RollResult { faces: DieFace[]; successes: number; crits: number; rerolled?: number; rr?: RerollInfo }
 
 /** Pedido de Rerrolagem para o jogador que controla o Herói. */
-export interface RerollRequest { heroId: string; kind: 'attack' | 'defense'; faces: DieFace[]; success: DieFace; rerolls: number }
+export interface RerollRequest { heroId: string; kind: 'attack' | 'defense'; faces: DieFace[]; success: DieFace; rerolls: number;
+  /** Defesa: quem atacou e os dados do ataque (mostrados antes). */
+  vs?: { id: string; faces: DieFace[]; hits: number; type: string } }
 
 /** Lançado quando o jogador precisa decidir (a jogada é desfeita e repetida com a decisão). */
 export class NeedDecision extends Error {
@@ -65,6 +67,8 @@ export class Game {
   private out: GameEvent[] = [];
   /** Quem decide a Rerrolagem dos Heróis: índices dos dados a rerrolar ou 'auto' (todos os que falharam). */
   rerollHook: ((req: RerollRequest) => number[] | 'auto') | null = null;
+  /** Ataque sendo resolvido (para mostrar os dados do atacante na Rerrolagem da Defesa). */
+  private curAttack: RerollRequest['vs'] | null = null;
 
   constructor(map: MapDef, state: GameState) {
     this.map = map;
@@ -226,6 +230,8 @@ export class Game {
     this.out = [];
     return e;
   }
+  /** Devolve eventos para a fila de saída (usado ao pular eventos já animados). */
+  requeue(evs: GameEvent[]) { this.out = [...evs, ...this.out]; }
   log(text: string) { this.emit({ t: 'log', text }); }
 
   unit(id: string): Unit { return this.s.units[id]; }
@@ -740,6 +746,7 @@ export class Game {
 
     const fx = def.fx;
     const atk = this.heroRoll(h, n, ATTACK_DIE, def.attackType!, this.s.debug.attackDice);
+    this.curAttack = { id: h.id, faces: atk.faces.slice(), hits: atk.successes, type: def.attackType! };
     if (atk.rerolled) notes.push(`↻ ${atk.rerolled} dado${atk.rerolled > 1 ? 's' : ''} rerrolado${atk.rerolled > 1 ? 's' : ''}`);
     if (ab === 'maestria_arco' && def.group === 'Arco' && atk.crits) { atk.successes += atk.crits; notes.push(`Maestria com Arco: +${atk.crits}`); }
     if (fx.critExtra && atk.crits) { atk.successes += atk.crits * fx.critExtra; notes.push(`${def.name}: +${atk.crits * fx.critExtra} acerto(s) por ✷`); }
@@ -1353,7 +1360,7 @@ export class Game {
   rollRerolls(n: number, die: DieFace[], success: DieFace, rerolls: number, who?: Unit, kind: 'attack' | 'defense' = 'attack'): RollResult {
     const r = this.roll(n, die, success, 'normal');
     if (!rerolls || !r.faces.some(f => f !== success && f !== 'crit')) return r;
-    const choice = who?.kind === 'hero' && this.rerollHook ? this.rerollHook({ heroId: who.id, kind, faces: r.faces.slice(), success, rerolls }) : 'auto';
+    const choice = who?.kind === 'hero' && this.rerollHook ? this.rerollHook({ heroId: who.id, kind, faces: r.faces.slice(), success, rerolls, vs: kind === 'defense' ? this.curAttack ?? undefined : undefined }) : 'auto';
     if (choice !== 'auto') {
       // o jogador escolheu os dados (cada dado rerrolado que der ✷ rola mais um)
       const idx = [...new Set(choice)].filter(i => i >= 0 && i < r.faces.length && r.faces[i] !== 'crit').slice(0, rerolls);
@@ -1527,6 +1534,7 @@ export class Game {
     if (ab.includes('packBonus') && this.monstersOnBoard().some(o => o.id !== m.id && this.board.isClose(o.cell!, m.cell!))) { dice++; notes.push('+1 dado (Perto de outro Monstro)'); }
     if (md !== MONSTERS[m.defId]) notes.push('Destruidor da Pedra Sangrenta: Orc mais fraco');
     const atk = this.rollRerolls(dice, ATTACK_DIE, md.attackType, md.rerolls);
+    this.curAttack = { id: m.id, faces: atk.faces.slice(), hits: atk.successes, type: md.attackType };
     if (md.rerolls) notes.push(`Rerrolagem ${md.rerolls}`);
     if (ab.includes('critExtra') && atk.crits) { atk.successes += atk.crits; notes.push(`+${atk.crits} acerto(s) por ✷`); }
     // Troll: atinge todos os Heróis Perto; Lorde Presas: também os Inimigos Perto do alvo

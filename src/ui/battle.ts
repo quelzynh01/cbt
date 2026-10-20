@@ -314,7 +314,7 @@ export class BattlePanel {
   get isAsking() { return !!this.askResolve || !!this.askRoll || (!!this.askEl && !this.askEl.classList.contains('hidden')); }
 
   private askRoll: (() => void) | null = null;
-  async askReroll(req: { heroId: string; kind: 'attack' | 'defense'; faces: DieFace[]; success: DieFace; rerolls: number }): Promise<number[]> {
+  async askReroll(req: { heroId: string; kind: 'attack' | 'defense'; faces: DieFace[]; success: DieFace; rerolls: number; vs?: { id: string; faces: DieFace[]; hits: number; type: string } }): Promise<number[]> {
     const g = this.deps.game();
     const h = g.unit(req.heroId);
     if (!this.askEl) { this.askEl = document.createElement('div'); this.askEl.id = 'rerollbox'; this.el.parentElement!.append(this.askEl); }
@@ -327,6 +327,7 @@ export class BattlePanel {
       const hits = req.faces.filter(ok).length;
       el.innerHTML = `<div class="rr-box">
         <div class="bt-head"><span class="bt-reason">↻ Rerrolagem</span><span class="bt-title">${HEROES[h.defId].name} — ${req.kind === 'attack' ? 'rolagem de Ataque' : 'rolagem de Defesa'}</span></div>
+        ${req.vs ? `<div class="rr-vs"><b>${g.name(g.unit(req.vs.id))}</b> atacou com <b>${req.vs.hits} acerto${req.vs.hits === 1 ? '' : 's'}</b></div>` : ''}
         <p>Você tem <b>${req.rerolls}</b> rerrolage${req.rerolls > 1 ? 'ns' : 'm'}. Clique nos dados que quer rolar de novo (o resultado novo substitui o antigo; ✷ crítico não pode ser rerrolado).</p>
         <div class="rr-dice">${req.faces.map((f, i) => `<button class="bdie ${req.kind === 'attack' ? 'black' : 'white'} ${ok(f) ? 'hit' : ''} ${f === 'crit' ? 'crit' : ''} ${this.askSel.has(i) ? 'pick' : ''}" data-i="${i}" ${f === 'crit' ? 'disabled' : ''}><span>${dieImg(f, req.kind === 'attack')}</span></button>`).join('')}</div>
         <div class="rr-sum">${hits} ${req.kind === 'attack' ? 'acerto' : 'bloqueio'}${hits === 1 ? '' : 's'} agora · selecionados: ${this.askSel.size}/${req.rerolls}</div>
@@ -347,6 +348,7 @@ export class BattlePanel {
     this.askReady = false;
     el.innerHTML = `<div class="rr-box">
       <div class="bt-head"><span class="bt-reason">↻ Rerrolagem</span><span class="bt-title">${HEROES[h.defId].name} — ${black ? 'rolagem de Ataque' : 'rolagem de Defesa'}</span></div>
+      ${req.vs ? `<div class="rr-vs"><b>${g.name(g.unit(req.vs.id))}</b> atacou: <span class="rr-vsd">${req.vs.faces.map(f => `<span class="bdie black ${f === 'crit' || f === req.vs!.type ? 'hit' : ''}"><span>${dieImg(f, true)}</span></span>`).join('')}</span> <b>${req.vs.hits} acerto${req.vs.hits === 1 ? '' : 's'}</b></div>` : ''}
       <p class="rr-msg">Clique para rolar os seus ${req.faces.length} dado${req.faces.length > 1 ? 's' : ''} de ${black ? 'Ataque' : 'Defesa'}.</p>
       <div class="rr-dice">${req.faces.map((_, i) => `<span class="bdie ${black ? 'black' : 'white'}" data-r="${i}"><span>${dieImg('blank', black)}</span></span>`).join('')}</div>
       <div class="bt-btns"><button class="primary" id="rr-roll">🎲 Rolar ${black ? 'ataque' : 'defesa'}</button></div></div>`;
