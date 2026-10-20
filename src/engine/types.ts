@@ -136,6 +136,9 @@ export interface GuildState {
   barrierOpen?: boolean;
 }
 
+/** Rerrolagem numa rolagem: faces antes, índices rolados de novo e se o jogador escolheu (diálogo). */
+export interface RerollInfo { before: DieFace[]; idx: number[]; asked: boolean }
+
 export interface EntryMarker { cell: Cell; pair: [DieFace, DieFace] }
 
 export type DiceMode = 'normal' | 'max' | 'zero';
@@ -202,14 +205,21 @@ export type GameEvent =
       dice: DieFace[];
       hits: number;
       crits: number;
-      targets: { id: string; defense: DieFace[]; blocks: number; wounds: number; stunnedNoDefense: boolean }[];
+      targets: { id: string; defense: DieFace[]; blocks: number; wounds: number; stunnedNoDefense: boolean; rr?: RerollInfo }[];
       notes: string[];
+      /** Rerrolagem do ataque: faces antes e quais dados foram rolados de novo. */
+      rr?: RerollInfo;
     }
   | { t: 'damage'; id: string; amount: number; wounds: number; maxHp: number }
   | { t: 'heal'; id: string; amount: number; wounds: number }
   | { t: 'death'; id: string; exterminated?: boolean }
   | { t: 'stun'; id: string; on: boolean }
-  | { t: 'pickup'; heroId: string; token: Token }
+  /** hidden: o marcador estava virado para baixo (é revelado ao pegar). */
+  | { t: 'pickup'; heroId: string; token: Token; hidden?: boolean }
+  /** Herói usou um marcador (poção). */
+  | { t: 'useToken'; heroId: string; token: Token }
+  /** Habilidade Natural ativada (Furtividade do Vapor, Vingança do Espetado…). */
+  | { t: 'skill'; id: string; skill: string; name: string }
   | { t: 'drop'; cell: Cell; tokens: Token[] }
   | { t: 'spawn'; id: string; cell: Cell }
   | { t: 'cemetery'; id: string; count: number; full: boolean }

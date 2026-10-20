@@ -1,11 +1,13 @@
 import { CARDS, GUILDS, GUILD_NAMES, HEROES, MONSTERS, TOKEN_INFO, setGuildNames, teamName } from '../engine/data';
 import type { Game } from '../engine/game';
-import type { CardInst, DieFace, GameEvent, GuildId, Token, Unit } from '../engine/types';
+import type { CardInst, DieFace, GameEvent, GuildId, RerollInfo, Token, Unit } from '../engine/types';
 import { tokenImageId, tokenUrl } from '../render/tokens';
 import { dieImg } from '../render/dice';
+import { play } from '../audio/sfx';
+import { soundWidget } from '../audio/widget';
 import { drawFace, getArtVersion } from '../render/chibi';
 import { CURSES } from '../engine/cards';
-import { ITEM_LEVEL, bonusImg, curseCard, heroCard, itemCard, itemColor, monsterCard, paintCardArt } from './cardview';
+import { ITEM_LEVEL, bonusImg, curseCard, medal, heroCard, itemCard, itemColor, monsterCard, paintCardArt } from './cardview';
 import { getSettings, onSettings, saveSettings } from './settings';
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string, root: ParentNode = document) => root.querySelector(sel) as T;
@@ -82,6 +84,7 @@ export class Hud {
       <div id="timeline"></div>
       <div id="cardview" class="hidden"></div>
       <div id="tokenflip" class="hidden"></div>
+      <div id="bagview" class="hidden"></div>
       <div id="dicecenter" class="hidden"></div>
       <div id="dice" class="hidden"></div>
       <div id="banner" class="hidden"></div>
@@ -93,8 +96,12 @@ export class Hud {
     $('#missiontoggle', root).onclick = () => saveFlag('cbt.missionsMin', $('#missions', root).classList.toggle('collapsed'));
     $('#scoretoggle', root).onclick = () => saveFlag('cbt.scoreOpen', !$('#scorebox', root).classList.toggle('collapsed'));
     $('#cardview', root).onclick = e => { if (e.target === e.currentTarget || (e.target as HTMLElement).closest('.cv-x')) this.closeCard(); };
-    window.addEventListener('keydown', e => { if (e.code === 'Escape' && this.cardOpen) { e.stopImmediatePropagation(); this.closeCard(); } }, true);
+    window.addEventListener('keydown', e => {
+      if (e.code === 'Escape' && this.cardOpen) { e.stopImmediatePropagation(); this.closeCard(); }
+      else if (e.code === 'Escape' && this.bagOpen) { e.stopImmediatePropagation(); this.closeBag(); }
+    }, true);
     $('#menubtn', root).onclick = () => this.actions?.menu();
+    $('#menubtn', root).before(soundWidget());
     $('#viewbtn', root).onclick = () => toggleView();
     const viewLabel = () => { $('#viewbtn', root).textContent = getSettings().view === 'players' ? '🎥 Jogadores' : '👁 Livre'; };
     viewLabel();
@@ -166,7 +173,7 @@ export class Hud {
       const who = this.nameOf(id) ?? (gs.controller === 'ai' ? 'IA' : this.isMine(id) ? 'Você' : 'Jogador');
       return `<div class="sc-guild ${id === cur.id && !g.s.winner ? 'cur' : ''} ${g.s.winner === id ? 'win' : ''}" style="--gc:${gs.color}">
         <div class="sc-row"><span class="dot" style="background:${gs.color}"></span><b class="sc-name">${guildShort(id)}</b><small>${who}</small>
-          <span title="Moedas">🪙 ${gs.coins}</span><span title="Monstros mortos">💀 ${gs.monsterKills}</span><span title="Missões cumpridas">🏆 ${gs.missions.length}/${g.s.missionsToWin}</span></div>
+          <span title="Moedas: ${gs.coins} + ${g.wealth(id) - gs.coins} dos Baús de Tesouro">🪙 ${g.wealth(id)}</span><span title="Monstros mortos">💀 ${gs.monsterKills}</span><span title="Missões cumpridas">🏆 ${gs.missions.length}/${g.s.missionsToWin}</span></div>
         <div class="sc-detail">
           <span title="Mortes de Heróis da Guilda">☠ ${deaths} mortes</span>
           <span title="Heróis vivos">❤ ${alive}/${heroes.length} vivos</span><span title="Marcadores de Exploração">🎒 ${tokens}</span>
@@ -224,38 +231,94 @@ export class Hud {
     return out.length ? `<div class="cv-mods">${out.join('')}</div>` : '<div class="cv-mods muted">Sem bônus nem penalidades agora.</div>';
   }
 
+  // ------------------------------------------------------------------
+  /** Bolsa do Herói: consumíveis (poções) em cima, com "Usar" quando dá para usar agora; depois Baús e Missões. */
+  private bagOpen: string | null = null;
+  showBag(id: string) {
+    const g = this.game;
+    const u = g.unit(id);
+    const act = g.s.activation;
+    const canUse = act?.heroId === u.id && this.isMine(u.guild!) && !g.s.winner;
+    const box = $('#bagview', this.root);
+    this.bagOpen = id;
+    const items = sortTokens(u.tokens);
+    const row = (t: Token) => {
+      const cons = CONSUMABLE.includes(t.type);
+      const why = !cons ? '' : !canUse ? 'Ative este Herói no seu turno para usar' : u.curse === 'aquafobia' ? 'Aquafobia: não pode usar Poções' : t.type === 'turno' && g.s.extraTurn ? 'Já há um turno adicional' : '';
+      return `<div class="bag-it ${cons ? 'cons' : ''}"><img src="${tokenUrl(tokenImageId(t) ?? 'fundo')}"/>
+        <div><b>${tokenName(t)}</b><small>${t.type === 'missao' ? 'Marcador de Missão' : TOKEN_INFO[t.type].text}</small></div>
+        ${cons ? `<button class="primary" data-use="${t.id}" ${why ? `disabled title="${why}"` : ''}>Usar</button>` : ''}</div>`;
+    };
+    box.innerHTML = `<div class="bag-box"><button class="cv-x" title="Fechar (Esc)">✕</button>
+      <h3>🎒 Bolsa de ${g.name(u)}</h3>
+      ${items.length ? items.map(row).join('') : '<p class="muted">Sem marcadores. Ande sobre os "?" do mapa para pegar.</p>'}
+      ${items.length && !canUse ? '<p class="muted">Poções só podem ser usadas pelo Herói ativo, no seu turno.</p>' : ''}</div>`;
+    box.classList.remove('hidden');
+    (box.querySelector('.cv-x') as HTMLElement).onclick = () => this.closeBag();
+    box.onclick = e => { if (e.target === box) this.closeBag(); };
+    box.querySelectorAll<HTMLElement>('[data-use]').forEach(b => { b.onclick = () => { this.closeBag(); this.actions.useToken(b.dataset.use!); }; });
+  }
+  closeBag() { this.bagOpen = null; $('#bagview', this.root).classList.add('hidden'); }
+  get bagIsOpen() { return !!this.bagOpen; }
+
   closeCard() { this.cardOpen = null; $('#cardview', this.root).classList.add('hidden'); }
 
   // ------------------------------------------------------------------
   /** Marcador pego: aparece no centro da tela com o verso (?) virando para a face. Vários seguidos entram na fila. */
-  private flipQueue: { heroId: string; token: Token }[] = [];
+  private flipQueue: { heroId: string; tokens: { token: Token; hidden: boolean }[]; used?: boolean; done?: () => void }[] = [];
   private flipBusy = false;
-  flipToken(heroId: string, token: Token) {
-    this.flipQueue.push({ heroId, token: { ...token } });
+  private flipDone: (() => void) | undefined;
+  /** Marcadores pegos de uma vez (mesmo Espaço). Os virados para baixo giram juntos; os que já estavam à mostra só aparecem.
+   *  `done` é chamado quando a animação acaba (o jogo espera). */
+  flipTokens(heroId: string, tokens: { token: Token; hidden: boolean }[], done?: () => void) {
+    this.flipQueue.push({ heroId, tokens: tokens.map(x => ({ token: { ...x.token }, hidden: x.hidden })), done });
+    if (!this.flipBusy) this.nextFlip();
+  }
+  /** Marcador usado (poção): aparece no centro com o efeito. */
+  showUsed(heroId: string, token: Token, done?: () => void) {
+    this.flipQueue.push({ heroId, tokens: [{ token: { ...token }, hidden: false }], used: true, done });
     if (!this.flipBusy) this.nextFlip();
   }
   private nextFlip() {
     const box = $('#tokenflip', this.root);
+    this.flipDone?.();
+    this.flipDone = undefined;
     const it = this.flipQueue.shift();
     if (!it) { this.flipBusy = false; box.classList.add('hidden'); return; }
     this.flipBusy = true;
+    this.flipDone = it.done;
     const g = this.game;
     const u = g.s.units[it.heroId];
-    const t = it.token;
-    const face = tokenImageId(t);
-    const info = TOKEN_INFO[t.type];
-    const name = t.type === 'bau' ? `${info.name} (${t.value ?? 1})` : t.type === 'missao' ? `Marcador de Missão ${t.color ?? ''}` : info.name;
     const color = u?.guild ? g.guild(u.guild).color : '#e6c8ff';
-    box.innerHTML = `<div class="tf-card ${t.type === 'armadilha' ? 'bad' : ''}">
-        <div class="tf-coin"><div class="tf-spin" style="--sp:${(1.4 / Math.max(1, this.speed)).toFixed(2)}s"><img class="tf-back" src="${tokenUrl('fundo')}"/><img class="tf-back2" src="${tokenUrl('fundo')}"/>${face ? `<img class="tf-face" src="${tokenUrl(face)}"/>` : `<div class="tf-face tf-txt">${name}</div>`}</div></div>
-        <div class="tf-name">${name}</div>
-        <div class="tf-who" style="color:${color}">${u ? g.name(u) : ''} pegou!</div>
-        <div class="tf-text">${t.type === 'missao' ? 'Marcador de Missão' : info.text}</div>
+    const sp = Math.max(1, this.speed);
+    const anyHidden = it.tokens.some(x => x.hidden);
+    const traps = it.tokens.some(x => x.token.type === 'armadilha');
+    if (it.used) play(it.tokens[0].token.type === 'cura' ? 'healing' : 'refresh');
+    else {
+      play('pick-item');
+      // som e borda da Armadilha só depois do giro (sem spoiler)
+      if (traps) setTimeout(() => { play('trap'); box.querySelector('.tf-card')?.classList.add('bad'); }, (anyHidden ? 1400 : 0) / sp);
+    }
+    const coin = (x: { token: Token; hidden: boolean }) => {
+      const t = x.token;
+      const face = tokenImageId(t);
+      const faceHtml = face ? `<img class="tf-face" src="${tokenUrl(face)}"/>` : `<div class="tf-face tf-txt">${tokenName(t)}</div>`;
+      return x.hidden
+        ? `<div class="tf-coin"><div class="tf-spin" style="--sp:${(1.4 / sp).toFixed(2)}s"><img class="tf-back" src="${tokenUrl('fundo')}"/><img class="tf-back2" src="${tokenUrl('fundo')}"/>${faceHtml}</div></div>`
+        : `<div class="tf-coin tf-static">${face ? `<img src="${tokenUrl(face)}"/>` : `<div class="tf-txt">${tokenName(t)}</div>`}</div>`;
+    };
+    const many = it.tokens.length > 1;
+    const one = it.tokens[0].token;
+    box.innerHTML = `<div class="tf-card ${it.used || !anyHidden ? 'used' : ''} ${many ? 'many' : ''}">
+        <div class="tf-coins">${it.tokens.map(coin).join('')}</div>
+        <div class="tf-name">${it.tokens.map(x => tokenName(x.token)).join(' · ')}</div>
+        <div class="tf-who" style="color:${color}">${u ? g.name(u) : ''} ${it.used ? 'usou!' : 'pegou!'}</div>
+        ${many ? '' : `<div class="tf-text">${one.type === 'missao' ? 'Marcador de Missão' : TOKEN_INFO[one.type].text}</div>`}
       </div>`;
     box.classList.remove('hidden');
     const card = box.firstElementChild as HTMLElement;
     requestAnimationFrame(() => requestAnimationFrame(() => card.classList.add('flip')));
-    const ms = 2600 / Math.max(1, this.speed);
+    const ms = (anyHidden && !it.used ? 2600 : 1600) / sp;
     setTimeout(() => { card.classList.add('out'); setTimeout(() => this.nextFlip(), 300); }, ms);
   }
 
@@ -288,6 +351,7 @@ export class Hud {
   }
 
   spawnRoll(e: Extract<GameEvent, { t: 'spawnRoll' }>, done: () => void) {
+    if (e.faces.length) play('dice', 0.6);
     const row = this.root.querySelector(`[data-sp="${e.id}"]`) as HTMLElement | null;
     const finish = () => {
       this.cem = this.cem.filter(x => x !== e.id);
@@ -411,16 +475,17 @@ export class Hud {
       ${u.stunned ? '<div class="tag stun">✷ Atordoado — não rola Defesa até Descansar</div>' : ''}
       ${!u.alive ? '<div class="tag dead">☠ Morto — ressuscita quando a Guilda Descansar</div>' : ''}
       <div class="cards">${cards.map(c => this.cardHtml(c, u, usableIds)).join('')}</div>
-      <div class="tokens">${u.tokens.length ? u.tokens.map(t => `
-        <div class="token" title="${TOKEN_INFO[t.type].text}">${tokenImageId(t) ? `<img class="tok-ico" src="${tokenUrl(tokenImageId(t)!)}"/>` : ''}<span>${TOKEN_INFO[t.type].name}${t.type === 'bau' ? ` (${t.value})` : ''}</span>
-        ${isActive && mine && t.type !== 'bau' ? `<button data-token="${t.id}">Usar</button>` : ''}</div>`).join('') : '<span class="muted">Sem marcadores de Exploração</span>'}</div>
+      <div class="tokrow">${u.tokens.length ? `${sortTokens(u.tokens).slice(0, 3).map(t => `<img class="tok-mini" src="${tokenUrl(tokenImageId(t) ?? 'fundo')}" title="${tokenName(t)}"/>`).join('')}${u.tokens.length > 3 ? `<span class="tok-more">+${u.tokens.length - 3}</span>` : ''}` : '<span class="muted">Bolsa vazia</span>'}
+        <button class="tok-bag" id="hb-bag2" title="Abrir a bolsa">🎒</button></div>
       ${actions}`;
     if (this.inspected) $('#hb-close', box).onclick = () => this.actions.inspect(null);
     $('#hb-card', box).onclick = () => this.showCard(u.id);
     box.querySelectorAll<HTMLElement>('[data-card]').forEach(el => {
       el.onclick = () => { if (mine && isActive && usableIds.has(el.dataset.card!)) this.actions.selectCard(el.dataset.card!); };
     });
-    box.querySelectorAll<HTMLElement>('[data-token]').forEach(el => { el.onclick = () => this.actions.useToken(el.dataset.token!); });
+    const openBag = () => this.showBag(u.id);
+    $('#hb-bag2', box).onclick = openBag;
+    if (this.bagOpen === u.id) this.showBag(u.id);
     this.bindActions(box);
   }
 
@@ -432,9 +497,7 @@ export class Hud {
     const bonus = d.kind === 'attack' ? this.game.attackBonus(u).n : 0;
     return `<div class="card k-${d.kind} ${c.exhausted ? 'exhausted' : ''} ${sel ? 'selected' : ''} ${usable.has(c.uid) ? 'usable' : ''}" data-card="${c.uid}" style="--lv:${itemColor(c.defId)}" title="${ITEM_LEVEL[d.level]?.name ?? ''}">
       <div class="cname">${d.name}</div>
-      ${d.kind === 'attack' ? `<div class="cdice">${d.attackType === 'melee' ? '⚔' : '➶'} <b class="${bonus > 0 ? 'up' : ''}" title="${bonus ? `${d.dice} da carta + ${bonus} de bônus` : ''}">${d.dice + bonus}</b><small>${d.attackType === 'melee' ? 'Próximo' : 'Distância'}</small></div>`
-        : `<div class="cdice"><small>${d.kind === 'boost' ? '✚ Ampliação' : '◆ Permanente'}</small></div>`}
-      <div class="cgroup">${d.group}${d.defBonus || d.hpBonus || d.rerolls ? `<span class="cbonus">${d.defBonus ? bonusImg('def', d.defBonus) : ''}${d.hpBonus ? bonusImg('hp', d.hpBonus) : ''}${d.rerolls ? bonusImg('rr', d.rerolls) : ''}</span>` : ''}</div>
+      ${`<div class="cicons">${d.kind === 'attack' ? medal(d.attackType === 'melee' ? 'melee' : 'ranged', d.dice + bonus, `${d.dice + bonus} dados de ataque ${d.attackType === 'melee' ? 'Próximo' : 'a Distância'}${bonus ? ` (carta ${d.dice} + ${bonus} de bônus)` : ''}`, `catk${bonus > 0 ? ' up' : ''}`) : ''}${d.defBonus ? bonusImg('def', d.defBonus) : ''}${d.hpBonus ? bonusImg('hp', d.hpBonus) : ''}${d.rerolls ? bonusImg('rr', d.rerolls) : ''}</div>`}
       ${d.text ? `<div class="ctext">${d.text}</div>` : ''}
       ${maya && !c.exhausted && c.uses > 0 ? '<div class="cuses">1 uso restante</div>' : ''}
       ${c.exhausted ? '<div class="cexh">EXAUSTADA</div>' : ''}
@@ -480,7 +543,7 @@ export class Hud {
     const g = this.game;
     switch (e.t) {
       case 'log': this.log(e.text); break;
-      case 'attack': if (!battleShown) this.centerDice(e); break;
+      case 'attack': break; // rolagem: centerDice (chamado pelo controlador, que espera acabar)
       case 'cemetery': {
         if (!this.cem.includes(e.id)) this.cem.push(e.id);
         this.renderCemetery();
@@ -503,8 +566,9 @@ export class Hud {
       case 'card': this.toast(`🃏 Nova carta: ${e.cardName}`, '#e0b43a'); break;
       case 'pickup':
         this.log(`${g.name(g.unit(e.heroId))} pegou: ${TOKEN_INFO[e.token.type].name}`);
-        this.flipToken(e.heroId, e.token);
         break;
+      case 'useToken': this.log(`${g.name(g.unit(e.heroId))} usou: ${TOKEN_INFO[e.token.type].name}`); break;
+      case 'skill': play(e.skill === 'furtivo' ? 'skill-wisp' : 'skill-spike'); this.toast(`✨ ${g.name(g.unit(e.id))}: ${e.name}!`, '#9fe8ff'); break;
       case 'door': this.log(`${g.name(g.unit(e.by))} ${e.open ? 'abriu' : 'fechou'} uma porta.`); break;
       case 'spawn': this.log(`${MONSTERS[g.unit(e.id).defId].name} entrou no tabuleiro.`); break;
       case 'reaction': this.log(`${MONSTERS[g.unit(e.monsterId).defId].name}: Reação de ${e.kind === 'alerta' ? 'Alerta' : 'Vingança'}!`); break;
@@ -544,65 +608,111 @@ export class Hud {
 
   /** Rolagem no centro da tela: os dados giram, param um a um e aparece o resultado final. */
   private centerTimers: number[] = [];
-  private centerDice(e: Extract<GameEvent, { t: 'attack' }>) {
+  /** Rolagem no centro da tela. Os seus dados só rolam quando você clica em "Rolar";
+   *  com Rerrolagem, aparece o resultado original e depois os dados escolhidos giram de novo. */
+  centerDice(e: Extract<GameEvent, { t: 'attack' }>, done?: () => void) {
     const g = this.game;
     const box = $('#dicecenter', this.root);
     for (const t of this.centerTimers) clearTimeout(t);
     this.centerTimers = [];
+    const token = ++this.centerRun;
     const sp = Math.max(1, this.speed);
-    const at = (ms: number, fn: () => void) => this.centerTimers.push(window.setTimeout(fn, ms / sp));
+    const wait = (ms: number) => new Promise<void>(r => this.centerTimers.push(window.setTimeout(r, ms / sp)));
     const atk = g.unit(e.attackerId);
     const reason = { heroi: 'Ataque', alerta: 'Reação de Alerta', vinganca: 'Reação de Vingança', armadilha: 'Armadilha' }[e.reason];
     const ok = (f: DieFace, s: string) => f === 'crit' || f === s;
-    const row = (faces: DieFace[], black: boolean, cls: string) => faces.map((f, i) => `<span class="cd-die ${cls} rolling" data-f="${f}" data-i="${i}">${dieImg(black ? 'blank' : 'blank', black)}</span>`).join('');
+    const mineHero = (u: Unit) => u.kind === 'hero' && !!u.guild && this.isMine(u.guild);
     const totalW = e.targets.reduce((s, t) => s + t.wounds, 0);
     box.innerHTML = `<div class="cd-box">
       <div class="cd-title">${reason} · <b>${g.name(atk)}</b> <small>${e.cardName}</small></div>
-      <div class="cd-row atk">${row(e.dice, true, 'black') || '<span class="muted">sem dados</span>'}</div>
+      <div class="cd-row atk"></div><div class="cd-btn atk"></div>
       <div class="cd-sum atk"></div>
       ${e.targets.map((t, ti) => `<div class="cd-def" data-t="${ti}"><div class="cd-who">${g.name(g.unit(t.id))}</div>
-        <div class="cd-row def">${t.stunnedNoDefense ? '<span class="muted">Atordoado: sem Defesa</span>' : row(t.defense, false, 'white') || '<span class="muted">sem dados de Defesa</span>'}</div><div class="cd-sum def"></div></div>`).join('')}
+        <div class="cd-row def"></div><div class="cd-btn def"></div><div class="cd-sum def"></div></div>`).join('')}
       <div class="cd-final"></div></div>`;
     box.classList.remove('hidden');
-    const spin = (sel: string, black: boolean, pool: DieFace[]) => {
-      const iv = window.setInterval(() => box.querySelectorAll<HTMLElement>(`${sel} .cd-die.rolling`).forEach(d => { d.innerHTML = dieImg(pool[Math.floor(Math.random() * pool.length)], black); }), 70);
-      this.centerTimers.push(iv);
-      return iv;
-    };
-    const settle = (sel: string, black: boolean, success: string, start: number, step: number) => {
-      box.querySelectorAll<HTMLElement>(`${sel} .cd-die`).forEach((d, i) => at(start + i * step, () => {
-        const f = d.dataset.f as DieFace;
-        d.classList.remove('rolling');
-        d.innerHTML = dieImg(f, black);
-        if (ok(f, success)) d.classList.add('hit');
-        if (f === 'crit') d.classList.add('crit');
-      }));
-    };
-    const a1 = spin('.cd-row.atk', true, ['crit', 'melee', 'ranged', 'blank']);
-    settle('.cd-row.atk', true, e.attackType, 500, 110);
-    const atkDone = 500 + e.dice.length * 110;
-    at(atkDone, () => { clearInterval(a1); const s = box.querySelector('.cd-sum.atk')!; s.innerHTML = `<b>${e.hits}</b> acerto${e.hits === 1 ? '' : 's'}${e.crits ? ` <span class="crit">(${e.crits}✷)</span>` : ''}`; });
-    let tEnd = atkDone + 150;
-    e.targets.forEach((t, ti) => {
-      const sel = `.cd-def[data-t="${ti}"]`;
-      const start = tEnd;
-      at(start, () => box.querySelector(sel)?.classList.add('show'));
-      const iv = spin(sel, false, ['crit', 'shield', 'blank', 'blank']);
-      settle(sel, false, 'shield', start + 450, 110);
-      const done = start + 450 + t.defense.length * 110;
-      at(done, () => { clearInterval(iv); box.querySelector(`${sel} .cd-sum`)!.innerHTML = t.stunnedNoDefense ? '' : `<b>${t.blocks}</b> bloqueio${t.blocks === 1 ? '' : 's'}`; });
-      tEnd = done + 150;
+    const alive = () => token === this.centerRun;
+
+    /** Botão "Rolar" (só para os dados de quem joga neste computador). */
+    const askClick = (holder: Element, label: string) => new Promise<void>(res => {
+      holder.innerHTML = `<button class="primary cd-roll">🎲 ${label}</button>`;
+      box.classList.add('interactive');
+      const b = holder.querySelector('button') as HTMLButtonElement;
+      const go = () => { holder.innerHTML = ''; box.classList.remove('interactive'); window.removeEventListener('keydown', key, true); res(); };
+      const key = (ev: KeyboardEvent) => { if (ev.code === 'Enter' || ev.code === 'Space') { ev.preventDefault(); ev.stopImmediatePropagation(); go(); } };
+      window.addEventListener('keydown', key, true);
+      b.onclick = go;
+      b.focus();
     });
-    at(tEnd + 100, () => {
+
+    /** Rola uma fileira: gira, para um a um; se houver Rerrolagem, gira de novo os escolhidos. */
+    const rollRow = async (row: Element, final: DieFace[], black: boolean, success: string, rr?: RerollInfo) => {
+      const pool: DieFace[] = black ? ['crit', 'melee', 'ranged', 'blank'] : ['crit', 'shield', 'blank', 'blank'];
+      const first = rr ? rr.before : final;
+      const instant = !!rr?.asked; // já rolado no diálogo de Rerrolagem
+      const mk = () => { const d = document.createElement('span'); d.className = `cd-die ${black ? 'black' : 'white'} rolling`; d.innerHTML = dieImg('blank', black); row.append(d); return d; };
+      const dice = first.map(() => mk());
+      const spin = window.setInterval(() => row.querySelectorAll<HTMLElement>('.cd-die.rolling').forEach(d => { d.innerHTML = dieImg(pool[Math.floor(Math.random() * pool.length)], black); }), 70);
+      this.centerTimers.push(spin);
+      const settle = (d: HTMLElement, f: DieFace) => { d.classList.remove('rolling', 'rerolling'); d.innerHTML = dieImg(f, black); d.classList.toggle('hit', ok(f, success)); d.classList.toggle('crit', f === 'crit'); };
+      if (!instant) { play('dice'); await wait(500); }
+      for (let i = 0; i < first.length; i++) { settle(dice[i], first[i]); if (!instant) await wait(110); }
+      if (rr && rr.idx.length) {
+        await wait(500);
+        row.parentElement?.querySelector('.cd-sum')?.classList.add('rr');
+        for (const i of rr.idx) { const d = dice[i]; if (d) { d.classList.remove('hit', 'crit'); d.classList.add('rolling', 'rerolling'); } }
+        play('dice');
+        await wait(650);
+        for (const i of rr.idx) { if (dice[i]) settle(dice[i], final[i]); await wait(160); }
+        for (let i = rr.before.length; i < final.length; i++) { const d = mk(); await wait(350); settle(d, final[i]); }
+      }
+      clearInterval(spin);
+    };
+
+    (async () => {
+      // ataque
+      const atkRow = box.querySelector('.cd-row.atk')!;
+      if (!e.dice.length) atkRow.innerHTML = '<span class="muted">sem dados</span>';
+      else {
+        if (mineHero(atk) && !e.rr?.asked) await askClick(box.querySelector('.cd-btn.atk')!, 'Rolar ataque');
+        if (!alive()) return;
+        await rollRow(atkRow, e.dice, true, e.attackType, e.rr);
+      }
+      if (!alive()) return;
+      box.querySelector('.cd-sum.atk')!.innerHTML = `<b>${e.hits}</b> acerto${e.hits === 1 ? '' : 's'}${e.crits ? ` <span class="crit">(${e.crits}✷)</span>` : ''}${e.rr?.idx.length ? ' <span class="rrtag">↻ rerrolado</span>' : ''}`;
+      await wait(150);
+      // defesas
+      for (let ti = 0; ti < e.targets.length; ti++) {
+        const t = e.targets[ti];
+        const wrap = box.querySelector(`.cd-def[data-t="${ti}"]`)!;
+        wrap.classList.add('show');
+        const row = wrap.querySelector('.cd-row')!;
+        if (t.stunnedNoDefense) row.innerHTML = '<span class="muted">Atordoado: sem Defesa</span>';
+        else if (!t.defense.length) row.innerHTML = '<span class="muted">sem dados de Defesa</span>';
+        else if (e.hits === 0) row.innerHTML = '<span class="muted">nenhum acerto para bloquear</span>';
+        else {
+          if (mineHero(g.unit(t.id)) && !t.rr?.asked) await askClick(wrap.querySelector('.cd-btn')!, 'Rolar defesa');
+          if (!alive()) return;
+          await rollRow(row, t.defense, false, 'shield', t.rr);
+          wrap.querySelector('.cd-sum')!.innerHTML = `<b>${t.blocks}</b> bloqueio${t.blocks === 1 ? '' : 's'}${t.rr?.idx.length ? ' <span class="rrtag">↻ rerrolado</span>' : ''}`;
+        }
+        if (!alive()) return;
+        await wait(150);
+      }
       const f = box.querySelector('.cd-final')!;
       f.className = `cd-final show ${totalW ? 'bad' : 'good'}`;
       f.innerHTML = e.targets.length > 1
         ? e.targets.map(t => `${g.name(g.unit(t.id))}: ${t.wounds ? `−${t.wounds}` : 'bloqueou'}`).join(' · ')
         : totalW ? `−${totalW} Ferimento${totalW > 1 ? 's' : ''}!` : 'Bloqueado!';
-    });
-    at(tEnd + 1500, () => box.classList.add('fade'));
-    at(tEnd + 1900, () => { box.classList.add('hidden'); box.classList.remove('fade'); });
+      await wait(1500);
+      if (!alive()) return;
+      box.classList.add('fade');
+      await wait(400);
+      box.classList.add('hidden'); box.classList.remove('fade');
+      done?.();
+    })();
   }
+  private centerRun = 0;
 
   private showDice(e: Extract<GameEvent, { t: 'attack' }>) {
     const g = this.game;
@@ -647,3 +757,13 @@ export function toggleView() { const st = getSettings(); saveSettings({ ...st, v
 
 /** Classe do valor no painel: verde se melhorado, vermelho se piorado em relação à carta. */
 function stat(now: number, base: number) { return now > base ? 'up' : now < base ? 'down' : ''; }
+
+const CONSUMABLE = ['cura', 'revigorante', 'turno'];
+/** Consumíveis (poções) primeiro, depois Baús e Missões. */
+function sortTokens(ts: Token[]): Token[] {
+  const rank = (t: Token) => (CONSUMABLE.includes(t.type) ? 0 : t.type === 'bau' ? 1 : 2);
+  return ts.slice().sort((a, b) => rank(a) - rank(b));
+}
+function tokenName(t: Token): string {
+  return t.type === 'bau' ? `Baú de Tesouro (${t.value ?? 1})` : t.type === 'missao' ? `Marcador de Missão ${t.color ?? ''}` : TOKEN_INFO[t.type].name;
+}

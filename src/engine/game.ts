@@ -6,7 +6,7 @@ import { nextRandom, randInt, shuffle } from './rng';
 import { CURSES, type CardFx } from './cards';
 import { TITLES } from './titles';
 import type {
-  MonsterDef,
+  MonsterDef, RerollInfo,
   Activation, AttackType, CardDef, CardInst, Cell, DiceMode, DieFace, GameEvent, GameState, GuildId, GuildState, MissionDef, Token, Unit,
 } from './types';
 
@@ -20,7 +20,7 @@ export interface PathNode {
   canEnd: boolean;
 }
 
-export interface RollResult { faces: DieFace[]; successes: number; crits: number; rerolled?: number }
+export interface RollResult { faces: DieFace[]; successes: number; crits: number; rerolled?: number; rr?: RerollInfo }
 
 /** Pedido de Rerrolagem para o jogador que controla o Herói. */
 export interface RerollRequest { heroId: string; kind: 'attack' | 'defense'; faces: DieFace[]; success: DieFace; rerolls: number }
@@ -627,7 +627,9 @@ export class Game {
       if (!st.portal) {
         // Reação de Alerta: sair de um Espaço Perto de um Monstro (p.19)
         // Vapor (Passos Silenciosos) não aciona Alerta ao se mover
-        const alerters = this.ab(h) === 'furtivo' ? [] : this.monstersCloseTo(from);
+        const near = this.monstersCloseTo(from);
+        const alerters = this.ab(h) === 'furtivo' ? [] : near;
+        if (this.ab(h) === 'furtivo' && near.length) this.emit({ t: 'skill', id: h.id, skill: 'furtivo', name: 'Furtividade' });
         for (const m of alerters) {
           if (!h.alive) break;
           this.emit({ t: 'reaction', monsterId: m.id, kind: 'alerta' });
@@ -771,8 +773,8 @@ export class Game {
     if (fx.onlyCritSaves) notes.push('Só ✷ na Defesa bloqueia');
     this.emit({
       t: 'attack', attackerId: h.id, reason: 'heroi', cardName: def.name, attackType: def.attackType!,
-      dice: atk.faces, hits: atk.successes, crits: atk.crits, notes,
-      targets: results.map(r => ({ id: r.t.id, defense: r.dr.faces, blocks: r.dr.successes, wounds: r.wounds, stunnedNoDefense: r.t.stunned })),
+      dice: atk.faces, hits: atk.successes, crits: atk.crits, notes, rr: atk.rr,
+      targets: results.map(r => ({ id: r.t.id, defense: r.dr.faces, blocks: r.dr.successes, wounds: r.wounds, stunnedNoDefense: r.t.stunned, rr: r.dr.rr })),
     });
 
     const dying: Unit[] = [];
@@ -862,7 +864,7 @@ export class Game {
     if (defender.kind !== 'hero' || !attacker.alive) return;
     let n = 0;
     const parts: string[] = [];
-    if (this.ab(defender) === 'espinhos') { const c = dr.faces.filter(f => f === 'crit').length; if (c) { n += c; parts.push('Vingança do Espetado'); } }
+    if (this.ab(defender) === 'espinhos') { const c = dr.faces.filter(f => f === 'crit').length; if (c) { n += c; parts.push('Vingança do Espetado'); this.emit({ t: 'skill', id: defender.id, skill: 'espinhos', name: 'Vingança' }); } }
     if (this.hasPerm(defender, 'retribution') && cancelled > 0) { n += cancelled; parts.push('Amuleto da Retribuição'); }
     if (!n) return;
     this.log(`${parts.join(' + ')}: ${n} Ferimento${n > 1 ? 's' : ''} em ${this.name(attacker)}!`);
@@ -1041,6 +1043,8 @@ export class Game {
     if (i < 0) return false;
     const t = h.tokens[i];
     if (h.curse === 'aquafobia' && t.type !== 'bau' && t.type !== 'missao') { this.log(`${this.name(h)} tem Aquafobia e não pode usar Poções.`); return false; }
+    const usable = t.type === 'cura' || t.type === 'revigorante' || (t.type === 'turno' && !this.s.extraTurn);
+    if (usable) this.emit({ t: 'useToken', heroId: h.id, token: { ...t } }); // mostrado antes do efeito
     if (t.type === 'cura') {
       const amount = h.wounds;
       h.wounds = 0;
@@ -1357,21 +1361,24 @@ export class Game {
       const extra: DieFace[] = [];
       for (const i of idx) { const nr = this.roll(1, die, success, 'normal'); faces[i] = nr.faces[0]; extra.push(...nr.faces.slice(1)); }
       const all = [...faces, ...extra];
-      return { faces: all, successes: all.filter(f => f === success || f === 'crit').length, crits: all.filter(f => f === 'crit').length, rerolled: idx.length };
+      return { faces: all, successes: all.filter(f => f === success || f === 'crit').length, crits: all.filter(f => f === 'crit').length, rerolled: idx.length,
+        rr: { before: r.faces.slice(), idx, asked: true } }; // asked: o jogador já viu os dados no diálogo
     }
-    r.rerolled = 0;
-    let left = rerolls;
-    while (left > 0) {
-      const i = r.faces.findIndex(f => f !== success && f !== 'crit');
-      if (i < 0) break;
-      left--;
-      r.rerolled!++;
+    // automática: os dados que falharam são rolados de novo (no mesmo lugar; ✷ extras vão para o fim)
+    const before = r.faces.slice();
+    const faces = r.faces.slice();
+    const extra: DieFace[] = [];
+    const idx: number[] = [];
+    for (let i = 0; i < faces.length && idx.length < rerolls; i++) {
+      if (faces[i] === success || faces[i] === 'crit') continue;
       const nr = this.roll(1, die, success, 'normal');
-      r.faces.splice(i, 1, ...nr.faces);
-      r.successes += nr.successes;
-      r.crits += nr.crits;
+      faces[i] = nr.faces[0];
+      extra.push(...nr.faces.slice(1));
+      idx.push(i);
     }
-    return r;
+    const all = [...faces, ...extra];
+    return { faces: all, successes: all.filter(f => f === success || f === 'crit').length, crits: all.filter(f => f === 'crit').length, rerolled: idx.length,
+      rr: idx.length ? { before, idx, asked: false } : undefined };
   }
 
   /** Pegar marcadores automaticamente se não houver Inimigo no Espaço (p.25). */
@@ -1383,6 +1390,7 @@ export class Game {
     if (this.unitsAt(h.cell).some(u => this.isEnemy(h, u))) return;
     const keep: Token[] = [];
     for (const t of list.slice()) {
+      const wasDown = !t.faceUp;
       if (!h.alive) { keep.push(t); continue; }
       if (t.type === 'missao') {
         if (!t.faceUp && this.map.ambush?.colors.includes(t.color ?? '')) {
@@ -1404,7 +1412,7 @@ export class Game {
           if (!this.missionTokenWanted(h.guild!, t)) { keep.push(t); continue; }
           t.faceUp = true;
           h.tokens.push(t);
-          this.emit({ t: 'pickup', heroId: h.id, token: t });
+          this.emit({ t: 'pickup', heroId: h.id, token: t, hidden: wasDown });
           this.log(`${this.name(h)} pegou o marcador ${t.color ?? ''}: leve-o até o destino.`);
           continue;
         }
@@ -1412,7 +1420,7 @@ export class Game {
           // Tomos: o Herói carrega o marcador (pode ser roubado se morrer)
           t.faceUp = true;
           h.tokens.push(t);
-          this.emit({ t: 'pickup', heroId: h.id, token: t });
+          this.emit({ t: 'pickup', heroId: h.id, token: t, hidden: wasDown });
           this.checkCarry(h.guild!, h);
           continue;
         }
@@ -1420,13 +1428,13 @@ export class Game {
         if (!this.missionTokenWanted(h.guild!, t)) { if (m.rule !== 'step_on') { /* fica */ } continue; }
         if (m.rule !== 'step_on') keep.pop();
         t.faceUp = true;
-        if (m.rule !== 'step_on') this.emit({ t: 'pickup', heroId: h.id, token: t });
+        if (m.rule !== 'step_on') this.emit({ t: 'pickup', heroId: h.id, token: t, hidden: wasDown });
         this.completeMission(h.guild!, m.id, h);
         continue;
       }
       const firstReveal = !t.faceUp;
       t.faceUp = true;
-      this.emit({ t: 'pickup', heroId: h.id, token: t });
+      this.emit({ t: 'pickup', heroId: h.id, token: t, hidden: wasDown });
       if (t.type === 'armadilha') {
         if (this.map.deadlyTokens && !(this.map.fireProtectTitle && this.hasTitle(h.guild!, this.map.fireProtectTitle))) {
           this.log(`${this.name(h)} pisou numa Armadilha do Templo — morte instantânea!`);
@@ -1533,8 +1541,8 @@ export class Game {
     });
     this.emit({
       t: 'attack', attackerId: m.id, reason, cardName: md.attackName, attackType: md.attackType,
-      dice: atk.faces, hits: atk.successes, crits: atk.crits, notes,
-      targets: res.map(r => ({ id: r.t.id, defense: r.dr.faces, blocks: r.dr.successes, wounds: r.wounds, stunnedNoDefense: r.t.stunned })),
+      dice: atk.faces, hits: atk.successes, crits: atk.crits, notes, rr: atk.rr,
+      targets: res.map(r => ({ id: r.t.id, defense: r.dr.faces, blocks: r.dr.successes, wounds: r.wounds, stunnedNoDefense: r.t.stunned, rr: r.dr.rr })),
     });
     for (const r of res) {
       if (r.wounds > 0) this.damageHero(r.t, r.wounds, { kind: 'monster', id: m.id });

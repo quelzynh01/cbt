@@ -479,7 +479,9 @@ export class SimpleAI {
   deployPlan(g: Game, guild: GuildId): { heroId: string; cell: Cell }[] {
     const cells = this.doorOrder(g, guild);
     const heroes = g.heroesOf(guild).slice().sort((a, b) => (g.maxHp(b) + g.defenseDice(b)) - (g.maxHp(a) + g.defenseDice(a)));
-    return heroes.map((h, i) => ({ heroId: h.id, cell: cells[Math.min(cells.length - 1, i < 2 ? 0 : 1)] }));
+    const plan = heroes.map((h, i) => ({ heroId: h.id, cell: cells[Math.min(cells.length - 1, i < 2 ? 0 : 1)] }));
+    // quem sai do Espaço da porta se move antes (senão a porta pode estar cheia)
+    return plan.sort((a, b) => Number(sameCell(a.cell, cells[0])) - Number(sameCell(b.cell, cells[0])));
   }
 
   /** Descanso: onde cada morto ressuscita — sempre até 2 no Espaço da porta; o Difícil também usa Aliados à frente. */

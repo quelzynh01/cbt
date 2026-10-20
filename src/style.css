@@ -528,3 +528,69 @@ button.primary { background: linear-gradient(#e9a83a, #b9761b); border-color: #f
 .cd-final.show { opacity: 1; transform: scale(1); }
 .cd-final.bad { color: #ff6a4a; text-shadow: 0 0 12px rgba(255,80,40,.6); }
 .cd-final.good { color: #7dff8a; text-shadow: 0 0 12px rgba(80,255,120,.5); }
+.cicons { display: flex; align-items: center; gap: 3px; margin: 3px 0; flex-wrap: wrap; }
+.cicons .bimg.catk { width: 34px; height: 34px; }
+.cicons .bonus { width: 26px; height: 26px; }
+
+/* cartas da mão: mesma altura e cada parte na mesma linha em todas */
+.card:not(.empty-slot) { display: grid; grid-template-rows: 28px 34px 1fr; align-items: start; height: 128px; }
+.card .cname { height: 28px; display: flex; align-items: center; line-height: 1.1; overflow: hidden; }
+.card .cicons { height: 34px; margin: 0; flex-wrap: nowrap; overflow: hidden; }
+.card .cicons .bimg.catk { width: 30px; height: 30px; }
+.card .cicons .bonus { width: 22px; height: 22px; }
+.card .ctext { margin-top: 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; }
+.card.empty-slot { height: 128px; }
+
+/* bolsa */
+.tokrow { display: flex; align-items: center; gap: 4px; min-height: 36px; margin-top: 4px; }
+.tok-mini { width: 32px; height: 32px; filter: drop-shadow(0 2px 2px rgba(0,0,0,.5)); }
+.tok-more { font-weight: 800; color: #ffe08a; margin-left: 2px; }
+.tok-bag { margin-left: auto; font-size: 18px; padding: 2px 10px; }
+#herobox .lupa { position: relative; }
+.bag-n { position: absolute; top: -6px; right: -6px; background: #c0392b; color: #fff; font-size: 11px; font-weight: 800; border-radius: 9px; padding: 0 5px; border: 2px solid #fff; }
+#bagview { position: absolute; inset: 0; background: rgba(10,6,3,.55); display: grid; place-items: center; z-index: 41; }
+#bagview.hidden { display: none; }
+.bag-box { position: relative; width: min(460px, calc(100% - 24px)); max-height: calc(100% - 60px); overflow: auto; background: var(--panel); border: 2px solid var(--gold); border-radius: 16px; padding: 40px 16px 14px; display: grid; gap: 8px; }
+.bag-box h3 { position: absolute; top: 8px; left: 16px; margin: 0; color: var(--gold); }
+.bag-it { display: grid; grid-template-columns: 56px 1fr auto; gap: 10px; align-items: center; background: rgba(255,255,255,.05); border-radius: 12px; padding: 6px 10px; }
+.bag-it.cons { border: 2px solid #5aa0e0; }
+.bag-it img { width: 56px; height: 56px; }
+.bag-it small { display: block; color: #cbb; font-size: 12px; }
+.bw-dice .bimg { width: 34px; height: 34px; vertical-align: middle; }
+.bt-title .bimg.bt-medal { width: 34px; height: 34px; vertical-align: middle; margin-left: 6px; }
+.rr-dice .bdie.rolling { animation: cdShake .14s linear infinite; }
+
+/* tela de carregamento */
+#loading { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; transition: opacity .45s;
+  background: radial-gradient(ellipse at 50% 40%, #3c6420, #1d3512 70%, #0f1d09); }
+#loading.out { opacity: 0; pointer-events: none; }
+.ld-box { display: grid; justify-items: center; gap: 12px; color: #fff; }
+.ld-box h2 { margin: 0; color: var(--gold, #f2c14e); }
+.ld-bar { width: min(420px, 80vw); height: 16px; border-radius: 10px; background: rgba(0,0,0,.45); border: 2px solid #c9a24a; overflow: hidden; }
+.ld-bar i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #f2c14e, #ffe08a); transition: width .2s; }
+.ld-txt { font-size: 13px; color: #e8dccb; }
+.card .cname { font-size: 11px; }
+
+#dicecenter.interactive { pointer-events: auto; }
+.cd-btn:empty { display: none; }
+.cd-roll { font-size: 17px; padding: 8px 22px; animation: tbPulse 1.2s ease-in-out infinite; }
+.cd-die.rerolling, .bdie.rerolling { outline: 3px solid #5ad08a; outline-offset: 2px; border-radius: 10px; }
+.rrtag { color: #7dff8a; font-size: 13px; }
+
+/* item usado: só aparece (sem girar) */
+.tf-static { display: grid; place-items: center; animation: tfIn .35s cubic-bezier(.2,1.4,.4,1); }
+.tf-static img { width: 100%; height: 100%; }
+.tf-card.used .tf-name, .tf-card.used .tf-who, .tf-card.used .tf-text { opacity: 1; transition: none; }
+.tf-card.bad { border-color: #ff6a4a; box-shadow: 0 0 30px rgba(255,80,40,.5); }
+
+.tf-coins { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+.tf-card.many .tf-coin { width: 130px; height: 130px; }
+.tf-card.many { max-width: 640px; }
+
+/* controle rápido de som */
+.sndw { display: flex; align-items: center; gap: 6px; }
+.sndw-mute { font-size: 18px; padding: 2px 10px; }
+.sndw-mute.off { opacity: .7; border-color: #c0392b; }
+.sndw-vol { display: flex; align-items: center; gap: 4px; font-size: 14px; }
+.sndw-vol input { width: 90px; }
+.menu-box .sndw { justify-content: center; margin-top: 10px; }

@@ -12,10 +12,19 @@ export interface Settings {
   view: 'free' | 'players';
   /** Dificuldade da IA. */
   ai: 'normal' | 'hard';
+  /** Sons ligados. */
+  sound: boolean;
+  /** Volume dos sons (0 a 1). */
+  volume: number;
+  /** Música ligada e volume da música. */
+  music: boolean;
+  musicVolume: number;
+  /** Silencia tudo (efeitos e música). */
+  muted: boolean;
 }
 
 const KEY = 'cbt.settings';
-const DEFAULT: Settings = { battle: 'always', speed: 1, clock: true, reroll: 'choose', view: 'free', ai: 'normal' };
+const DEFAULT: Settings = { battle: 'always', speed: 1, clock: true, reroll: 'choose', view: 'free', ai: 'normal', sound: true, volume: 0.7, music: true, musicVolume: 0.12, muted: false };
 
 export function getSettings(): Settings {
   try { return { ...DEFAULT, ...JSON.parse(localStorage.getItem(KEY) ?? '{}') }; } catch { return { ...DEFAULT }; }

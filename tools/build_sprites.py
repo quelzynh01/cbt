@@ -1,6 +1,6 @@
 """Gera os sprites (4 direções) a partir de ref/modelos/<nome>.jpg (fundo verde, chroma key).
 
-Cada imagem tem a pose de FRENTE à esquerda e a de COSTAS à direita:
+Cada imagem tem a pose de FRENTE à esquerda e a de COSTAS à direita (ambas olhando para a esquerda):
   frente -> sw (frente-esquerda); espelhada -> se
   costas -> nw (costas-esquerda); espelhada -> ne
 
@@ -158,6 +158,7 @@ def build(lineup_path=None):
             half = int(max(fx_s, im.width - fx_s)) + 2
             canvas = Image.new('RGBA', (2 * half, im.height), (0, 0, 0, 0))
             canvas.paste(im, (int(round(half - fx_s)), 0))
+            # os modelos olham para a ESQUERDA: frente = sw (frente-esquerda), costas = nw; o espelho dá se e ne
             dirs = ('sw', 'se') if side == 'front' else ('nw', 'ne')
             # WebP com transparência: ~5x menor que PNG, mesma qualidade visual
             canvas.save(os.path.join(OUT, f'{cid}_{dirs[0]}.webp'), 'WEBP', quality=90, method=6)
@@ -169,7 +170,7 @@ def build(lineup_path=None):
             print(f'{cid:12s} {side:5s} caixa {pose.size} corpo {top}->{feet} escala {scale:.3f} png {canvas.size}')
         if cid in FACE:
             fx_, fy_, fs_ = FACE[cid]
-            entry['face'] = {'se': [fx_, fy_, fs_], 'sw': [round(1 - fx_, 4), fy_, fs_]}
+            entry['face'] = {'se': [fx_, fy_, fs_], 'sw': [round(1 - fx_, 4), fy_, fs_]}  # FACE foi medido na pose 'se' (espelhada)
         manifest[cid] = entry
     json.dump(manifest, open(man_path, 'w', encoding='utf-8'), indent=1)
     if lineup_path:

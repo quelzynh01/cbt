@@ -1,4 +1,6 @@
 import { entryPlaque } from './dice';
+import { play } from '../audio/sfx';
+import { CARDS } from '../engine/cards';
 import { drawTokenImage } from './tokens';
 import { key, sameCell } from '../engine/board';
 import { GUILDS, MONSTERS } from '../engine/data';
@@ -41,13 +43,13 @@ interface UnitView {
   alpha: number;
   fade: { from: number; to: number; t0: number; dur: number } | null;
   hurtT0: number;
-  lunge: { dx: number; t0: number; dur: number } | null;
+  lunge: { dx: number; dy: number; t0: number; dur: number } | null;
   flip: boolean;
   dir: Dir;
 }
 
 interface Floater { text: string; color: string; x: number; y: number; t0: number; dur: number; size: number }
-interface Projectile { from: Pt; to: Pt; t0: number; dur: number; kind: 'arrow' | 'orb' | 'stone' }
+interface Projectile { from: Pt; to: Pt; t0: number; dur: number; kind: 'arrow' | 'orb' | 'stone' | 'blade'; arc: number }
 
 export interface RendererHooks {
   /** Retornar true segura a fila de animações até release() (ex.: tela de batalha). */
@@ -288,7 +290,7 @@ export class Renderer {
         id: u.id, kind: u.kind, defId: u.defId, guild: u.guild, num: u.num,
         cell: u.alive && u.cell ? { ...u.cell } : null, wounds: u.wounds, maxHp: g.maxHp(u), alive: u.alive && !!u.cell,
         stunned: u.stunned, pos: v?.pos ?? { gx: 0, gy: 0 }, tween: null, alpha: 1, fade: null,
-        hurtT0: v?.hurtT0 ?? -9, lunge: null, flip: v?.flip ?? false, dir: v?.dir ?? initialDir(u.cell),
+        hurtT0: v?.hurtT0 ?? -9, lunge: null, flip: v?.flip ?? false, dir: v?.dir ?? this.centerDir(u.cell),
       };
       this.units.set(u.id, nv);
     }
@@ -297,6 +299,26 @@ export class Renderer {
     this.floor = {};
     for (const [k, toks] of Object.entries(g.s.floor)) this.floor[k] = toks.map(t => ({ ...t }));
     this.layoutUnits(true);
+  }
+
+  /** Direção de quem olha para o meio do tabuleiro a partir de `c`. */
+  centerDir(c: Cell | null): Dir {
+    if (!c || !this.game) return 'se';
+    const m = this.game.map;
+    const a = g2s(m.cols / 2, m.rows / 2), b = g2s(c.c + 0.5, c.r + 0.5);
+    return dirFromScreen(a.x - b.x, a.y - b.y);
+  }
+
+  /** Tipo do projétil/som pelo ataque: Mágica = orbe, Arco = flecha, Espada arremessada = lâmina, Arremesso = pedra. */
+  private attackKind(e: Extract<GameEvent, { t: 'attack' }>, attacker: string): Projectile['kind'] {
+    const base = attacker.replace(/\d+$/, '');
+    if (['irma_prazer', 'lorde_presas'].includes(base)) return 'orb';
+    if (['goblin', 'feral_lanceiro'].includes(base)) return 'arrow';
+    const d = Object.values(CARDS).find(c => c.name === e.cardName);
+    if (d?.magic) return 'orb';
+    if (d?.group === 'Arco') return 'arrow';
+    if (d?.group === 'Espada' || d?.group === 'Lança') return 'blade';
+    return 'stone';
   }
 
   private slotPositions(): Map<string, { gx: number; gy: number }> {
@@ -371,9 +393,11 @@ export class Renderer {
         u.tween = { fx: u.pos.gx, fy: u.pos.gy, t0: now, dur: (e.portal ? 520 : 280) / this.speed, portal: !!e.portal };
         const dx = g2s(e.to.c, e.to.r).x - g2s(e.from.c, e.from.r).x;
         if (dx !== 0) u.flip = dx < 0;
-        if (!e.portal) u.dir = dirFromStep(e.to.c - e.from.c, e.to.r - e.from.r);
+        // posicionamento inicial: todos olham para o meio do tabuleiro; no jogo, para onde estão indo
+        if (this.game.s.deploying?.length) u.dir = this.centerDir(e.to);
+        else if (!e.portal) { u.dir = dirFromStep(e.to.c - e.from.c, e.to.r - e.from.r); play('foot-step', 0.6); }
         u.cell = { ...e.to };
-        if (e.portal) dur = 520 / this.speed;
+        if (e.portal) { dur = 520 / this.speed; play('teletransport', 0.8); }
         break;
       }
       case 'door': this.doors.set(e.doorId, e.open); break;
@@ -384,17 +408,63 @@ export class Renderer {
         a.flip = pt.x < pa.x;
         a.dir = dirFromScreen(pt.x - pa.x, pt.y - pa.y);
         if (t.kind === 'hero' || t.kind === 'monster') t.dir = dirFromScreen(pa.x - pt.x, pa.y - pt.y);
-        if (e.attackType === 'melee' || sameCell(a.cell, t.cell)) a.lunge = { dx: pt.x < pa.x ? -14 : 14, t0: now + 250 / this.speed, dur: 320 / this.speed };
-        else {
-          const kind = a.defId === 'goblin' ? 'arrow' : a.defId === 'maya' ? 'orb' : 'stone';
+        break; // a investida / o projétil vêm depois da rolagem (animateAttack)
+      }
+      case 'damage': {
+        const u = this.units.get(e.id)!;
+        u.wounds = e.wounds;
+        u.hurtT0 = now;
+        this.floatAt(e.id, `-${e.amount}`, '#ff5a3c', 26);
+        break;
+      }
+      case 'heal': {
+        const u = this.units.get(e.id)!;
+        u.wounds = e.wounds;
+        this.floatAt(e.id, `+${e.amount}`, '#6cff7a', 24);
+        break;
+      }
+      default: this.startEvent2(e, now); break;
+    }
+    return dur;
+  }
+
+  /** Animação do ataque (investida ou projétil). Retorna quanto tempo leva (ms). */
+  animateAttack(e: Extract<GameEvent, { t: 'attack' }>): number {
+    const now = this.t;
+    const a = this.units.get(e.attackerId);
+    const t = this.units.get(e.targets[0]?.id);
+    if (!a || !t) return 0;
+    const pa = g2s(a.pos.gx, a.pos.gy), pt = g2s(t.pos.gx, t.pos.gy);
+    {
+      {
+        const kind = this.attackKind(e, a.defId);
+        const sp = this.speed;
+        if (e.attackType === 'melee' || sameCell(a.cell, t.cell)) {
+          // investida: corre até encostar no inimigo e volta
+          let dx = pt.x - pa.x, dy = pt.y - pa.y;
+          const d = Math.hypot(dx, dy);
+          if (d < 8) { dx = (pt.x < pa.x ? -1 : 1) * 26; dy = 0; } else { const k = Math.min(0.72, Math.max(0.35, (d - 34) / d)); dx *= k; dy *= k; }
+          a.lunge = { dx, dy, t0: now + 150 / sp, dur: 620 / sp };
+          setTimeout(() => play('atack-sword'), 330 / sp);
+        } else {
           for (const tg of e.targets) {
             const tv = this.units.get(tg.id)!;
             const p2 = g2s(tv.pos.gx, tv.pos.gy);
-            this.projectiles.push({ from: { x: pa.x, y: pa.y - 34 }, to: { x: p2.x, y: p2.y - 30 }, t0: now + 250 / this.speed, dur: 380 / this.speed, kind });
+            const from = { x: pa.x, y: pa.y - 40 }, to = { x: p2.x, y: p2.y - 36 };
+            const dist = Math.hypot(to.x - from.x, to.y - from.y);
+            this.projectiles.push({ from, to, t0: now + 250 / sp, dur: Math.min(900, 380 + dist * 0.35) / sp, kind, arc: Math.max(50, Math.min(220, dist * 0.5)) });
           }
+          setTimeout(() => play(kind === 'orb' ? 'atack-magic' : 'atack-bow'), 230 / sp);
         }
-        break;
+        if (e.attackType === 'melee' || sameCell(a.cell, t.cell)) return 820 / sp;
+        const far = e.targets.map(tg => { const tv = this.units.get(tg.id)!; const p2 = g2s(tv.pos.gx, tv.pos.gy); return Math.hypot(p2.x - pa.x, p2.y - pa.y); });
+        return (250 + Math.min(900, 380 + Math.max(...far) * 0.35)) / sp;
       }
+    }
+  }
+
+  private startEvent2(e: GameEvent, now: number) {
+    switch (e.t) {
       case 'damage': {
         const u = this.units.get(e.id)!;
         u.wounds = e.wounds;
@@ -417,7 +487,7 @@ export class Renderer {
       case 'stun': {
         const u = this.units.get(e.id)!;
         u.stunned = e.on;
-        if (e.on) this.floatAt(e.id, 'Atordoado!', '#ffe14d', 16, -18);
+        if (e.on) { this.floatAt(e.id, 'Atordoado!', '#ffe14d', 16, -18); play('stun', 0.8); }
         break;
       }
       case 'pickup': {
@@ -442,6 +512,7 @@ export class Renderer {
         u.wounds = 0;
         u.stunned = false;
         u.fade = { from: 0, to: 1, t0: now, dur: 400 / this.speed };
+        u.dir = this.centerDir(e.cell);
         u.alpha = 0;
         const s = this.slotPositions().get(u.id);
         if (s) u.pos = { ...s };
@@ -459,7 +530,26 @@ export class Renderer {
       default:
         break;
     }
-    return dur;
+  }
+
+  /** Marcadores pegos pelo mesmo Herói logo em seguida (mesmo Espaço): saem da fila juntos para aparecerem de uma vez. */
+  takePickups(heroId: string): Extract<GameEvent, { t: 'pickup' }>[] {
+    const out: Extract<GameEvent, { t: 'pickup' }>[] = [];
+    const rest: GameEvent[] = [];
+    let i = 0;
+    for (; i < this.queue.length; i++) {
+      const q = this.queue[i];
+      if (q.t === 'move' || q.t === 'attack' || q.t === 'turn' || q.t === 'death') break;
+      if (q.t === 'pickup' && q.heroId === heroId) {
+        out.push(q);
+        for (const k of Object.keys(this.floor)) {
+          this.floor[k] = this.floor[k].filter(t => t.id !== q.token.id);
+          if (!this.floor[k].length) delete this.floor[k];
+        }
+      } else rest.push(q);
+    }
+    this.queue = [...rest, ...this.queue.slice(i)];
+    return out;
   }
 
   private finishEvent(e: GameEvent) {
@@ -956,15 +1046,18 @@ export class Renderer {
     }
     ctx.restore();
 
-    let lunge = 0;
+    let lx = 0, ly = 0;
     if (u.lunge) {
       const k = (this.t - u.lunge.t0) / u.lunge.dur;
-      if (k >= 0 && k <= 1) lunge = Math.sin(k * Math.PI) * u.lunge.dx;
+      // vai rápido (35%), fica encostado (20%) e volta
+      const f = k < 0 ? 0 : k < 0.35 ? 1 - Math.pow(1 - k / 0.35, 3) : k < 0.55 ? 1 : k < 1 ? 1 - (k - 0.55) / 0.45 : 0;
+      lx = u.lunge.dx * f; ly = u.lunge.dy * f;
       if (k > 1) u.lunge = null;
     }
+    ctx.translate(lx, ly);
     const hurt = Math.max(0, 1 - (this.t - u.hurtT0) / (350 / this.speed));
     const idleT = tt + (u.num || u.id.length) * 0.37;
-    drawCharacter(ctx, u.defId, { dir: u.dir, flip: u.flip, t: idleT, hurt, alpha: 1, stunned: u.stunned, lunge, scale: L.scale * 0.66 });
+    drawCharacter(ctx, u.defId, { dir: u.dir, flip: u.flip, t: idleT, hurt, alpha: 1, stunned: u.stunned, lunge: 0, scale: L.scale * 0.66 });
     if (u.stunned) for (let i = 0; i < 3; i++) {
       const ang = tt * 3 + (i * Math.PI * 2) / 3;
       star(ctx, Math.cos(ang) * 16, -84 * L.scale + Math.sin(ang) * 5, 5, '#ffe14d');
@@ -1006,17 +1099,29 @@ export class Renderer {
     for (const p of this.projectiles) {
       const k = (this.t - p.t0) / p.dur;
       if (k < 0) continue;
-      const x = p.from.x + (p.to.x - p.from.x) * k;
-      const y = p.from.y + (p.to.y - p.from.y) * k - Math.sin(k * Math.PI) * 40;
+      const at = (q: number) => ({ x: p.from.x + (p.to.x - p.from.x) * q, y: p.from.y + (p.to.y - p.from.y) * q - Math.sin(q * Math.PI) * p.arc });
+      const { x, y } = at(k);
+      // rastro
+      const col = p.kind === 'orb' ? '150,220,255' : p.kind === 'blade' ? '230,235,255' : p.kind === 'arrow' ? '255,236,170' : '220,220,220';
+      const N = 14;
+      for (let i = 0; i < N; i++) {
+        const q0 = Math.max(0, k - 0.3 + (0.3 * i) / N), q1 = Math.max(0, k - 0.3 + (0.3 * (i + 1)) / N);
+        const a0 = at(q0), a1 = at(q1);
+        ctx.strokeStyle = `rgba(${col},${(i / N) * 0.75})`;
+        ctx.lineWidth = 1 + (i / N) * (p.kind === 'orb' ? 9 : 5);
+        ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(a0.x, a0.y); ctx.lineTo(a1.x, a1.y); ctx.stroke();
+      }
+      const nxt = at(Math.min(1, k + 0.02));
       ctx.save();
       ctx.translate(x, y);
       if (p.kind === 'orb') {
         const grd = ctx.createRadialGradient(0, 0, 1, 0, 0, 14);
         grd.addColorStop(0, '#ffffff'); grd.addColorStop(0.4, '#9fe8ff'); grd.addColorStop(1, 'rgba(120,200,255,0)');
         ctx.fillStyle = grd; ctx.beginPath(); ctx.arc(0, 0, 14, 0, Math.PI * 2); ctx.fill();
-      } else if (p.kind === 'arrow') {
-        const ang = Math.atan2(p.to.y - p.from.y - Math.cos(k * Math.PI) * 40 * Math.PI, p.to.x - p.from.x);
-        ctx.rotate(ang);
+      } else if (p.kind === 'arrow' || p.kind === 'blade') {
+        ctx.rotate(Math.atan2(nxt.y - y, nxt.x - x));
+        if (p.kind === 'blade') { ctx.rotate(this.t / 40); ctx.fillStyle = '#e6ebf5'; ctx.strokeStyle = '#3a3a48'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(-12, -3); ctx.lineTo(12, 0); ctx.lineTo(-12, 3); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore(); continue; }
         ctx.strokeStyle = '#5a3a1a'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(-12, 0); ctx.lineTo(10, 0); ctx.stroke();
         ctx.fillStyle = '#ccc'; ctx.beginPath(); ctx.moveTo(14, 0); ctx.lineTo(8, -4); ctx.lineTo(8, 4); ctx.fill();
       } else {
@@ -1265,11 +1370,6 @@ function dirFromStep(dc: number, dr: number): Dir {
 function dirFromScreen(dx: number, dy: number): Dir {
   if (dy >= 0) return dx >= 0 ? 'se' : 'sw';
   return dx >= 0 ? 'ne' : 'nw';
-}
-/** Começa olhando para o centro do mapa. */
-function initialDir(c: Cell | null): Dir {
-  if (!c) return 'se';
-  return dirFromScreen(g2s(4.5, 4.5).x - g2s(c.c + 0.5, c.r + 0.5).x, g2s(4.5, 4.5).y - g2s(c.c + 0.5, c.r + 0.5).y);
 }
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {

@@ -42,7 +42,7 @@ export function bonusImg(kind: 'def' | 'hp' | 'rr', n: number, cls = 'bonus'): s
 
 type BadgeKind = 'def' | 'hp' | 'rr' | 'melee' | 'ranged' | 'coin' | 'skull' | 'move';
 /** Medalhão com o número (imagem de public/bonus, 1..10); fora disso usa o medalhão desenhado. `extra`: up/down, posição. */
-function medal(kind: BadgeKind, n: number, title: string, extra = ''): string {
+export function medal(kind: BadgeKind, n: number, title: string, extra = ''): string {
   if (Number.isInteger(n) && n >= 1 && n <= 10) {
     return `<img class="bimg ${kind} ${extra}" src="${import.meta.env.BASE_URL}bonus/${kind}${n}.webp" title="${title}" alt="${n}" draggable="false"/>`;
   }
@@ -109,7 +109,7 @@ export function heroCard(id: string, extra = '', attrs = '', foot = '', badge = 
       <div class="hc-left">
         <div class="hc-meds">${medal('def', def, diff(def, h.defense, 'Defesa'), `big${cmp(def, h.defense)}`)}${medal('hp', hp, live ? `Vida atual: ${hp}/${live.maxHp ?? h.hp} (carta: ${h.hp})` : 'Vida', `big${cmp(hp, h.hp)}`)}${rr ?medal('rr', rr, `Rerrolagem: ${rr}`, `big${cmp(rr, 0)}`) : ''}${live?.atk ?medal('melee', live.atk, `+${live.atk} dado(s) em todos os ataques`, 'big up') : ''}</div>
         <div class="ac-ribbon"><small>Habilidade</small><b>${h.abilityName}</b></div>
-        <div class="ac-text"><p>${h.abilityText}${h.implemented === false ? ' <i>(a confirmar)</i>' : ''}</p></div>
+        <div class="ac-text ${textSize(h.abilityText)}"><p>${h.abilityText}${h.implemented === false ? ' <i>(a confirmar)</i>' : ''}</p></div>
       </div>
       <canvas class="hc-artc" width="200" height="230" data-art="${id}"></canvas>
     </div>

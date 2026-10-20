@@ -22,7 +22,7 @@ npm run build      # build de produção em dist/
 | Atacar | clique no inimigo marcado em **vermelho** → abre a **Tela de Batalha**: escolha a arma e clique **Atacar**. Quando um herói seu é atacado, clique **Defender** para rolar a defesa (Enter/Espaço também funcionam) |
 | Abrir/fechar porta | clique na porta (ou no ícone 🔑) ao lado do herói ativo — 1 PM. O movimento **nunca** abre portas sozinho |
 | Encerrar turno / Descansar | **Espaço** / **R** |
-| Câmera | arrastar = mover · roda = zoom · **C** = mapa inteiro · **F** = focar herói · **V** (ou botão no topo) = *Visão livre* / *Visão dos jogadores* |
+| Câmera | arrastar ou **W/A/S/D** (ou setas) = mover · roda = zoom · **C** = mapa inteiro · **F** = focar herói · **V** (ou botão no topo) = *Visão livre* / *Visão dos jogadores* |
 | Desfazer jogada (Modo Teste) | **Ctrl+Z** ou painel de teste → *Desfazer* / *Início do turno* (opção: mesmos dados) |
 | Painel de teste | **T** · coordenadas da grade: **G** |
 
@@ -130,6 +130,26 @@ aparece no centro da tela virando do verso para a face, com o nome de quem pegou
 **Dados:** as faces (dado preto de ataque, branco de defesa) e as placas das Entradas de Monstro vêm de `ref/dados/` via `python tools/build_dice.py` (a placa ✷+⚔ é montada a partir das outras).
 
 **Medalhões das cartas:** Defesa, Vida, Rerrolagem, dados de ataque (Próximo/Distância), moeda (custo/recompensa), caveira (Extermínio) e movimento usam as imagens 1–10 de `ref/dados/+*.jpg`, geradas com `python tools/build_bonus.py` em `public/bonus/`. Valores fora de 1–10 usam o medalhão desenhado.
+
+**Sons:** `ref/sounds/` → `public/sounds/*.mp3` (poções, teleporte, armadilha, pegar marcador, Missão, habilidades do
+Vapor e do Espetado, dados, ataques de espada/arco/magia, atordoar, passos a cada Espaço). Música em loop:
+`musica-menu` nos menus e `musica-game` na partida (volume baixo por padrão). Botão 🔊/🔇 e volume da música no menu inicial e na barra da partida; "Desativar todos os sons" em Configurações. Depois de colocar sons novos em `ref/sounds/`, rode
+`python tools/sync_sounds.py`. Efeitos e música têm liga/desliga e volume separados em Configurações.
+
+**Rolagens:** os dados de quem joga neste computador só rolam ao clicar em **🎲 Rolar** (ou Enter). Com Rerrolagem,
+primeiro aparece o resultado; depois os dados escolhidos giram de novo (borda verde).
+
+**Animações:** ao começar, todos olham para o meio do tabuleiro; andando olham para onde vão e atacando viram para o
+alvo. Corpo a corpo = investida até encostar no inimigo; a distância = projétil em arco com rastro. Depois vem a rolagem
+dos dados no centro da tela. Pegar/usar marcador e rolar dados seguram o jogo até a animação acabar.
+Ordem do ataque: primeiro rolam os dados (ataque e defesa) e, com o resultado, vem a investida/o projétil. Todos os
+marcadores pegos num Espaço aparecem juntos: os virados para baixo giram ao mesmo tempo e os que já estavam à mostra
+(Missão, itens derrubados) só aparecem.
+
+**Bolsa (🎒, tecla B):** ao lado da lupa e no fim da linha de marcadores (até 3 ícones + "+N"). Poções em cima, com
+"Usar"; ao usar, a poção aparece no centro da tela.
+
+Ao abrir o jogo há uma **tela de carregamento** (personagens, marcadores, dados e sons).
 
 ## Multiplayer Online (até 4 jogadores)
 

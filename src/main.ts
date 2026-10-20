@@ -7,8 +7,12 @@ import { OnlineLobby } from './ui/lobby';
 import { CampaignUI } from './ui/campaignUI';
 import { gameOptions, recordResult } from './campaign/campaign';
 import { preloadArt } from './render/chibi';
-import { preloadTokens } from './render/tokens';
-import { preloadDice } from './render/dice';
+import { TOKEN_COUNT, preloadTokens } from './render/tokens';
+import { DICE_COUNT, preloadDice } from './render/dice';
+import { SOUND_COUNT, preloadSounds } from './audio/sfx';
+import { initMusic, setMusic } from './audio/music';
+import { soundWidget } from './audio/widget';
+import { hideLoading, loader, showLoading } from './ui/loading';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const hud = document.getElementById('hud')!;
@@ -39,6 +43,7 @@ function getController(): Controller {
 }
 
 function enterGame() {
+  setMusic('partida');
   menu.classList.add('hidden');
   menu.classList.remove('over-game');
   hud.classList.remove('hidden');
@@ -52,6 +57,7 @@ lobby.onStart = (state, l, session) => {
 
 const camp = new CampaignUI(menu, pages);
 function backToCampaign() {
+  setMusic('menu');
   controller?.stop();
   hud.classList.add('hidden');
   menu.classList.remove('hidden');
@@ -66,6 +72,7 @@ camp.onPlay = mapId => {
 };
 
 function showMenu() {
+  setMusic('menu');
   controller?.stop();
   pages.close();
   lobby.close();
@@ -87,7 +94,19 @@ hud.classList.add('hidden');
 
 // Carrega os sprites (PNG) antes de liberar o jogo.
 // Atalhos: /#teste inicia direto no Modo Teste; /#biblioteca abre a Biblioteca.
-Promise.all([preloadArt(), preloadTokens(), preloadDice()]).then(() => {
+showLoading();
+loader.expect(TOKEN_COUNT + DICE_COUNT + SOUND_COUNT);
+initMusic();
+setMusic('menu');
+menu.querySelector('.menu-box')!.append(soundWidget());
+Promise.all([
+  preloadArt(loader.tick, loader.expect),
+  preloadTokens(loader.tick),
+  preloadDice(loader.tick),
+  preloadSounds(loader.tick),
+  document.fonts?.ready ?? Promise.resolve(),
+]).then(() => {
+  hideLoading();
   if (location.hash === '#teste') { enterGame(); getController().startTest(); }
   if (location.hash === '#biblioteca') pages.showLibrary('herois');
   const sala = new URLSearchParams(location.search).get('sala');

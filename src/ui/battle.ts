@@ -1,7 +1,9 @@
+import { medal } from './cardview';
+import { play } from '../audio/sfx';
 import { dieImg } from '../render/dice';
 import { CARDS, GUILDS, HEROES, MONSTERS } from '../engine/data';
 import type { Game } from '../engine/game';
-import type { DieFace, GameEvent, Unit } from '../engine/types';
+import type { RerollInfo, DieFace, GameEvent, Unit } from '../engine/types';
 import { charScale, drawCharacter } from '../render/chibi';
 
 type AttackEvent = Extract<GameEvent, { t: 'attack' }>;
@@ -130,7 +132,7 @@ export class BattlePanel {
           const why = c.exhausted ? 'Exaustada' : !can ? (d.fx.astral ? 'Alvo não está Perto de um Aliado' : d.attackType === 'melee' ? 'Alvo não está Perto' : 'Sem Linha de Visão') : '';
           const pv = can ? g.attackDicePreview(h, c, t).dice : d.dice;
           return `<button class="bt-weapon ${c.uid === sel ? 'sel' : ''}" data-uid="${c.uid}" ${can ? '' : 'disabled'}>
-            <b>${d.name}</b><span class="bw-dice">${d.attackType === 'melee' ? '⚔' : '➶'} ${pv} dado${pv > 1 ? 's' : ''}</span>
+            <b>${d.name}</b><span class="bw-dice">${medal(d.attackType === 'melee' ? 'melee' : 'ranged', pv, `${pv} dado${pv > 1 ? 's' : ''} de ataque ${d.attackType === 'melee' ? 'Próximo' : 'a Distância'}`, pv > d.dice ? 'up' : '')}</span>
             <small>${d.attackType === 'melee' ? 'Próximo' : 'Distância'} · ${d.group}</small>${d.text ? `<em>${d.text}</em>` : ''}${why ? `<i>${why}</i>` : ''}</button>`;
         }).join('')}</div>
         <div class="bt-preview">${prev
@@ -183,7 +185,7 @@ export class BattlePanel {
 
     this.mode = 'play';
     this.el.innerHTML = `<div class="bt-box">
-      <div class="bt-head"><span class="bt-reason ${e.reason !== 'heroi' ? 'react' : ''}">${reason}</span><span class="bt-title">${e.cardName} <small>${e.attackType === 'melee' ? '⚔ Próximo' : '➶ Distância'}</small></span></div>
+      <div class="bt-head"><span class="bt-reason ${e.reason !== 'heroi' ? 'react' : ''}">${reason}</span><span class="bt-title">${e.cardName} ${medal(e.attackType === 'melee' ? 'melee' : 'ranged', e.dice.length, `${e.dice.length} dados de ataque ${e.attackType === 'melee' ? 'Próximo' : 'a Distância'}`, 'bt-medal')}</span></div>
       <div class="bt-arena">${this.fighterHtml(atk, 'left', atkWounds)}<div class="bt-vs">VS</div>${this.fighterHtml(main, 'right', before.get(main.id)!)}</div>
       ${e.notes.length ? `<div class="bt-notes center">${e.notes.join(' · ')}</div>` : ''}
       <div class="bt-tray-wrap"><div class="bt-lbl">Ataque</div><div class="bt-tray atk"></div><div class="bt-count atk"></div></div>
@@ -206,7 +208,7 @@ export class BattlePanel {
     if (!humanAtk || e.reason !== 'heroi') await wait(450);
     const f = this.fighter(atk.id);
     if (f) f.lungeT = performance.now() + 500 / sp;
-    await this.rollTray(this.el.querySelector('.bt-tray.atk') as HTMLElement, e.dice, e.attackType, ATK_FACES, sp);
+    await this.rollWithReroll(this.el.querySelector('.bt-tray.atk') as HTMLElement, e.dice, e.attackType, ATK_FACES, sp, e.rr);
     (this.el.querySelector('.bt-count.atk') as HTMLElement).innerHTML = `<b>${e.hits}</b> acerto${e.hits === 1 ? '' : 's'}${e.crits ? ` <span class="crit">(${e.crits} crítico${e.crits > 1 ? 's' : ''})</span>` : ''}`;
 
     // --- defesa (por alvo)
@@ -223,7 +225,7 @@ export class BattlePanel {
       else {
         if (tu.kind === 'hero' && this.deps.isHuman(tu)) await button(`🛡 Defender ${HEROES[tu.defId].name} (${t.defense.length - t.defense.filter(x => x === 'crit').length} dado${t.defense.length > 1 ? 's' : ''})`);
         else await wait(400);
-        await this.rollTray(tray, t.defense, 'shield', DEF_FACES, sp);
+        await this.rollWithReroll(tray, t.defense, 'shield', DEF_FACES, sp, t.rr);
         count.innerHTML = `<b>${t.blocks}</b> bloqueio${t.blocks === 1 ? '' : 's'}`;
       }
     }
@@ -255,8 +257,24 @@ export class BattlePanel {
     done();
   }
 
-  /** Dados girando e parando um a um; críticos fazem surgir um dado extra. */
-  private async rollTray(tray: HTMLElement, faces: DieFace[], success: DieFace, pool: DieFace[], sp: number) {
+  /** Rolagem com Rerrolagem: primeiro o resultado original; depois os dados escolhidos giram de novo. */
+  private async rollWithReroll(tray: HTMLElement, faces: DieFace[], success: DieFace, pool: DieFace[], sp: number, rr?: RerollInfo) {
+    if (!rr) { await this.rollTray(tray, faces, success, pool, sp); return; }
+    const dice = await this.rollTray(tray, rr.before, success, pool, sp, rr.asked);
+    if (!rr.idx.length) return;
+    await new Promise(r => setTimeout(r, 450 / sp));
+    await rerollDice(tray, dice, rr, faces, success, pool === ATK_FACES, sp, () => {
+      const d = document.createElement('div');
+      d.className = `bdie ${pool === ATK_FACES ? 'black' : 'white'} rolling`;
+      d.innerHTML = '<span></span>';
+      tray.append(d);
+      return d;
+    });
+  }
+
+  /** Dados girando e parando um a um; críticos fazem surgir um dado extra. `instant`: já mostra o resultado (rolado no diálogo). */
+  private async rollTray(tray: HTMLElement, faces: DieFace[], success: DieFace, pool: DieFace[], sp: number, instant = false): Promise<HTMLElement[]> {
+    if (!instant) play('dice', 0.8);
     const cls = pool === ATK_FACES ? 'black' : 'white';
     const crits = faces.filter(f => f === 'crit').length;
     let visible = Math.max(0, faces.length - crits);
@@ -272,18 +290,19 @@ export class BattlePanel {
     const spin = window.setInterval(() => {
       for (const d of dice) if (d.classList.contains('rolling')) d.firstElementChild!.innerHTML = dieImg(pool[Math.floor(Math.random() * pool.length)], cls === 'black');
     }, 70);
-    await new Promise(r => setTimeout(r, 750 / sp));
+    if (!instant) await new Promise(r => setTimeout(r, 750 / sp));
     for (let i = 0; i < faces.length; i++) {
-      if (i >= dice.length) { add(); await new Promise(r => setTimeout(r, 380 / sp)); }
+      if (i >= dice.length) { add(); if (!instant) await new Promise(r => setTimeout(r, 380 / sp)); }
       const d = dice[i];
       const f = faces[i];
       d.classList.remove('rolling');
       d.firstElementChild!.innerHTML = dieImg(f, cls === 'black');
       if (f === 'crit' || f === success) d.classList.add('hit');
       if (f === 'crit') { d.classList.add('crit'); d.setAttribute('title', 'Crítico! Rola um dado extra'); }
-      await new Promise(r => setTimeout(r, 170 / sp));
+      if (!instant) await new Promise(r => setTimeout(r, 170 / sp));
     }
     clearInterval(spin);
+    return dice;
   }
 
   // ---------------------------------------------------------------
@@ -292,9 +311,10 @@ export class BattlePanel {
   private askEl: HTMLElement | null = null;
   private askResolve: ((idx: number[]) => void) | null = null;
   private askSel = new Set<number>();
-  get isAsking() { return !!this.askResolve; }
+  get isAsking() { return !!this.askResolve || !!this.askRoll || (!!this.askEl && !this.askEl.classList.contains('hidden')); }
 
-  askReroll(req: { heroId: string; kind: 'attack' | 'defense'; faces: DieFace[]; success: DieFace; rerolls: number }): Promise<number[]> {
+  private askRoll: (() => void) | null = null;
+  async askReroll(req: { heroId: string; kind: 'attack' | 'defense'; faces: DieFace[]; success: DieFace; rerolls: number }): Promise<number[]> {
     const g = this.deps.game();
     const h = g.unit(req.heroId);
     if (!this.askEl) { this.askEl = document.createElement('div'); this.askEl.id = 'rerollbox'; this.el.parentElement!.append(this.askEl); }
@@ -320,19 +340,57 @@ export class BattlePanel {
       (el.querySelector('#rr-keep') as HTMLElement).onclick = () => this.answer([]);
       (el.querySelector('#rr-go') as HTMLElement).onclick = () => this.answer([...this.askSel]);
     };
-    render();
+    // primeiro os dados rolam na tela; só depois dá para escolher quais rerrolar
+    const black = req.kind === 'attack';
+    const pool: DieFace[] = black ? ['crit', 'melee', 'ranged', 'blank'] : ['crit', 'shield', 'blank', 'blank'];
+    const sp = Math.max(1, this.deps.speed());
+    this.askReady = false;
+    el.innerHTML = `<div class="rr-box">
+      <div class="bt-head"><span class="bt-reason">↻ Rerrolagem</span><span class="bt-title">${HEROES[h.defId].name} — ${black ? 'rolagem de Ataque' : 'rolagem de Defesa'}</span></div>
+      <p class="rr-msg">Clique para rolar os seus ${req.faces.length} dado${req.faces.length > 1 ? 's' : ''} de ${black ? 'Ataque' : 'Defesa'}.</p>
+      <div class="rr-dice">${req.faces.map((_, i) => `<span class="bdie ${black ? 'black' : 'white'}" data-r="${i}"><span>${dieImg('blank', black)}</span></span>`).join('')}</div>
+      <div class="bt-btns"><button class="primary" id="rr-roll">🎲 Rolar ${black ? 'ataque' : 'defesa'}</button></div></div>`;
     el.classList.remove('hidden');
+    await new Promise<void>(res => { this.askRoll = res; const b = el.querySelector('#rr-roll') as HTMLElement; b.onclick = () => res(); b.focus(); });
+    this.askRoll = null;
+    (el.querySelector('.bt-btns') as HTMLElement).innerHTML = '';
+    (el.querySelector('.rr-msg') as HTMLElement).textContent = 'Rolando os dados…';
+    el.querySelectorAll('.bdie').forEach(d => d.classList.add('rolling'));
+    play('dice', 0.8);
+    const spin = window.setInterval(() => el.querySelectorAll<HTMLElement>('.bdie.rolling > span').forEach(s => { s.innerHTML = dieImg(pool[Math.floor(Math.random() * pool.length)], black); }), 70);
+    req.faces.forEach((f, i) => setTimeout(() => {
+      const d = el.querySelector<HTMLElement>(`[data-r="${i}"]`);
+      if (!d) return;
+      d.classList.remove('rolling');
+      d.firstElementChild!.innerHTML = dieImg(f, black);
+      if (ok(f)) d.classList.add('hit');
+    }, (600 + i * 120) / sp));
+    await new Promise(r => setTimeout(r, (900 + req.faces.length * 120) / sp));
+    clearInterval(spin);
+    this.askReady = true;
+    render();
     return new Promise(res => { this.askResolve = res; });
   }
 
   /** Enter confirma a Rerrolagem sugerida. */
-  confirmAsk() { if (this.askResolve) this.answer([...this.askSel]); }
+  confirmAsk() { if (this.askRoll) this.askRoll(); else if (this.askResolve && this.askReady) this.answer([...this.askSel]); }
+  private askReady = true;
 
   private answer(idx: number[]) {
     const r = this.askResolve;
     this.askResolve = null;
-    this.askEl?.classList.add('hidden');
-    r?.(idx);
+    this.askReady = false;
+    const el = this.askEl;
+    if (!idx.length || !el) { el?.classList.add('hidden'); r?.(idx); return; }
+    // os dados escolhidos giram; o resultado novo aparece em seguida na rolagem do ataque
+    el.querySelectorAll<HTMLElement>('[data-i]').forEach(b => { if (idx.includes(Number(b.dataset.i))) b.classList.add('rolling', 'rerolling'); (b as HTMLButtonElement).disabled = true; });
+    const btns = el.querySelector('.bt-btns');
+    if (btns) btns.innerHTML = '<span class="muted">↻ Rerrolando…</span>';
+    play('dice', 0.8);
+    const black = !!el.querySelector('.bdie.black');
+    const pool: DieFace[] = black ? ['crit', 'melee', 'ranged', 'blank'] : ['crit', 'shield', 'blank', 'blank'];
+    const spin = window.setInterval(() => el.querySelectorAll<HTMLElement>('.bdie.rolling > span').forEach(x => { x.innerHTML = dieImg(pool[Math.floor(Math.random() * pool.length)], black); }), 70);
+    setTimeout(() => { clearInterval(spin); el.classList.add('hidden'); r?.(idx); }, 700 / Math.max(1, this.deps.speed()));
   }
 
   /** Enter/Espaço aciona o botão atual (Defender / Continuar). */
@@ -340,4 +398,35 @@ export class BattlePanel {
     if (this.resolveBtn) { this.resolveBtn(); return true; }
     return false;
   }
+}
+
+/** Anima a Rerrolagem: os dados rerrolados ficam com borda verde, giram e param no novo valor; ✷ extras entram no fim. */
+export async function rerollDice(_tray: HTMLElement, dice: HTMLElement[], rr: RerollInfo, final: DieFace[], success: DieFace, black: boolean, sp: number, add: () => HTMLElement) {
+  const pool: DieFace[] = black ? ['crit', 'melee', 'ranged', 'blank'] : ['crit', 'shield', 'blank', 'blank'];
+  const sel = rr.idx.map(i => dice[i]).filter(Boolean);
+  for (const d of sel) { d.classList.remove('hit', 'crit'); d.classList.add('rolling', 'rerolling'); }
+  play('dice', 0.8);
+  const spin = window.setInterval(() => { for (const d of dice) if (d.classList.contains('rolling')) d.firstElementChild!.innerHTML = dieImg(pool[Math.floor(Math.random() * pool.length)], black); }, 70);
+  await new Promise(r => setTimeout(r, 700 / sp));
+  for (const i of rr.idx) {
+    const d = dice[i];
+    if (!d) continue;
+    d.classList.remove('rolling');
+    d.firstElementChild!.innerHTML = dieImg(final[i], black);
+    if (final[i] === 'crit' || final[i] === success) d.classList.add('hit');
+    if (final[i] === 'crit') d.classList.add('crit');
+    await new Promise(r => setTimeout(r, 200 / sp));
+  }
+  // dados extras de críticos tirados na rerrolagem
+  for (let i = rr.before.length; i < final.length; i++) {
+    const d = add();
+    dice.push(d);
+    await new Promise(r => setTimeout(r, 380 / sp));
+    d.classList.remove('rolling');
+    d.firstElementChild!.innerHTML = dieImg(final[i], black);
+    if (final[i] === 'crit' || final[i] === success) d.classList.add('hit');
+    if (final[i] === 'crit') d.classList.add('crit');
+  }
+  clearInterval(spin);
+  setTimeout(() => sel.forEach(d => d.classList.remove('rerolling')), 900 / sp);
 }

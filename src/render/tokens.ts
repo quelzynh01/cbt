@@ -6,14 +6,16 @@ const IDS = ['fundo', 'cura', 'revigorante', 'turno', 'armadilha', 'bau1', 'bau2
   'missao_azul', 'missao_vermelho', 'missao_verde', 'missao_laranja'];
 const imgs = new Map<string, HTMLImageElement>();
 
+export const TOKEN_COUNT = 12;
+
 export function tokenUrl(id: string) { return `${import.meta.env.BASE_URL}tokens/${id}.webp`; }
 
 /** Carrega as imagens (chame uma vez no início). */
-export function preloadTokens(): Promise<void> {
+export function preloadTokens(onEach?: () => void): Promise<void> {
   return Promise.all(IDS.map(id => new Promise<void>(resolve => {
     const img = new Image();
-    img.onload = () => { imgs.set(id, img); resolve(); };
-    img.onerror = () => resolve();
+    img.onload = () => { imgs.set(id, img); onEach?.(); resolve(); };
+    img.onerror = () => { onEach?.(); resolve(); };
     img.src = tokenUrl(id);
   }))).then(() => undefined);
 }

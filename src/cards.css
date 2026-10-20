@@ -109,3 +109,11 @@
 .bimg.ac-tl, .bimg.mc-coin { position: absolute; top: 5px; z-index: 1; }
 .bimg.ac-tl { left: 5px; }
 .bimg.mc-coin { right: 5px; }
+
+/* carta de Herói: mesma altura para todos; o texto da habilidade ocupa sempre a mesma caixa */
+.acard.hero { height: 262px; min-height: 0; }
+.acard.hero .hc-body { flex: 1 1 0; min-height: 0; }
+.acard.hero .hc-left { min-height: 0; }
+.acard.hero .ac-ribbon { flex: none; }
+.acard.hero .ac-text { flex: 1 1 0; min-height: 0; overflow: hidden; }
+.acard.hero .hc-meds { flex: none; height: 46px; align-items: center; }

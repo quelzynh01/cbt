@@ -967,19 +967,20 @@ let artVersion = 0;
 export function getArtVersion() { return artVersion; }
 
 /** Carrega os PNGs listados em public/sprites/manifest.json (chame uma vez no início). */
-export async function preloadArt(): Promise<void> {
+export async function preloadArt(onEach?: () => void, expect?: (n: number) => void): Promise<void> {
   try {
     const res = await fetch(`${import.meta.env.BASE_URL}sprites/manifest.json`, { cache: 'no-cache' });
     if (!res.ok) return;
     type Entry = string[] | { dirs: string[]; ext?: string; feet?: Record<string, number>; top?: Record<string, number>; face?: Record<string, number[]> };
     const man = (await res.json()) as Record<string, Entry>;
     const jobs: Promise<void>[] = [];
+    expect?.(Object.values(man).reduce((n, e) => n + (Array.isArray(e) ? e : e.dirs).length, 0));
     for (const [id, e] of Object.entries(man)) for (const d of Array.isArray(e) ? e : e.dirs) {
       if (!Array.isArray(e)) meta.set(`${id}_${d}`, { feet: e.feet?.[d] ?? 1, top: e.top?.[d] ?? 0, face: e.face?.[d] });
       jobs.push(new Promise(resolve => {
         const img = new Image();
-        img.onload = () => { images.set(`${id}_${d}`, img); resolve(); };
-        img.onerror = () => resolve();
+        img.onload = () => { images.set(`${id}_${d}`, img); onEach?.(); resolve(); };
+        img.onerror = () => { onEach?.(); resolve(); };
         img.src = `${import.meta.env.BASE_URL}sprites/${id}_${d}.${Array.isArray(e) ? 'png' : e.ext ?? 'png'}`;
       }));
     }

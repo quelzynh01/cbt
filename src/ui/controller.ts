@@ -16,6 +16,7 @@ import { CURSES } from '../engine/cards';
 import { TOKEN_INFO } from '../engine/data';
 import { NeedDecision, type RestOptions } from '../engine/game';
 import { itemColor } from './cardview';
+import { play } from '../audio/sfx';
 
 /** Liga motor + renderer + HUD + IA + rede. Modos: local (teste), anfitrião e cliente (online). */
 export class Controller {
@@ -65,6 +66,22 @@ export class Controller {
           this.battle.playAttack(e, () => this.renderer.release());
           return true;
         }
+        // animações no centro da tela: o jogo espera elas acabarem
+        if (e.t === 'attack') {
+          // primeiro a rolagem (ataque e defesa) no centro da tela; com o resultado, a investida / o projétil
+          this.hud.centerDice(e, () => {
+            const ms = this.renderer.animateAttack(e);
+            setTimeout(() => this.renderer.release(), ms + 80);
+          });
+          return true;
+        }
+        if (e.t === 'pickup') {
+          // todos os marcadores do mesmo Espaço aparecem juntos
+          const all = [e, ...this.renderer.takePickups(e.heroId)];
+          this.hud.flipTokens(e.heroId, all.map(x => ({ token: x.token, hidden: !!x.hidden })), () => this.renderer.release());
+          return true;
+        }
+        if (e.t === 'useToken') { this.hud.showUsed(e.heroId, e.token, () => this.renderer.release()); return true; }
         if (e.t === 'spawnRoll') {
           this.hud.spawnRoll(e, () => this.renderer.release());
           return true;
@@ -90,6 +107,7 @@ export class Controller {
     let last = performance.now();
     const loop = (t: number) => {
       this.tickClock(t - last);
+      this.tickPan(t - last);
       this.tickView(t);
       last = t;
       this.renderer.frame(t);
@@ -708,6 +726,8 @@ export class Controller {
       e.preventDefault();
       this.renderer.zoomAt(e.clientX, e.clientY, e.deltaY < 0 ? 1.1 : 1 / 1.1);
     }, { passive: false });
+    window.addEventListener('keyup', e => { this.panKeys.delete(e.code); });
+    window.addEventListener('blur', () => this.panKeys.clear());
     window.addEventListener('keydown', e => {
       if (!this.game || (e.target as HTMLElement)?.tagName === 'INPUT' || (e.target as HTMLElement)?.tagName === 'SELECT') return;
       if (document.getElementById('hud')?.classList.contains('hidden')) return;
@@ -718,6 +738,8 @@ export class Controller {
         else if (e.code === 'Space' || e.code === 'Enter') { e.preventDefault(); this.battle.pressButton(); }
         return;
       }
+      if (PAN_KEYS.includes(e.code) && !e.ctrlKey && !e.metaKey) { this.panKeys.add(e.code); return; }
+      if (e.code === 'KeyB') { const id = this.hud.inspected ?? this.game.s.activation?.heroId; if (id && this.game.unit(id).kind === 'hero') { if (this.hud.bagIsOpen) this.hud.closeBag(); else this.hud.showBag(id); } return; }
       if (e.code === 'Space' || e.code === 'Enter') { e.preventDefault(); if (this.isHumanTurn() && !this.restDraft) this.act({ type: 'end' }); }
       else if (e.code === 'KeyR') { if (this.isHumanTurn()) this.openRest(); }
       else if (e.code === 'KeyG') { this.renderer.showGrid = !this.renderer.showGrid; this.updateTestPanel(); }
@@ -738,6 +760,20 @@ export class Controller {
         if (c && !c.exhausted) { this.hud.selectedCard = c.uid; this.refresh(); }
       }
     });
+  }
+
+  // ------------------------------------------------------------------
+  /** Teclas W/A/S/D seguradas: a câmera anda enquanto estiverem pressionadas. */
+  private panKeys = new Set<string>();
+  private tickPan(dt: number) {
+    if (!this.panKeys.size || dt <= 0 || dt > 200) return;
+    const v = 0.9 * dt; // pixels por ms
+    const c = this.renderer.cam;
+    this.renderer.camGoal = null;
+    if (this.panKeys.has('KeyW') || this.panKeys.has('ArrowUp')) c.y += v;
+    if (this.panKeys.has('KeyS') || this.panKeys.has('ArrowDown')) c.y -= v;
+    if (this.panKeys.has('KeyA') || this.panKeys.has('ArrowLeft')) c.x += v;
+    if (this.panKeys.has('KeyD') || this.panKeys.has('ArrowRight')) c.x -= v;
   }
 
   /** Reação de Vingança controlada por você (jogador à direita do ativo). */
@@ -1022,6 +1058,7 @@ export class Controller {
   // MISSÕES: mostrar objetivos no mapa
   // ------------------------------------------------------------------
   private showMission(id: string) {
+    play('scan');
     const g = this.game;
     const m = g.s.missions.find(x => x.id === id);
     if (!m) return;
@@ -1355,3 +1392,5 @@ export class Controller {
 
 export { sameCell };
 export type { Cell };
+
+const PAN_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];

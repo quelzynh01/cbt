@@ -4,14 +4,15 @@ import type { DieFace } from '../engine/types';
 
 const FILES = ['atk_melee', 'atk_ranged', 'atk_crit', 'atk_blank', 'def_shield', 'def_crit', 'def_blank',
   'entry_melee-melee', 'entry_ranged-ranged', 'entry_melee-ranged', 'entry_crit-ranged', 'entry_crit-melee'];
+export const DICE_COUNT = FILES.length;
 const imgs = new Map<string, HTMLImageElement>();
 const url = (id: string) => `${import.meta.env.BASE_URL}dice/${id}.webp`;
 
-export function preloadDice(): Promise<void> {
+export function preloadDice(onEach?: () => void): Promise<void> {
   return Promise.all(FILES.map(id => new Promise<void>(res => {
     const im = new Image();
-    im.onload = () => { imgs.set(id, im); res(); };
-    im.onerror = () => res();
+    im.onload = () => { imgs.set(id, im); onEach?.(); res(); };
+    im.onerror = () => { onEach?.(); res(); };
     im.src = url(id);
   }))).then(() => undefined);
 }

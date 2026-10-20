@@ -9,6 +9,7 @@ import { ITEM_LEVEL, MONSTER_LEVEL, curseCard, heroCard, itemCard, monsterCard, 
 import { CARDS as ALL_CARDS, CURSES } from '../engine/cards';
 import { TITLES, TITLE_TEXT } from '../engine/titles';
 import { getSettings, saveSettings } from './settings';
+import { play } from '../audio/sfx';
 import { tokenUrl } from '../render/tokens';
 import { EXPLORATION_BAG, TOKEN_INFO } from '../engine/data';
 
@@ -281,6 +282,12 @@ export class MenuPages {
       <h3>Câmera</h3>
       ${opt('view', 'free', '<b>Visão livre</b> — você move a câmera (arrastar e roda do mouse)', st.view)}
       ${opt('view', 'players', '<b>Visão dos jogadores</b> — a câmera segue quem está jogando (online: a tela e o mouse do jogador da vez)', st.view)}
+      <h3>Som</h3>
+      <label class="set-opt"><input type="checkbox" id="set-muted" ${st.muted ? 'checked' : ''}/> <b>Desativar todos os sons</b> (efeitos e música)</label>
+      <label class="set-opt"><input type="checkbox" id="set-sound" ${st.sound ? 'checked' : ''}/> Sons ligados</label>
+      <label class="set-opt set-vol">Volume dos efeitos <input type="range" id="set-volume" min="0" max="100" step="5" value="${Math.round(st.volume * 100)}"/> <b id="set-volv">${Math.round(st.volume * 100)}%</b></label>
+      <label class="set-opt"><input type="checkbox" id="set-music" ${st.music ? 'checked' : ''}/> Música ligada</label>
+      <label class="set-opt set-vol">Volume da música <input type="range" id="set-mvolume" min="0" max="100" step="5" value="${Math.round(st.musicVolume * 100)}"/> <b id="set-mvolv">${Math.round(st.musicVolume * 100)}%</b></label>
       <h3>Velocidade das animações</h3>
       ${opt('speed', '1', '1x', String(st.speed))}${opt('speed', '2', '2x', String(st.speed))}${opt('speed', '4', '4x', String(st.speed))}
       <h3>Cronômetro</h3>
@@ -294,9 +301,19 @@ export class MenuPages {
       const reroll = (this.page.querySelector('input[name=reroll]:checked') as HTMLInputElement).value as 'choose';
       const view = (this.page.querySelector('input[name=view]:checked') as HTMLInputElement).value as 'free';
       const ai = (this.page.querySelector('input[name=ai]:checked') as HTMLInputElement).value as 'normal';
-      saveSettings({ battle, speed, clock, reroll, view, ai });
+      const sound = (this.page.querySelector('#set-sound') as HTMLInputElement).checked;
+      const volume = Number((this.page.querySelector('#set-volume') as HTMLInputElement).value) / 100;
+      (this.page.querySelector('#set-volv') as HTMLElement).textContent = `${Math.round(volume * 100)}%`;
+      const music = (this.page.querySelector('#set-music') as HTMLInputElement).checked;
+      const musicVolume = Number((this.page.querySelector('#set-mvolume') as HTMLInputElement).value) / 100;
+      (this.page.querySelector('#set-mvolv') as HTMLElement).textContent = `${Math.round(musicVolume * 100)}%`;
+      const muted = (this.page.querySelector('#set-muted') as HTMLInputElement).checked;
+      saveSettings({ ...getSettings(), battle, speed, clock, reroll, view, ai, sound, volume, music, musicVolume, muted });
     };
     this.page.querySelectorAll<HTMLInputElement>('input').forEach(i => { i.onchange = upd; });
+    (this.page.querySelector('#set-volume') as HTMLInputElement).oninput = upd;
+    (this.page.querySelector('#set-mvolume') as HTMLInputElement).oninput = upd;
+    (this.page.querySelector('#set-volume') as HTMLInputElement).onchange = () => { upd(); play('dice', 0.8); };
   }
 
   showMaps(selected = loadMapId()) {
