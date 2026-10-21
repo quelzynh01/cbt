@@ -44,7 +44,7 @@ export function invEditorHtml(items: InvItem[], o: InvOptions): string {
     const curse = o.curse?.(h);
     const slots: string[] = mine.map(x => `<button class="inv-slot full" data-slot="${h}" data-item="${x.i}" title="Trocar ou tirar esta carta" ${o.ready ? 'disabled' : ''}>${itemCard(x.id)}</button>`);
     for (let k = mine.length; k < total; k++) slots.push(`<button class="inv-slot empty ${k >= sl.max ? 'magic' : ''}" data-slot="${h}" ${o.ready ? 'disabled' : ''}><span>＋</span><small>${k >= sl.max ? 'Espaço Mágico' : 'Espaço vazio'}</small></button>`);
-    return `<div class="inv-hero ${sl.used > sl.max ? 'over' : ''}" style="--gc:${o.color}">
+    return `<div class="inv-hero ${sl.used > sl.max ? 'over' : ''}" data-hero="${h}" style="--gc:${o.color}">
       <div class="inv-hh"><canvas width="56" height="56" data-iface="${h}"></canvas><div><b>${HEROES[h].name}</b><small>${HEROES[h].title}</small></div>
         <span class="inv-count ${sl.used > sl.max ? 'bad' : ''}">${sl.used}/${sl.max}${sl.magicExtra ? ` +${sl.magicExtra}✨` : ''}</span></div>
       ${curse ? `<div class="inv-curse">☠ ${esc(curse)}</div>` : ''}
@@ -54,7 +54,7 @@ export function invEditorHtml(items: InvItem[], o: InvOptions): string {
   const disc = items.map((x, i) => ({ ...x, i })).filter(x => x.to === 'descartar');
   return `<div class="inv-ed">
     <div class="inv-heroes">${heroCols}</div>
-    ${pool.length ? `<div class="inv-pool"><h4>🎒 Cartas sem Herói <small>— clique para equipar${o.discard ? ' ou descartar' : ''}</small></h4><div class="inv-row">${pool.map(x => `<button class="inv-slot full" data-item="${x.i}" ${o.ready ? 'disabled' : ''}>${itemCard(x.id)}</button>`).join('')}</div></div>` : ''}
+    ${pool.length ? `<div class="inv-pool" data-pool="pool"><h4>🎒 Cartas sem Herói <small>— clique para equipar${o.discard ? ' ou descartar' : ''}</small></h4><div class="inv-row">${pool.map(x => `<button class="inv-slot full" data-item="${x.i}" ${o.ready ? 'disabled' : ''}>${itemCard(x.id)}</button>`).join('')}</div></div>` : ''}
     ${disc.length ? `<div class="inv-pool disc"><h4>🗑 Descartadas <small>— clique para recuperar</small></h4><div class="inv-row">${disc.map(x => `<button class="inv-slot full disc" data-item="${x.i}" ${o.ready ? 'disabled' : ''}>${itemCard(x.id)}</button>`).join('')}</div></div>` : ''}
   </div>`;
 }
@@ -64,11 +64,67 @@ export function bindInvEditor(root: ParentNode, items: InvItem[], o: InvOptions,
   paintCardArt(root);
   root.querySelectorAll<HTMLCanvasElement>('canvas[data-iface]').forEach(cv => drawFace(cv, cv.dataset.iface!, o.color));
   if (o.ready) return;
+  let dragged = false;
   root.querySelectorAll<HTMLElement>('.inv-slot').forEach(b => {
     b.onclick = () => {
+      if (dragged) { dragged = false; return; } // soltou depois de arrastar: não abre a janela
       const hero = b.dataset.slot ?? null;
       const item = b.dataset.item !== undefined ? Number(b.dataset.item) : null;
       openPicker(items, o, hero, item, rerender);
+    };
+  });
+  // arrastar uma carta: soltar em outra carta troca as duas de lugar; num espaço vazio ou no Herói, ela vai para ele
+  root.querySelectorAll<HTMLElement>('.inv-slot.full[data-item]').forEach(b => {
+    b.onpointerdown = e => {
+      if (e.button !== 0) return;
+      const from = Number(b.dataset.item);
+      const x0 = e.clientX, y0 = e.clientY;
+      let ghost: HTMLElement | null = null;
+      let over: HTMLElement | null = null;
+      const target = (x: number, y: number) => {
+        const el = document.elementFromPoint(x, y) as HTMLElement | null;
+        return el?.closest<HTMLElement>('.inv-slot, .inv-hero, [data-pool]') ?? null;
+      };
+      const move = (ev: PointerEvent) => {
+        if (!ghost) {
+          if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < 8) return;
+          ghost = b.cloneNode(true) as HTMLElement;
+          ghost.classList.add('inv-ghost');
+          document.body.append(ghost);
+          b.classList.add('inv-dragging');
+        }
+        ghost.style.left = `${ev.clientX}px`;
+        ghost.style.top = `${ev.clientY}px`;
+        const t = target(ev.clientX, ev.clientY);
+        if (t !== over) { over?.classList.remove('inv-over'); over = t && t !== b ? t : null; over?.classList.add('inv-over'); }
+      };
+      const up = (ev: PointerEvent) => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        if (!ghost) return;
+        ghost.remove();
+        b.classList.remove('inv-dragging');
+        over?.classList.remove('inv-over');
+        dragged = true;
+        setTimeout(() => { dragged = false; }, 0);
+        const t = target(ev.clientX, ev.clientY);
+        if (!t || t === b) return;
+        const cur = items[from];
+        if (t.dataset.item !== undefined) {
+          // troca as duas cartas de lugar
+          const other = items[Number(t.dataset.item)];
+          if (other === cur) return;
+          const was = cur.to;
+          cur.to = other.to;
+          other.to = was;
+        } else if (t.dataset.slot) cur.to = t.dataset.slot;
+        else if (t.dataset.hero) cur.to = t.dataset.hero;
+        else if (t.dataset.pool) cur.to = 'pool';
+        else return;
+        rerender();
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
     };
   });
 }

@@ -24,8 +24,8 @@ function player(t: Track): HTMLAudioElement {
 function apply() {
   const st = getSettings();
   for (const [t, a] of players) {
-    a.volume = Math.max(0, Math.min(1, st.musicVolume));
-    const want = t === current && !st.muted && st.music && st.musicVolume > 0 && unlocked;
+    a.volume = Math.max(0, Math.min(1, st.musicVolume * (st.master ?? 1)));
+    const want = t === current && !st.muted && st.music && st.musicVolume > 0 && (st.master ?? 1) > 0 && unlocked;
     if (want && a.paused) a.play().catch(() => { /* bloqueado ou sem arquivo */ });
     if (!want && !a.paused) a.pause();
   }

@@ -1183,7 +1183,7 @@ export function drawFull(canvas: HTMLCanvasElement, id: string, flip = false, bg
     // recorta pela área visível: imagens com muita margem (ex.: orcs) ficariam pequenas
     const [bx, by, bw, bh] = opaqueBox(s);
     // ajuste por figura: o Goblin é baixinho; o Capitão Orc segura a espada aberta (largo) e ficaria pequeno
-    const fit = CARD_FIT[id] ?? { scale: 1, wide: 1 };
+    const fit = CARD_FIT[id] ?? CARD_FIT[id.replace(/\d+$/, '')] ?? { scale: 1, wide: 1 }; // todos os níveis usam o ajuste da figura
     const k = Math.min((h - 14) / bh, (w - 10) * fit.wide / bw) * fit.scale;
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(s.cv, bx, by, bw, bh, (w - bw * k) / 2, h - 6 - bh * k, bw * k, bh * k);

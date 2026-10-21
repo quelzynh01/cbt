@@ -1,4 +1,5 @@
 import { entryPlaque } from './dice';
+import { getSettings } from '../ui/settings';
 import { play, playOnce, type Sfx } from '../audio/sfx';
 import { CARDS } from '../engine/cards';
 import { drawTokenImage, tokenImage, tokenImageId } from './tokens';
@@ -707,6 +708,7 @@ export class Renderer {
     }
     this.drawGroundOverlays();
     this.drawSprites();
+    this.drawMissionBadges();
     this.drawFlashArrows();
     this.drawPings();
     this.drawFx();
@@ -883,18 +885,6 @@ export class Renderer {
       ctx.setLineDash([10, 7]);
       ctx.stroke();
       ctx.setLineDash([]);
-      // Arena: quantas vezes cada Guilda já marcou este marcador (terminou a ativação em cima dele)
-      const arena = this.game.s.arena;
-      if (arena) {
-        const marks = this.game.s.guildOrder.map(gid => ({ gid, n: (arena[gid] ?? []).filter(x => x === k).length })).filter(m => m.n);
-        marks.forEach((m, i) => {
-          const p = g2s(c + 0.78, r + 0.22 + i * 0.16);
-          ctx.fillStyle = GUILDS[m.gid as keyof typeof GUILDS].color; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5;
-          ctx.beginPath(); ctx.arc(p.x, p.y, 15, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-          ctx.fillStyle = '#fff'; ctx.font = '900 15px "Baloo 2", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-          ctx.fillText(`×${m.n}`, p.x, p.y + 1); ctx.textBaseline = 'alphabetic';
-        });
-      }
     }
     // portais
     for (const p of this.game.map.portals) {
@@ -940,7 +930,9 @@ export class Renderer {
       paint(this.flash.cells, '255,170,0', '255,236,120');
     }
     const purple = this.hl.moveColor === 'purple', green = this.hl.moveColor === 'green';
-    for (const [k] of this.hl.move) {
+    // Configurações: sem a sinalização de ajuda, não pinta os Espaços azuis (andar) nem os vermelhos (atacar) da jogada normal
+    const hints = getSettings().hints !== false;
+    for (const [k] of hints || purple || green ? this.hl.move : []) {
       const [c, r] = k.split(',').map(Number);
       diamondPath(ctx, c + 0.05, r + 0.05, 0.9, 0.9);
       ctx.fillStyle = green ? 'rgba(60,190,90,0.45)' : purple ? 'rgba(150,70,210,0.42)' : 'rgba(40,120,230,0.42)';
@@ -949,7 +941,7 @@ export class Renderer {
       ctx.lineWidth = 1.5;
       ctx.stroke();
     }
-    for (const k of this.hl.attackCells ?? []) {
+    for (const k of hints || purple ? this.hl.attackCells ?? [] : []) {
       const [c, r] = k.split(',').map(Number);
       diamondPath(ctx, c + 0.12, r + 0.12, 0.76, 0.76);
       ctx.setLineDash([14, 8]);
@@ -975,7 +967,7 @@ export class Renderer {
       }
     }
     // alvos de ataque (vermelho)
-    for (const id of this.hl.attackUnits) {
+    for (const id of hints || purple ? this.hl.attackUnits : []) {
       const u = this.units.get(id);
       if (!u?.cell) continue;
       diamondPath(ctx, u.cell.c + 0.05, u.cell.r + 0.05, 0.9, 0.9);
@@ -1270,17 +1262,21 @@ export class Renderer {
       ctx.lineWidth = 2; ctx.strokeStyle = '#1b0f08'; ctx.stroke();
       ctx.fillStyle = '#fff'; ctx.fillText(String(u.num), -bw / 2 - 9, top + 6);
     }
-    // marcador de Missão carregado (escolta, Tomos…): aparece acima da cabeça
+    // marcador de Missão carregado (escolta, Tomos…): grande, em cima da cabeça, com brilho
     const carried = u.kind === 'hero' ? (this.game.s.units[u.id]?.tokens ?? []).filter(t => t.type === 'missao') : [];
     carried.forEach((t, i) => {
       const img = tokenImage(tokenImageId(t));
-      const x = bw / 2 + 14 + i * 20, y = top - 8 + Math.sin(tt * 3 + i) * 2;
-      if (img) { ctx.drawImage(img, x - 15, y - 15, 30, 30); }
-      else { ctx.fillStyle = '#ffd34d'; ctx.beginPath(); ctx.arc(x, y, 9, 0, Math.PI * 2); ctx.fill(); }
+      const S = 84;
+      const x = (i - (carried.length - 1) / 2) * (S + 6), y = top - 64 + Math.sin(tt * 3 + i) * 4;
+      const glow = ctx.createRadialGradient(x, y, 4, x, y, S * 0.85);
+      glow.addColorStop(0, `rgba(${hexRgb(gemColor(t.color))},0.75)`); glow.addColorStop(1, 'rgba(255,220,120,0)');
+      ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(x, y, S * 0.85, 0, Math.PI * 2); ctx.fill();
+      if (img) ctx.drawImage(img, x - S / 2, y - S / 2, S, S);
+      else { ctx.fillStyle = '#ffd34d'; ctx.beginPath(); ctx.arc(x, y, S / 3, 0, Math.PI * 2); ctx.fill(); }
     });
     if (carried.length) {
-      ctx.font = '900 11px "Baloo 2", sans-serif'; ctx.lineWidth = 3; ctx.strokeStyle = '#1b0f08'; ctx.textAlign = 'center';
-      ctx.strokeText('★ carregando', bw / 2 + 14, top - 26); ctx.fillStyle = '#ffe9a8'; ctx.fillText('★ carregando', bw / 2 + 14, top - 26);
+      ctx.font = '900 20px "Baloo 2", sans-serif'; ctx.lineWidth = 5; ctx.strokeStyle = '#1b0f08'; ctx.textAlign = 'center';
+      ctx.strokeText('★ MISSÃO', 0, top - 112); ctx.fillStyle = '#ffe9a8'; ctx.fillText('★ MISSÃO', 0, top - 112);
     }
     if (active) {
       const ay = top - 22 + Math.sin(tt * 5) * 3;
@@ -1288,6 +1284,44 @@ export class Renderer {
       ctx.beginPath(); ctx.moveTo(-8, ay - 8); ctx.lineTo(8, ay - 8); ctx.lineTo(0, ay + 2); ctx.closePath(); ctx.fill(); ctx.stroke();
     }
     ctx.restore();
+  }
+
+  /** Arena (ficar no marcador de Missão): o contador de cada Guilda flutua em cima do Espaço, por cima de tudo, para todos verem. */
+  private drawMissionBadges() {
+    const arena = this.game.s.arena;
+    if (!arena) return;
+    const ctx = this.ctx;
+    const total = this.game.map.missionMarkers.length;
+    for (const [k, toks] of Object.entries(this.floor)) {
+      if (!toks.some(t => t.type === 'missao')) continue;
+      const [c, r] = k.split(',').map(Number);
+      const marks = this.game.s.guildOrder.map(gid => ({ gid, n: (arena[gid] ?? []).filter(x => x === k).length })).filter(m => m.n);
+      if (!marks.length) continue;
+      const base = g2s(c + 0.5, r + 0.5);
+      const R = 34, gap = 10, w = marks.length * (R * 2 + gap) - gap;
+      const y = base.y - 285;
+      // haste até o chão do Espaço
+      ctx.strokeStyle = 'rgba(255,240,180,0.7)'; ctx.lineWidth = 3; ctx.setLineDash([6, 5]);
+      ctx.beginPath(); ctx.moveTo(base.x, y + R); ctx.lineTo(base.x, base.y - 10); ctx.stroke(); ctx.setLineDash([]);
+      // placa de fundo
+      ctx.fillStyle = 'rgba(20,12,6,0.85)'; ctx.strokeStyle = '#f0c243'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.roundRect(base.x - w / 2 - 14, y - R - 32, w + 28, R * 2 + 56, 16); ctx.fill(); ctx.stroke();
+      ctx.font = '900 18px "Baloo 2", sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#ffe9a8';
+      ctx.fillText('🏆 ARENA', base.x, y - R - 10);
+      marks.forEach((m, i) => {
+        const x = base.x - w / 2 + R + i * (R * 2 + gap);
+        const list = arena[m.gid] ?? [];
+        ctx.fillStyle = GUILDS[m.gid as keyof typeof GUILDS].color; ctx.strokeStyle = '#fff'; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(x, y + 4, R, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = '#fff'; ctx.font = '900 32px "Baloo 2", sans-serif'; ctx.textBaseline = 'middle';
+        ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,.55)';
+        ctx.strokeText(`×${m.n}`, x, y + 5); ctx.fillText(`×${m.n}`, x, y + 5);
+        ctx.textBaseline = 'alphabetic';
+        // total da Guilda (5 marcações ou 1 em cada marcador)
+        ctx.font = '800 14px "Baloo 2", sans-serif'; ctx.fillStyle = '#ffe9a8';
+        ctx.fillText(`${list.length}/5 · ${new Set(list).size}/${total}`, x, y + R + 20);
+      });
+    }
   }
 
   private drawFx() {

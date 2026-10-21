@@ -1073,3 +1073,4 @@ body:has(#roulette, #gamedialog, #gamemenu:not(.hidden), #battle:not(.hidden):no
 }
 /* a faixa "Sua vez" e o aviso de banner esperam a roleta e o menu */
 body:has(#roulette, #gamemenu:not(.hidden), #gamedialog) :is(#activebar, #banner, #turnframe) { display: none !important; }
+.dp-row .dp-tip { flex: 1; min-width: 220px; }

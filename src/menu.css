@@ -433,3 +433,18 @@
 .hub-ocards { display: flex; flex-wrap: wrap; gap: 4px; }
 .hub-ocard { width: 58px; height: 93px; }
 .hub-ocard .acard { zoom: .27; }
+
+/* arrastar cartas no editor */
+.inv-slot.full { touch-action: none; }
+.inv-ghost { position: fixed; z-index: 9500; pointer-events: none; transform: translate(-50%, -60%) rotate(-4deg) scale(1.05); opacity: .92; filter: drop-shadow(0 10px 18px rgba(0,0,0,.6)); width: 118px; height: 190px; overflow: hidden; border-radius: 12px; }
+.inv-ghost .acard { zoom: .55; }
+.inv-dragging { opacity: .35; }
+.inv-over { outline: 3px solid #ffe14d; outline-offset: 2px; border-radius: 12px; }
+.inv-hero.inv-over { box-shadow: 0 0 0 3px #ffe14d, 0 0 18px #ffe14d; outline: none; }
+
+/* sala online: Configurações da partida */
+.lb-sum { font-size: 13px; color: var(--muted); font-weight: 600; }
+#matchcfg { position: fixed; inset: 0; z-index: 9000; display: grid; place-items: center; padding: 16px; background: rgba(8,4,2,.6); font-family: 'Baloo 2', system-ui, sans-serif; color: var(--text); }
+.mc-cfg { width: min(480px, 100%); display: grid; gap: 10px; padding: 16px 20px; border-radius: 20px; border: 3px solid var(--gold); background: linear-gradient(#3b2a1a, #24180d); box-shadow: 0 18px 50px rgba(0,0,0,.7); animation: tfIn .2s ease-out; }
+.mcf-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-weight: 700; }
+.mcf-row select { font-family: inherit; font-size: 15px; background: #2a1d12; color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; }

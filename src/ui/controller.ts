@@ -1376,20 +1376,12 @@ export class Controller {
     const el = this.hud.panel('deploybox', `
       <div class="panel-h">📍 Posicione seus Heróis <small>${g.name}</small><span class="dp-short"> · toque ou arraste até um Espaço verde</span></div>
       <div class="rb-body dp-body">
-        <p class="dp-tip">Toque num Herói e depois num <b>Espaço verde</b> — ou <b>arraste</b> o Herói no mapa. Soltar sobre um Aliado num Espaço cheio troca os dois de lugar. Máximo 2 por Espaço.</p>
         <div class="dp-row">
-          <div class="dp-heroes">${heroes.map(h => `<button class="dp-hero ${this.deploySel === h.id ? 'on' : ''}" data-dp="${h.id}" title="${HEROES[h.defId].name}">
-            <img src="${this.hud.portraitOf(h)}"/><span>${h.num}. ${HEROES[h.defId].name}</span></button>`).join('')}</div>
+          <p class="dp-tip"><b>Arraste</b> os Heróis no mapa até um <b>Espaço verde</b> (ou toque no Herói e depois no Espaço). Soltar sobre um Aliado num Espaço cheio troca os dois de lugar. Máximo 2 por Espaço.</p>
           <div class="dp-btns"><button class="primary" id="dp-ok">✔ Pronto</button></div>
         </div>
         ${others.length ? `<p class="muted">Também posicionando: ${others.map(x => this.hud.nameOf(x) ?? guildShort(x)).join(', ')}.</p>` : ''}
       </div>`);
-    el.querySelectorAll<HTMLElement>('[data-dp]').forEach(b => { b.onclick = () => {
-      this.deploySel = b.dataset.dp!;
-      const c = this.game.unit(this.deploySel).cell;
-      if (c) this.renderer.glideCells([c]);
-      this.refresh();
-    }; });
     // hotseat: ao passar para a próxima Guilda, a câmera vai até a Área Inicial dela — no espaço livre abaixo do painel
     if (refocus) {
       this.renderer.focus(area);

@@ -75,6 +75,8 @@ export interface CampaignState {
   setup?: Setup;
   /** Mapa escolhido na votação (1º cenário). */
   voted?: string;
+  /** Configurações da partida: na Fase de Melhorias cada um pega 1 carta por rodada (6 rodadas) em vez de 2 (3 rodadas). */
+  pickOne?: boolean;
   /** Mapa já escolhido para o próximo cenário (fica salvo: sair e voltar não muda). */
   next?: string;
   /** Tempo total jogado (ms). */
@@ -113,9 +115,9 @@ function shuffled<T>(c: CampaignState, a: T[]): T[] {
 }
 
 // ------------------------------------------------------------------ criação
-export function newCampaign(opponents: number, name?: string, aiLevel: AILevel = 'normal', diceCap = false): CampaignState {
+export function newCampaign(opponents: number, name?: string, aiLevel: AILevel = 'normal', diceCap = false, pickOne = false): CampaignState {
   const ids: GuildId[] = ['azul', 'vermelho', 'verde', 'laranja'];
-  const c: CampaignState = { version: 1, guilds: [], played: [], chooser: 'azul', phase: 'setup', seed: (Date.now() ^ (Math.random() * 1e9)) | 0, elapsed: 0, aiLevel, diceCap };
+  const c: CampaignState = { version: 1, guilds: [], played: [], chooser: 'azul', phase: 'setup', seed: (Date.now() ^ (Math.random() * 1e9)) | 0, elapsed: 0, aiLevel, diceCap, ...(pickOne ? { pickOne } : {}) };
   for (let i = 0; i <= opponents; i++) c.guilds.push({ id: ids[i], controller: i === 0 ? 'human' : 'ai', heroes: [], inventory: {}, saved: 0, titles: [], curses: {}, ...(i === 0 && name?.trim() ? { name: name.trim().slice(0, 20) } : {}) });
   useCampaignNames(c);
   // Recrutamento de Heróis (p.7): cada jogador recebe uma mão, escolhe 1 e passa o resto para a esquerda.
@@ -300,12 +302,16 @@ function guildCardValue(c: CampaignState, g: CGuild, id: string): number {
   return cardValue(id) * (hard ? fit : 1 + (fit - 1) * 0.4) * afford + (hard ? 0 : (rnd(c) - 0.5) * 2.5);
 }
 
+/** Cartas escolhidas por rodada na Fase de Melhorias (2, ou 1 com a regra "pegar 1") e quantas rodadas (sempre 6 cartas no fim). */
+export const picksPerRound = (c: CampaignState) => c.pickOne ? 1 : 2;
+export const draftRounds = (c: CampaignState) => 6 / picksPerRound(c);
+
 export function aiDraftPicks(c: CampaignState) {
   const up = c.upgrade!;
   for (const g of c.guilds) if (g.controller === 'ai') {
     const hand = up.hands[g.id]!;
     const score = Object.fromEntries(hand.map(id => [id, guildCardValue(c, g, id)]));
-    const best = hand.slice().sort((a, b) => score[b] - score[a]).slice(0, 2);
+    const best = hand.slice().sort((a, b) => score[b] - score[a]).slice(0, picksPerRound(c));
     for (const id of best) hand.splice(hand.indexOf(id), 1);
     up.picked[g.id]!.push(...best);
   }
@@ -316,7 +322,7 @@ export function autoUpgrade(c: CampaignState) {
   const up = c.upgrade;
   if (!up) return;
   const order = c.guilds.map(g => g.id);
-  while (up.round < 3) {
+  while (up.round < draftRounds(c)) {
     if (up.round > 0) aiDraftPicks(c);
     const prev = Object.fromEntries(order.map(id => [id, up.hands[id]!]));
     order.forEach((id, i) => { up.hands[order[(i + 1) % order.length]] = prev[id]; });
@@ -338,7 +344,7 @@ export function draftPick(c: CampaignState, ids: string[]) {
   const prev = Object.fromEntries(order.map(id => [id, up.hands[id]!]));
   order.forEach((id, i) => { up.hands[order[(i + 1) % order.length]] = prev[id]; });
   up.round++;
-  if (up.round >= 3) {
+  if (up.round >= draftRounds(c)) {
     up.step = 'buy';
     for (const g of c.guilds) if (g.controller === 'ai') aiBuy(c, g);
   } else aiDraftPicks(c);
@@ -515,7 +521,7 @@ export function draftPickAll(c: CampaignState, picks: Partial<Record<GuildId, st
   const prev = Object.fromEntries(order.map(id => [id, up.hands[id]!]));
   order.forEach((id, i) => { up.hands[order[(i + 1) % order.length]] = prev[id]; });
   up.round++;
-  if (up.round >= 3) {
+  if (up.round >= draftRounds(c)) {
     up.step = 'buy';
     for (const g of c.guilds) if (g.controller === 'ai') aiBuy(c, g);
   } else aiDraftPicks(c);

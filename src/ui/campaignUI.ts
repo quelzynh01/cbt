@@ -4,7 +4,7 @@ import { play } from '../audio/sfx';
 import {
   useCampaignNames,
   CIRCLES, CIRCLE_NEED, STARTER_CARDS, type CampaignState, aiChoice, draftHero, finishEquip, voteMap, availableScenarios, draftPick, finishArrange, finishBuy, guildName,
-  guildOf, heroSlots, human, loadCampaign, medals, newCampaign, nextScenario, progress, saveCampaign, scenarioLevel, scenarioNumber,
+  guildOf, heroSlots, human, picksPerRound, draftRounds, loadCampaign, medals, newCampaign, nextScenario, progress, saveCampaign, scenarioLevel, scenarioNumber,
   validateInventory, victoryRank,
 } from '../campaign/campaign';
 import { CARDS, CURSES } from '../engine/cards';
@@ -14,6 +14,7 @@ import { TITLES, TITLE_TEXT } from '../engine/titles';
 import { drawFace } from '../render/chibi';
 import { curseCard, heroCard, itemCard, paintCardArt } from './cardview';
 import { CARD_ART } from './cardArt';
+import { buySummaryHtml, curseRevealHtml, curseSummaryHtml } from './upgradeViews';
 import { attachMapPeek, closeMapPeek, mapChoiceCard } from './mapInfo';
 import { bindInvEditor, invEditorHtml, poolErrors, type InvItem, type InvOptions } from './inventoryEditor';
 import { fmtTime, getSettings } from './settings';
@@ -107,12 +108,13 @@ export class CampaignUI {
         <label class="lb-field">Dificuldade da IA <select id="cp-ai"><option value="normal">Normal</option><option value="hard" ${getSettings().ai === 'hard' ? 'selected' : ''}>Difícil</option></select></label>
         <h4 class="cp-opt-h">⚙️ Configurações da partida</h4>
         <label class="set-opt"><input type="checkbox" id="cp-cap"/> <b>Limite de dados</b> — no máximo 8 dados de ataque e 6 de defesa por rolagem (contando críticos e rerrolagens), como os dados físicos da caixa. Sem marcar, os dados são ilimitados.</label>
+        <label class="set-opt"><input type="checkbox" id="cp-one"/> <b>Pegar 1 carta</b> — na Fase de Melhorias cada um pega <b>1 carta</b> e passa o resto (6 rodadas), em vez de 2 cartas (3 rodadas).</label>
         <label class="lb-field">Adversários (IA) <select id="cp-opp"><option value="1">1</option><option value="2">2</option><option value="3" selected>3</option></select></label>
         <button class="primary cp-big" id="cp-start">🏰 Começar campanha</button>
       </div>`);
     (this.page.querySelector('#cp-start') as HTMLElement).onclick = () => {
       const n = Number((this.page.querySelector('#cp-opp') as HTMLSelectElement).value);
-      this.c = newCampaign(n, (this.page.querySelector('#cp-name') as HTMLInputElement).value, (this.page.querySelector('#cp-ai') as HTMLSelectElement).value as 'normal' | 'hard', (this.page.querySelector('#cp-cap') as HTMLInputElement).checked);
+      this.c = newCampaign(n, (this.page.querySelector('#cp-name') as HTMLInputElement).value, (this.page.querySelector('#cp-ai') as HTMLSelectElement).value as 'normal' | 'hard', (this.page.querySelector('#cp-cap') as HTMLInputElement).checked, (this.page.querySelector('#cp-one') as HTMLInputElement).checked);
       this.c.chooser = human(this.c).id;
       this.save();
       this.setupFlow();
@@ -328,13 +330,13 @@ export class CampaignUI {
       const hand = up.hands[me.id]!;
       this.sel = new Set([...this.sel].filter(i => Number(i) < hand.length));
       this.show(`Fase de Melhorias · Nível ${up.level}`, `${results}
-        <div class="cp-step"><h3>1. Escolha de cartas — rodada ${up.round + 1} de 3</h3>
-        <p>Escolha <b>2 cartas</b> da sua mão. O resto passa para o jogador à esquerda (as IAs fazem o mesmo). No fim você terá 6 cartas para comprar.</p>
+        <div class="cp-step"><h3>1. Escolha de cartas — rodada ${up.round + 1} de ${draftRounds(c)}</h3>
+        <p>Escolha <b>${picksPerRound(c) === 1 ? '1 carta' : '2 cartas'}</b> da sua mão. O resto passa para o jogador à esquerda (as IAs fazem o mesmo). No fim você terá 6 cartas para comprar.</p>
         <div class="cp-cards">${hand.map((id, i) => cardHtml(id, this.sel.has(`${i}`) ? 'sel' : '', `data-i="${i}"`)).join('')}</div>
         ${up.picked[me.id]!.length ? `<h4>Já escolhidas</h4><div class="cp-cards small">${up.picked[me.id]!.map(id => cardHtml(id)).join('')}</div>` : ''}
-        <button class="primary cp-big" id="cp-ok" ${this.sel.size === Math.min(2, hand.length) ? '' : 'disabled'}>Confirmar escolha</button></div>`, false);
+        <button class="primary cp-big" id="cp-ok" ${this.sel.size === Math.min(picksPerRound(c), hand.length) ? '' : 'disabled'}>Confirmar escolha</button></div>`, false);
       this.page.querySelectorAll<HTMLElement>('[data-i]').forEach(el => {
-        el.onclick = () => { const k = el.dataset.i!; if (this.sel.has(k)) this.sel.delete(k); else if (this.sel.size < 2) this.sel.add(k); this.upgrade(); };
+        el.onclick = () => { const k = el.dataset.i!; if (this.sel.has(k)) this.sel.delete(k); else if (this.sel.size < picksPerRound(c)) this.sel.add(k); this.upgrade(); };
       });
       (this.page.querySelector('#cp-ok') as HTMLElement).onclick = () => {
         const ids = [...this.sel].map(i => hand[Number(i)]);
@@ -382,20 +384,10 @@ export class CampaignUI {
     const list = up.cursesDrawn;
     const step = up.curseStep ?? 0;
     clearTimeout(this.curseTimer);
-    const who = (g: GuildId) => `<span class="dot" style="background:${GUILDS[g].color}"></span> ${guildName(g)}`;
+    const name = (g: GuildId) => guildName(g);
     if (step >= list.length) {
-      // resumo
-      const rows = c.guilds.map(g => {
-        const mine = list.filter(x => x.guild === g.id);
-        if (!mine.length) return '';
-        return `<div class="cr-sumg"><h4>${who(g.id)}</h4><div class="cr-sumrow">${mine.map(x => `<div class="cr-sumhero ${x.kept === 'sem_maldicao' ? 'free' : ''}">
-          <b>${HEROES[x.hero].name}</b><small>${x.drawn.length} morte${x.drawn.length > 1 ? 's' : ''}</small>${curseCard(x.kept, 'small')}</div>`).join('')}</div></div>`;
-      }).join('');
-      this.show('Maldições Mortais · Resumo', `
-        <div class="cp-step"><h3>☠ Quem ficou amaldiçoado</h3>
-        <p>As Maldições valem durante o próximo cenário. Uma <b>Poção de Cura</b> remove a Maldição na hora.</p>
-        ${rows}
-        <button class="primary cp-big" id="cp-ok">Continuar para as Melhorias ▶</button></div>`, false);
+      this.show('Maldições Mortais · Resumo', `${curseSummaryHtml(c, name)}
+        <div class="cp-step"><button class="primary cp-big" id="cp-ok">Continuar para as Melhorias ▶</button></div>`, false);
       paintCardArt(this.page);
       (this.page.querySelector('#cp-ok') as HTMLElement).onclick = () => { up.curseDone = true; this.save(); this.upgrade(); };
       return;
@@ -404,21 +396,8 @@ export class CampaignUI {
     const flipped = Math.min(up.curseFlipped ?? 0, cur.drawn.length);
     const all = flipped >= cur.drawn.length;
     const mine = cur.guild === me.id;
-    const keptAt = cur.drawn.indexOf(cur.kept);
-    const cards = cur.drawn.map((id, i) => i < flipped
-      ? `<div class="cr-slot face ${all ? (i === keptAt ? 'kept' : 'back-deck') : ''}">${curseCard(id)}${all ? `<span class="cr-tag">${i === keptAt ? '✔ Fica com esta' : '↩ Volta ao baralho'}</span>` : ''}</div>`
-      : `<button class="cr-slot cr-back ${mine && i === flipped ? 'next' : ''}" data-flip="${i}" ${mine && i === flipped ? '' : 'disabled'}><span class="cr-skull">💀</span><b>Maldição<br/>Mortal</b>${mine && i === flipped ? '<small>toque para virar</small>' : ''}</button>`).join('');
-    const done = list.slice(0, step);
-    this.show('Maldições Mortais', `
-      <div class="cp-step cr-step">
-        <h3>☠ Maldições Mortais <small>(${step + 1} de ${list.length})</small></h3>
-        <div class="cr-who" style="--gc:${GUILDS[cur.guild].color}">${who(cur.guild)} · <b>${HEROES[cur.hero].name}</b> morreu <b>${cur.drawn.length}</b> ${cur.drawn.length > 1 ? 'vezes' : 'vez'}:
-          compra ${cur.drawn.length} carta${cur.drawn.length > 1 ? 's' : ''} e fica com a de <b>maior valor</b>.</div>
-        <div class="cr-table">${cards}</div>
-        <div class="cr-result">${all ? (cur.kept === 'sem_maldicao' ? `🎉 <b>${HEROES[cur.hero].name}</b> escapou: Sem Maldição!` : `☠ <b>${HEROES[cur.hero].name}</b> fica com <b>${CURSES[cur.kept].name}</b> — ${esc(CURSES[cur.kept].text)}`) : mine ? 'Vire as cartas — todos estão vendo.' : `${guildName(cur.guild)} está virando as cartas…`}</div>
-        ${all ? `<button class="primary cp-big" id="cp-ok">${step + 1 < list.length ? 'Próximo Herói ▶' : 'Ver o resumo ▶'}</button>` : ''}
-        ${done.length ? `<div class="cr-done">${done.map(x => `<span>${who(x.guild)} ${HEROES[x.hero].name}: <b>${CURSES[x.kept].name}</b></span>`).join('')}</div>` : ''}
-      </div>`, false);
+    this.show('Maldições Mortais', `${curseRevealHtml(c, mine, name)}
+      ${all ? `<div class="cp-step cr-step"><button class="primary cp-big" id="cp-ok">${step + 1 < list.length ? 'Próximo Herói ▶' : 'Ver o resumo ▶'}</button></div>` : ''}`, false);
     paintCardArt(this.page);
     const flip = () => { up.curseFlipped = flipped + 1; play('pick-item'); this.save(); this.curses(); };
     this.page.querySelectorAll<HTMLElement>('[data-flip]').forEach(b => { b.onclick = () => { if (!b.hasAttribute('disabled')) flip(); }; });
@@ -428,30 +407,12 @@ export class CampaignUI {
     if (ok) ok.onclick = () => { up.curseStep = step + 1; up.curseFlipped = 0; this.save(); this.curses(); };
   }
 
-  /** Depois que todos compram: o que cada Guilda comprou e o que descartou (as escolhidas que não comprou). */
+  /** Depois que todos compram: o que cada Guilda comprou e o que descartou. */
   private buys() {
     const c = this.c!;
     const up = c.upgrade!;
-    const rows = c.guilds.map(g => {
-      // o registro das compras (a IA já colocou as cartas nos Heróis, então `bought` dela está vazio)
-      const bought = up.purchased?.[g.id] ?? up.bought[g.id] ?? [];
-      const left = (up.picked[g.id] ?? []).slice();
-      for (const id of bought) { const i = left.indexOf(id); if (i >= 0) left.splice(i, 1); }
-      const dropped = up.dropped?.[g.id] ?? [];
-      return `<div class="by-guild" style="--gc:${GUILDS[g.id].color}">
-        <h4><span class="dot" style="background:${GUILDS[g.id].color}"></span> ${guildName(g.id)} ${g.controller === 'human' ? '<small>(você)</small>' : ''}
-          <span class="by-coins">🪙 sobrou ${up.coins[g.id] ?? 0} · guarda ${g.saved}</span></h4>
-        <div class="by-cols">
-          <div><h5>🛒 Comprou</h5><div class="cp-cards small">${bought.map(id => cardHtml(id)).join('') || '<span class="muted">Nada</span>'}</div></div>
-          <div><h5>🗑 Descartou</h5><div class="cp-cards small by-disc">${left.map(id => cardHtml(id)).join('') || '<span class="muted">Nada</span>'}</div></div>
-        </div>
-        ${dropped.length ? `<div class="by-drop"><h5>↩ Tirou do inventário para dar lugar</h5><div class="cp-cards small by-disc">${dropped.map(id => cardHtml(id)).join('')}</div></div>` : ''}</div>`;
-    }).join('');
-    this.show(`Fase de Melhorias · Nível ${up.level}`, `
-      <div class="cp-step"><h3>🛒 Compras de todas as Guildas</h3>
-      <p>As cartas escolhidas e não compradas voltam para a caixa.</p>
-      ${rows}
-      <button class="primary cp-big" id="cp-ok">Equipar meus Heróis ▶</button></div>`, false);
+    this.show(`Fase de Melhorias · Nível ${up.level}`, `${buySummaryHtml(c, g => guildName(g), human(c).id)}
+      <div class="cp-step"><button class="primary cp-big" id="cp-ok">Equipar meus Heróis ▶</button></div>`, false);
     paintCardArt(this.page);
     (this.page.querySelector('#cp-ok') as HTMLElement).onclick = () => { up.buySummary = false; this.save(); this.arrange(); };
   }

@@ -299,6 +299,8 @@ export class MenuPages {
       <h3>Dificuldade da IA</h3>
       ${opt('ai', 'normal', '<b>Normal</b> — joga bem, mas comete erros e às vezes arrisca à toa', st.ai)}
       ${opt('ai', 'hard', '<b>Difícil</b> — calcula as chances dos dados, usa poções, caça quem carrega Missões e se protege', st.ai)}
+      <h3>Sinalização de ajuda</h3>
+      <label class="set-opt"><input type="checkbox" id="set-hints" ${st.hints !== false ? 'checked' : ''}/> Mostrar os <b>Espaços azuis</b> (onde dá para andar) e os <b>vermelhos</b> (quem dá para atacar) no tabuleiro</label>
       <h3>Reação de Alerta</h3>
       <label class="set-opt"><input type="checkbox" id="set-alert" ${st.alertConfirm ? 'checked' : ''}/> Avisar e pedir confirmação antes de um movimento que provoca <b>Reação de Alerta</b></label>
       <label class="set-opt"><input type="checkbox" id="set-endc" ${st.endConfirm ? 'checked' : ''}/> Avisar ao <b>encerrar o turno</b> se ainda dá para ativar, mover ou atacar</label>
@@ -316,6 +318,7 @@ export class MenuPages {
       <h3>Som</h3>
       <label class="set-opt"><input type="checkbox" id="set-muted" ${st.muted ? 'checked' : ''}/> <b>Desativar todos os sons</b> (efeitos e música)</label>
       <label class="set-opt"><input type="checkbox" id="set-sound" ${st.sound ? 'checked' : ''}/> Sons ligados</label>
+      <label class="set-opt set-vol">Volume geral <input type="range" id="set-master" min="0" max="100" step="5" value="${Math.round((st.master ?? 1) * 100)}"/> <b id="set-masterv">${Math.round((st.master ?? 1) * 100)}%</b></label>
       <label class="set-opt set-vol">Volume dos efeitos <input type="range" id="set-volume" min="0" max="100" step="5" value="${Math.round(st.volume * 100)}"/> <b id="set-volv">${Math.round(st.volume * 100)}%</b></label>
       <label class="set-opt"><input type="checkbox" id="set-music" ${st.music ? 'checked' : ''}/> Música ligada</label>
       <label class="set-opt set-vol">Volume da música <input type="range" id="set-mvolume" min="0" max="100" step="5" value="${Math.round(st.musicVolume * 100)}"/> <b id="set-mvolv">${Math.round(st.musicVolume * 100)}%</b></label>
@@ -334,11 +337,14 @@ export class MenuPages {
       (this.page.querySelector('#set-volv') as HTMLElement).textContent = `${Math.round(volume * 100)}%`;
       const music = (this.page.querySelector('#set-music') as HTMLInputElement).checked;
       const musicVolume = Number((this.page.querySelector('#set-mvolume') as HTMLInputElement).value) / 100;
+      const master = Number((this.page.querySelector('#set-master') as HTMLInputElement).value) / 100;
+      (this.page.querySelector('#set-masterv') as HTMLElement).textContent = `${Math.round(master * 100)}%`;
       (this.page.querySelector('#set-mvolv') as HTMLElement).textContent = `${Math.round(musicVolume * 100)}%`;
       const muted = (this.page.querySelector('#set-muted') as HTMLInputElement).checked;
       const alertConfirm = (this.page.querySelector('#set-alert') as HTMLInputElement).checked;
       const endConfirm = (this.page.querySelector('#set-endc') as HTMLInputElement).checked;
-      saveSettings({ ...getSettings(), battle, speed, clock, reroll, view, ai, sound, volume, music, musicVolume, muted, alertConfirm, endConfirm });
+      const hints = (this.page.querySelector('#set-hints') as HTMLInputElement).checked;
+      saveSettings({ ...getSettings(), battle, speed, clock, reroll, view, ai, sound, volume, master, hints, music, musicVolume, muted, alertConfirm, endConfirm });
     };
     this.page.querySelectorAll<HTMLInputElement>('input').forEach(i => { i.onchange = upd; });
     this.page.querySelectorAll<HTMLElement>('[data-stab]').forEach(b => { b.onclick = () => {
@@ -348,6 +354,7 @@ export class MenuPages {
     }; });
     (this.page.querySelector('#set-volume') as HTMLInputElement).oninput = upd;
     (this.page.querySelector('#set-mvolume') as HTMLInputElement).oninput = upd;
+    (this.page.querySelector('#set-master') as HTMLInputElement).oninput = upd;
     (this.page.querySelector('#set-volume') as HTMLInputElement).onchange = () => { upd(); play('dice', 0.8); };
   }
 

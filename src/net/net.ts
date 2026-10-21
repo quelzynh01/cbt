@@ -33,8 +33,8 @@ export interface Lobby {
 
 /** Jogadas da preparação. */
 export type SetupMsg = { t: 'draft'; hero: string } | { t: 'vote'; map: string } | { t: 'equip'; inv: Record<string, string[]> }
-  | { t: 'upPick'; ids: string[] } | { t: 'upBuy'; ids: string[] } | { t: 'upArr'; inv: Record<string, string[]> } | { t: 'pickmap'; map: string };
-const SETUP_MSGS = ['draft', 'vote', 'equip', 'upPick', 'upBuy', 'upArr', 'pickmap'];
+  | { t: 'upPick'; ids: string[] } | { t: 'upBuy'; ids: string[] } | { t: 'upArr'; inv: Record<string, string[]> } | { t: 'pickmap'; map: string } | { t: 'curseFlip' } | { t: 'upOk' };
+const SETUP_MSGS = ['draft', 'vote', 'equip', 'upPick', 'upBuy', 'upArr', 'pickmap', 'curseFlip', 'upOk'];
 
 export type Msg =
   | { t: 'hello'; clientId: string; name: string; heroes: string[] }
@@ -112,7 +112,7 @@ export class HostSession {
 
   constructor(name: string, heroes: string[], ev: SessionEvents) {
     this.ev = ev;
-    this.lobby = { code: '', started: false, mapId: loadMapId(), seats: [{ clientId: this.me, name, heroes, guild: 'azul', ai: false, connected: true, host: true }] };
+    this.lobby = { code: '', started: false, mapId: loadMapId(), seats: [{ clientId: this.me, name, team: name.trim().slice(0, 20) || undefined, heroes, guild: 'azul', ai: false, connected: true, host: true }] };
     this.open();
   }
 
@@ -146,7 +146,7 @@ export class HostSession {
           if (this.lobby.started || this.lobby.setup) { conn.send({ t: 'kicked', reason: 'A partida já começou.' } satisfies Msg); setTimeout(() => conn.close(), 300); return; }
           const free = GUILD_SEATS.find(g => !this.lobby.seats.some(s => s.guild === g));
           if (!free) { conn.send({ t: 'kicked', reason: 'A sala está cheia (4 jogadores).' } satisfies Msg); setTimeout(() => conn.close(), 300); return; }
-          seat = { clientId: m.clientId, name: m.name || 'Jogador', heroes: m.heroes, guild: free, ai: false, connected: true };
+          seat = { clientId: m.clientId, name: m.name || 'Jogador', team: (m.name || 'Jogador').trim().slice(0, 20), heroes: m.heroes, guild: free, ai: false, connected: true };
           this.lobby.seats.push(seat);
           this.chatAll('Sistema', `${seat.name} entrou na sala.`);
         } else {

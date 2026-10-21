@@ -37,9 +37,9 @@ export function playOnce(n: Sfx, ms = 700, vol = 1) {
 /** Toca um efeito (pode sobrepor: cada chamada usa uma cópia). */
 export function play(n: Sfx, vol = 1) {
   const st = getSettings();
-  if (st.muted || !st.sound || st.volume <= 0 || missing.has(n)) return;
+  if (st.muted || !st.sound || st.volume <= 0 || (st.master ?? 1) <= 0 || missing.has(n)) return;
   const base = buffers.get(n);
   const a = base ? (base.cloneNode(true) as HTMLAudioElement) : new Audio(`${import.meta.env.BASE_URL}sounds/${n}.mp3`);
-  a.volume = Math.max(0, Math.min(1, st.volume * vol));
+  a.volume = Math.max(0, Math.min(1, st.volume * (st.master ?? 1) * vol));
   a.play().catch(() => { /* o navegador só deixa tocar depois do primeiro clique */ });
 }

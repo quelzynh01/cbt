@@ -3,7 +3,7 @@ import { MAPS } from '../engine/maps';
 import type { Game } from '../engine/game';
 import { CARDS } from '../engine/cards';
 import {
-  type CampaignState, aiChoice, arrangeGuild, availableScenarios, cardValue, closeUpgrade, draftPickAll, finishBuy, recordResult, validateInventory,
+  type CampaignState, aiChoice, arrangeGuild, picksPerRound, availableScenarios, cardValue, closeUpgrade, draftPickAll, finishBuy, recordResult, validateInventory,
 } from '../campaign/campaign';
 import type { GuildId } from '../engine/types';
 import { pickHero, type AILevel } from '../ai/ai';
@@ -26,7 +26,11 @@ export interface OnlineSetup {
   mode: 'single' | 'campaign';
   /** Limite de dados (Configurações da partida): no máximo 8 dados de ataque e 6 de defesa por rolagem. Sem isso, ilimitado. */
   diceCap: boolean;
-  step: 'draft' | 'vote' | 'equip' | 'done' | 'upgrade-draft' | 'upgrade-buy' | 'upgrade-arrange' | 'choose' | 'final';
+  step: 'draft' | 'vote' | 'equip' | 'done' | 'upgrade-curses' | 'upgrade-draft' | 'upgrade-buy' | 'upgrade-summary' | 'upgrade-arrange' | 'choose' | 'final';
+  /** Configurações da partida: na Fase de Melhorias pega 1 carta por rodada (em vez de 2). */
+  pickOne?: boolean;
+  /** Telas de "todos veem" (resumo das Maldições, resumo das compras): quem já clicou em Continuar. */
+  upOk?: Partial<Record<GuildId, boolean>>;
   /** Campanha online (estado completo, como no modo campanha). */
   camp?: CampaignState;
   /** Fase de Melhorias: escolhas de cada Guilda humana nesta etapa (null = ainda escolhendo). */
@@ -59,13 +63,13 @@ function shuffle<T>(a: T[], rnd: () => number): T[] {
   return r;
 }
 
-export function newSetup(seats: SeatInfo[], aiLevel: AILevel, rnd: () => number = Math.random, mode: 'single' | 'campaign' = 'single', diceCap = false): OnlineSetup {
+export function newSetup(seats: SeatInfo[], aiLevel: AILevel, rnd: () => number = Math.random, mode: 'single' | 'campaign' = 'single', diceCap = false, pickOne = false): OnlineSetup {
   const order = seats.map(s => s.guild);
   const size = order.length <= 3 ? 4 : 3;
   const pool = shuffle(ALL_HEROES, rnd);
   const st: OnlineSetup = {
     step: 'draft', round: 0, order, hands: {}, choice: {}, picks: {}, votes: {}, equip: {}, tick: 0, aiLevel,
-    mode, diceCap, upPick: {}, upBuy: {}, upArr: {},
+    mode, diceCap, upPick: {}, upBuy: {}, upArr: {}, ...(pickOne ? { pickOne } : {}),
   };
   for (const g of order) { st.hands[g] = pool.splice(0, size); st.choice[g] = null; st.picks[g] = []; }
   return st;
@@ -170,7 +174,7 @@ export function advance(st: OnlineSetup, seats: SeatInfo[], rnd: () => number = 
 export function startCampaign(st: OnlineSetup, seats: (SeatInfo & { team?: string })[]) {
   const c: CampaignState = {
     version: 1, guilds: [], played: [], chooser: st.order[0], phase: 'choose', seed: (Date.now() ^ (Math.random() * 1e9)) | 0,
-    elapsed: 0, aiLevel: st.aiLevel, diceCap: st.diceCap, voted: st.map,
+    elapsed: 0, aiLevel: st.aiLevel, diceCap: st.diceCap, voted: st.map, ...(st.pickOne ? { pickOne: true } : {}),
   };
   for (const g of st.order) {
     const s = seats.find(x => x.guild === g);
@@ -185,18 +189,66 @@ export function scenarioOver(st: OnlineSetup, game: Game) {
   recordResult(c, game);
   st.tick++;
   if (c.phase === 'done') { st.step = 'final'; st.news = 'Fim da campanha!'; return; }
-  st.step = 'upgrade-draft';
   st.nextMap = undefined;
-  st.upPick = {}; st.upBuy = {}; st.upArr = {};
+  st.upPick = {}; st.upBuy = {}; st.upArr = {}; st.upOk = {};
   for (const g of c.guilds) if (g.controller === 'human') st.upPick[g.id] = null;
-  st.news = `Cenário concluído! Fase de Melhorias (nível ${c.upgrade!.level}).`;
+  // primeiro as Maldições Mortais (se alguém morreu), viradas na mesa para todos verem
+  st.step = c.upgrade!.cursesDrawn.length ? 'upgrade-curses' : 'upgrade-draft';
+  st.news = `Cenário concluído! ${st.step === 'upgrade-curses' ? 'Maldições Mortais' : `Fase de Melhorias (nível ${c.upgrade!.level})`}.`;
+}
+
+/** Todas as cartas de `ids` estão em `pool` (contando as cópias). */
+function subset(ids: string[], pool: string[]): boolean {
+  const left = pool.slice();
+  for (const id of ids) { const i = left.indexOf(id); if (i < 0) return false; left.splice(i, 1); }
+  return true;
+}
+
+/** Cartas por rodada na Fase de Melhorias online. */
+const pickCount = (st: OnlineSetup) => st.camp ? picksPerRound(st.camp) : 2;
+
+/** Maldições: quem é dono do Herói da vez vira a próxima carta. */
+export function curseFlip(st: OnlineSetup, g: GuildId): boolean {
+  const up = st.camp?.upgrade;
+  if (st.step !== 'upgrade-curses' || !up) return false;
+  const cur = up.cursesDrawn[up.curseStep ?? 0];
+  if (!cur || cur.guild !== g || (up.curseFlipped ?? 0) >= cur.drawn.length) return false;
+  up.curseFlipped = (up.curseFlipped ?? 0) + 1;
+  st.tick++;
+  return true;
+}
+
+/** Ação automática das Maldições (anfitrião, com tempo): a IA vira as cartas dela; com todas viradas, passa para o próximo Herói. */
+export function curseAuto(st: OnlineSetup, seats: SeatInfo[]): boolean {
+  const up = st.camp?.upgrade;
+  if (st.step !== 'upgrade-curses' || !up) return false;
+  const cur = up.cursesDrawn[up.curseStep ?? 0];
+  if (!cur) return false;
+  const flipped = up.curseFlipped ?? 0;
+  if (flipped < cur.drawn.length) {
+    const owner = st.camp!.guilds.find(x => x.id === cur.guild);
+    const auto = owner?.controller === 'ai' || (seats.find(x => x.guild === cur.guild)?.ai ?? true);
+    if (!auto) return false;
+    up.curseFlipped = flipped + 1;
+  } else { up.curseStep = (up.curseStep ?? 0) + 1; up.curseFlipped = 0; }
+  st.tick++;
+  return true;
+}
+
+/** "Continuar" nas telas de resumo (Maldições, compras). */
+export function upgradeOk(st: OnlineSetup, g: GuildId): boolean {
+  if (st.step !== 'upgrade-curses' && st.step !== 'upgrade-summary') return false;
+  if (st.step === 'upgrade-curses') { const up = st.camp?.upgrade; if (!up || (up.curseStep ?? 0) < up.cursesDrawn.length) return false; }
+  (st.upOk ??= {})[g] = true;
+  return true;
 }
 
 export function upgradePick(st: OnlineSetup, g: GuildId, ids: string[]): boolean {
   const up = st.camp?.upgrade;
   if (st.step !== 'upgrade-draft' || !up) return false;
   const hand = up.hands[g] ?? [];
-  if (ids.length !== Math.min(2, hand.length) || ids.some(id => !hand.includes(id)) || new Set(ids).size !== ids.length) return false;
+  // cartas repetidas valem (ex.: 2 Fender na mão): confere quantas cópias há de cada uma
+  if (ids.length !== Math.min(pickCount(st), hand.length) || !subset(ids, hand)) return false;
   st.upPick[g] = ids;
   return true;
 }
@@ -204,7 +256,7 @@ export function upgradeBuy(st: OnlineSetup, g: GuildId, ids: string[]): boolean 
   const up = st.camp?.upgrade;
   if (st.step !== 'upgrade-buy' || !up) return false;
   const picked = up.picked[g] ?? [];
-  if (ids.length > 3 || ids.some(id => !picked.includes(id))) return false;
+  if (ids.length > 3 || !subset(ids, picked)) return false;
   if (ids.reduce((s, id) => s + CARDS[id].cost, 0) > (up.coins[g] ?? 0)) return false;
   st.upBuy[g] = ids;
   return true;
@@ -236,9 +288,21 @@ function advanceCampaign(st: OnlineSetup, seats: SeatInfo[]): boolean {
   const auto = (g: GuildId) => seats.find(s => s.guild === g)?.ai ?? true;
   const humans = c.guilds.filter(g => g.controller === 'human');
   let changed = false;
+  // Maldições: no resumo, espera todos clicarem em Continuar
+  if (st.step === 'upgrade-curses' && up && (up.curseStep ?? 0) >= up.cursesDrawn.length) {
+    for (const g of humans) if (auto(g.id)) (st.upOk ??= {})[g.id] = true;
+    if (humans.every(g => st.upOk?.[g.id])) {
+      up.curseDone = true;
+      st.step = 'upgrade-draft';
+      st.upOk = {};
+      st.tick++;
+      st.news = `Fase de Melhorias (nível ${up.level}).`;
+      changed = true;
+    }
+  }
   if (st.step === 'upgrade-draft' && up) {
     for (const g of humans) if (auto(g.id) && !st.upPick[g.id]) {
-      st.upPick[g.id] = (up.hands[g.id] ?? []).slice().sort((a, b) => cardValue(b) - cardValue(a)).slice(0, 2);
+      st.upPick[g.id] = (up.hands[g.id] ?? []).slice().sort((a, b) => cardValue(b) - cardValue(a)).slice(0, pickCount(st));
     }
     if (humans.every(g => st.upPick[g.id])) {
       draftPickAll(c, Object.fromEntries(humans.map(g => [g.id, st.upPick[g.id]!])));
@@ -256,10 +320,22 @@ function advanceCampaign(st: OnlineSetup, seats: SeatInfo[]): boolean {
     for (const g of humans) if (auto(g.id) && !st.upBuy[g.id]) st.upBuy[g.id] = [];
     if (humans.every(g => st.upBuy[g.id])) {
       for (const g of humans) finishBuy(c, g, st.upBuy[g.id]!);
+      // todos veem o que cada Guilda comprou e descartou
+      st.step = 'upgrade-summary';
+      st.upOk = {};
+      st.tick++;
+      st.news = 'Compras feitas! Veja o que cada Guilda comprou.';
+      changed = true;
+    }
+  }
+  if (st.step === 'upgrade-summary' && up) {
+    for (const g of humans) if (auto(g.id)) (st.upOk ??= {})[g.id] = true;
+    if (humans.every(g => st.upOk?.[g.id])) {
       st.step = 'upgrade-arrange';
+      st.upOk = {};
       st.tick++;
       for (const g of humans) st.upArr[g.id] = null;
-      st.news = 'Compras feitas. Distribuam as cartas entre os Heróis.';
+      st.news = 'Distribuam as cartas entre os Heróis.';
       changed = true;
     }
   }
@@ -301,6 +377,17 @@ export function redact(st: OnlineSetup, me: GuildId | null): OnlineSetup {
       if (up.hands[g]) up.hands[g] = up.hands[g]!.map(() => HIDDEN);
       if (up.picked[g] && r.step === 'upgrade-draft') up.picked[g] = up.picked[g]!.map(() => HIDDEN);
     }
+  }
+  // Maldições: as cartas ainda não viradas ficam escondidas (ninguém vê antes da hora)
+  const up = r.camp?.upgrade;
+  if (up && r.step === 'upgrade-curses') {
+    const step = up.curseStep ?? 0;
+    up.cursesDrawn.forEach((x, i) => {
+      if (i < step) return;
+      const shown = i === step ? up.curseFlipped ?? 0 : 0;
+      x.drawn = x.drawn.map((d, k) => k < shown ? d : HIDDEN);
+      if (shown < x.drawn.length) x.kept = HIDDEN;
+    });
   }
   return r;
 }

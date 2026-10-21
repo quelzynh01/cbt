@@ -1,4 +1,7 @@
+import { play } from '../audio/sfx';
 import { GUILDS, HEROES } from '../engine/data';
+import { buySummaryHtml, curseRevealHtml, curseSummaryHtml } from './upgradeViews';
+import { draftRounds, picksPerRound } from '../campaign/campaign';
 import { gameConfirm } from './dialog';
 import { Game } from '../engine/game';
 import { MAPS, getMap } from '../engine/maps';
@@ -7,7 +10,7 @@ import { drawFace } from '../render/chibi';
 import { ClientSession, HostSession, type Lobby, type Session, type SessionEvents, type SetupMsg, savedName, saveName } from '../net/net';
 import {
   HIDDEN, STARTER, type OnlineSetup, advance, chooseHero, equipErrors, newSetup, pickNextMap, scenarioOver, setEquip, startCampaign,
-  upgradeArrange, upgradeBuy, upgradePick, votableMaps, voteMap,
+  upgradeArrange, upgradeBuy, upgradePick, votableMaps, voteMap, curseFlip, curseAuto, upgradeOk,
 } from '../net/onlineSetup';
 import { CARDS, CURSES } from '../engine/cards';
 import { availableScenarios, gameOptions, scenarioLevel, heroSlots, medals, validateInventory, victoryRank } from '../campaign/campaign';
@@ -30,8 +33,9 @@ export class OnlineLobby {
   private equipDraft: InvItem[] | null = null;
   /** Editor de inventário desenhado nesta tela (liga os cliques depois de montar o HTML). */
   private invBind: { items: InvItem[]; opts: InvOptions } | null = null;
-  private mode: 'single' | 'campaign' = 'single';
+  private mode: 'single' | 'campaign' = 'campaign';
   private diceCap = false;
+  private pickOne = false;
   private lastTick = -1;
   /** Campanha online (anfitrião): a preparação guardada enquanto um cenário é jogado. */
   private stash: OnlineSetup | null = null;
@@ -78,7 +82,7 @@ export class OnlineLobby {
     this.show(`
       <div class="mp-head"><button class="mp-back">← Voltar</button><h2>Multiplayer Online</h2></div>
       <div class="lb-entry">
-        <label class="lb-field">Seu nome <input id="lb-name" maxlength="16" value="${esc(savedName())}" placeholder="Ex.: Raquel"/></label>
+        <label class="lb-field">Seu nome <small>(também é o nome do seu time)</small> <input id="lb-name" maxlength="16" value="${esc(savedName())}" placeholder="Ex.: Raquel"/></label>
         <div class="lb-cols">
           <div class="lb-box"><h3>Criar sala</h3><p>Você será o anfitrião: o jogo roda no seu navegador. Mantenha a aba aberta durante a partida.</p>
             <button class="primary" id="lb-create">👑 Criar sala</button></div>
@@ -151,7 +155,6 @@ export class OnlineLobby {
           ${s.host ? '<span class="tag-host">👑 anfitrião</span>' : ''}${s.clientId === me ? '<span class="tag-me">você</span>' : ''}
           ${host && !s.host ? `<button class="lb-kick" data-id="${s.clientId}">✕</button>` : ''}</div>
         <div class="lb-seat-g">${s.team ? `<b>${esc(s.team)}</b> · ` : ''}${GUILDS[s.guild].name}</div>
-        ${s.clientId === me ? `<input class="lb-team" maxlength="20" placeholder="Nome do time (opcional)" value="${esc(s.team ?? '')}"/>` : ''}
         <div class="lb-seat-hero"><i>${s.ai ? 'a IA recruta na mesa' : 'recruta os Heróis na mesa'}</i></div>
       </div>`;
     }).join('');
@@ -163,9 +166,8 @@ export class OnlineLobby {
           <button id="lb-copy">📋 Copiar link</button><small>${esc(link)}</small></div>
         <div class="lb-seats">${slots}</div>
         <div class="lb-actions">
-          ${host ? `<label>Modo <select id="lb-mode"><option value="single">Partida única</option><option value="campaign" ${this.mode === 'campaign' ? 'selected' : ''}>Campanha (6 cenários)</option></select></label>
-            <label class="lb-cap"><input type="checkbox" id="lb-cap" ${this.diceCap ? 'checked' : ''}/> ⚙️ Configurações da partida: <b>Limite de dados</b> (8 ataque / 6 defesa)</label>
-            <label>Dificuldade da IA <select id="lb-ai"><option value="normal">Normal</option><option value="hard" ${getSettings().ai === 'hard' ? 'selected' : ''}>Difícil</option></select></label>
+          ${host ? `<span class="lb-sum">${this.mode === 'campaign' ? '🏰 Campanha (6 cenários)' : '⚔ Partida única'} · IA ${getSettings().ai === 'hard' ? 'Difícil' : 'Normal'}${this.diceCap ? ' · Limite de dados' : ''}${this.mode === 'campaign' && this.pickOne ? ' · Pegar 1 carta' : ''}</span>
+            <button id="lb-cfg">⚙️ Configurações da partida</button>
             <button class="primary" id="lb-start" ${canStart ? '' : 'disabled'}>▶ Ir para a mesa</button>` : '<span class="lb-wait">Aguardando o anfitrião levar todos para a mesa…</span>'}
         </div>
         <p class="lb-note">Na mesa: recrutamento dos Heróis (3 rodadas, escolhas escondidas), votação do mapa e distribuição das cartas iniciais. O mapa e os Heróis só são definidos lá.</p>
@@ -177,25 +179,45 @@ export class OnlineLobby {
     (this.page.querySelector('#lb-copy') as HTMLElement).onclick = () => {
       navigator.clipboard?.writeText(link).then(() => this.setStatus('Link copiado! Envie para seus amigos.', 'ok'), () => this.setStatus(link));
     };
-    const team = this.page.querySelector('.lb-team') as HTMLInputElement | null;
-    if (team) team.onchange = () => this.session?.setMine({ team: team.value });
     this.page.querySelectorAll<HTMLElement>('.lb-addai').forEach(b => { b.onclick = () => (this.session as HostSession).addAI(); });
     this.page.querySelectorAll<HTMLElement>('.lb-kick').forEach(b => { b.onclick = () => (this.session as HostSession).removeSeat(b.dataset.id!); });
-    const ai = this.page.querySelector('#lb-ai') as HTMLSelectElement | null;
-    if (ai) ai.onchange = () => saveSettings({ ...getSettings(), ai: ai.value as 'normal' | 'hard' });
+    const cfg = this.page.querySelector('#lb-cfg') as HTMLElement | null;
+    if (cfg) cfg.onclick = () => this.matchSettings();
     const st = this.page.querySelector('#lb-start') as HTMLElement | null;
     if (st) st.onclick = () => this.startSetup();
-    const md = this.page.querySelector('#lb-mode') as HTMLSelectElement | null;
-    if (md) md.onchange = () => { this.mode = md.value as 'single' | 'campaign'; };
-    const cap = this.page.querySelector('#lb-cap') as HTMLInputElement | null;
-    if (cap) cap.onchange = () => { this.diceCap = cap.checked; };
+  }
+
+  /** Janela "Configurações da partida" (anfitrião): modo, dificuldade da IA e regras. */
+  private matchSettings() {
+    document.getElementById('matchcfg')?.remove();
+    const el = document.createElement('div');
+    el.id = 'matchcfg';
+    const draw = () => {
+      el.innerHTML = `<div class="mc-cfg">
+        <div class="gd-title">⚙️ Configurações da partida</div>
+        <label class="mcf-row">Modo <select id="mc-mode"><option value="campaign" ${this.mode === 'campaign' ? 'selected' : ''}>🏰 Campanha (6 cenários)</option><option value="single" ${this.mode === 'single' ? 'selected' : ''}>⚔ Partida única</option></select></label>
+        <label class="mcf-row">Dificuldade da IA <select id="mc-ai"><option value="normal">Normal</option><option value="hard" ${getSettings().ai === 'hard' ? 'selected' : ''}>Difícil</option></select></label>
+        <label class="set-opt"><input type="checkbox" id="mc-cap" ${this.diceCap ? 'checked' : ''}/> <b>Limite de dados</b> — no máximo 8 dados de ataque e 6 de defesa por rolagem. Sem marcar, ilimitado.</label>
+        ${this.mode === 'campaign' ? `<label class="set-opt"><input type="checkbox" id="mc-one" ${this.pickOne ? 'checked' : ''}/> <b>Pegar 1 carta</b> — na Fase de Melhorias cada um pega 1 carta por rodada e passa o resto (em vez de 2).</label>` : ''}
+        <div class="gd-btns"><button class="primary" id="mc-ok">✔ Pronto</button></div>
+      </div>`;
+      (el.querySelector('#mc-mode') as HTMLSelectElement).onchange = e => { this.mode = (e.target as HTMLSelectElement).value as 'single' | 'campaign'; draw(); };
+      (el.querySelector('#mc-ai') as HTMLSelectElement).onchange = e => saveSettings({ ...getSettings(), ai: (e.target as HTMLSelectElement).value as 'normal' | 'hard' });
+      (el.querySelector('#mc-cap') as HTMLInputElement).onchange = e => { this.diceCap = (e.target as HTMLInputElement).checked; };
+      const one = el.querySelector('#mc-one') as HTMLInputElement | null;
+      if (one) one.onchange = () => { this.pickOne = one.checked; };
+      (el.querySelector('#mc-ok') as HTMLElement).onclick = () => { el.remove(); this.renderRoom(); };
+    };
+    el.onpointerdown = e => { if (e.target === el) { el.remove(); this.renderRoom(); } };
+    draw();
+    document.body.append(el);
   }
 
   // ------------------------------------------------------------------ anfitrião: preparação
   private startSetup() {
     const host = this.session as HostSession;
     const l = host.lobby;
-    l.setup = newSetup(l.seats.map(s => ({ guild: s.guild, ai: s.ai })), getSettings().ai, Math.random, this.mode, this.diceCap);
+    l.setup = newSetup(l.seats.map(s => ({ guild: s.guild, ai: s.ai })), getSettings().ai, Math.random, this.mode, this.diceCap, this.mode === 'campaign' && this.pickOne);
     this.hostAdvance();
   }
 
@@ -210,6 +232,8 @@ export class OnlineLobby {
     else if (m.t === 'upBuy') upgradeBuy(st, g, m.ids);
     else if (m.t === 'upArr') upgradeArrange(st, g, m.inv);
     else if (m.t === 'pickmap') pickNextMap(st, g, m.map);
+    else if (m.t === 'curseFlip') curseFlip(st, g);
+    else if (m.t === 'upOk') upgradeOk(st, g);
     this.hostAdvance();
   }
 
@@ -223,7 +247,18 @@ export class OnlineLobby {
     advance(st, l.seats.map(s => ({ guild: s.guild, ai: s.ai })));
     host.pushLobby();
     if (st.step === 'done') setTimeout(() => this.startGame(), 1500);
+    // Maldições: a IA vira as cartas dela e, com todas viradas, a mesa passa para o próximo Herói (com tempo para todos verem)
+    clearTimeout(this.curseTimer);
+    const up = st.camp?.upgrade;
+    if (st.step === 'upgrade-curses' && up && (up.curseStep ?? 0) < up.cursesDrawn.length) {
+      const cur = up.cursesDrawn[up.curseStep ?? 0];
+      const all = (up.curseFlipped ?? 0) >= cur.drawn.length;
+      this.curseTimer = window.setTimeout(() => {
+        if (curseAuto(st, l.seats.map(x => ({ guild: x.guild, ai: x.ai })))) this.hostAdvance();
+      }, all ? 2600 : (up.curseFlipped ? 900 : 1300));
+    }
   }
+  private curseTimer = 0;
 
   /** Campanha online (anfitrião): o cenário acabou — volta todos para a mesa na Fase de Melhorias. */
   get isCampaign() { return !!this.stash; }
@@ -305,9 +340,11 @@ export class OnlineLobby {
     const isHumanG = (g: GuildId) => camp ? camp.guilds.find(x => x.id === g)?.controller === 'human' : !l.seats.find(s => s.guild === g)?.ai;
     const done = (g: GuildId) => st.step === 'draft' ? !!st.choice[g] : st.step === 'vote' ? !!st.votes[g] : st.step === 'equip' ? !!st.equip[g]
       : st.step === 'upgrade-draft' ? !isHumanG(g) || !!st.upPick[g] : st.step === 'upgrade-buy' ? !isHumanG(g) || !!st.upBuy[g]
-      : st.step === 'upgrade-arrange' ? !isHumanG(g) || !!st.upArr[g] : st.step === 'choose' ? camp?.chooser !== g || !!st.nextMap : true;
+      : st.step === 'upgrade-arrange' ? !isHumanG(g) || !!st.upArr[g] : st.step === 'choose' ? camp?.chooser !== g || !!st.nextMap
+      : st.step === 'upgrade-summary' || st.step === 'upgrade-curses' ? !isHumanG(g) || !!st.upOk?.[g] : true;
     const verb = st.step === 'draft' || st.step === 'upgrade-draft' ? ['escolheu', 'escolhendo…'] : st.step === 'vote' ? ['votou', 'votando…']
-      : st.step === 'upgrade-buy' ? ['comprou', 'comprando…'] : st.step === 'choose' ? ['pronto', 'escolhendo o cenário…'] : ['pronto', 'distribuindo cartas…'];
+      : st.step === 'upgrade-buy' ? ['comprou', 'comprando…'] : st.step === 'choose' ? ['pronto', 'escolhendo o cenário…']
+      : st.step === 'upgrade-summary' || st.step === 'upgrade-curses' ? ['pronto', 'vendo…'] : ['pronto', 'distribuindo cartas…'];
     if (st.tick !== this.lastTick) {
       if (this.lastTick >= 0 && st.news) this.setStatus(st.news, 'ok');
       this.lastTick = st.tick;
@@ -431,13 +468,26 @@ export class OnlineLobby {
       <table><tr><th>Guilda</th><th>Missões</th><th>Mortes</th><th>Moedas</th></tr>
       ${last.guilds.map(r => `<tr class="${r.id === last.winner ? 'win' : ''}"><td><span class="dot" style="background:${GUILDS[r.id].color}"></span> ${esc(this.seatName(r.id))}${r.id === last.winner ? ' 🏆' : ''}</td><td>${r.missions}</td><td>${r.deaths}</td><td>${r.coins}</td></tr>`).join('')}</table>
       ${up.cursesDrawn.filter(x => x.guild === me).map(x => `<div class="cp-curse">☠ ${HEROES[x.hero].name}: <b>${CURSES[x.kept].name}</b> — ${CURSES[x.kept].text}</div>`).join('')}</div>`;
+    const name = (x: GuildId) => this.seatName(x);
+    // Maldições Mortais: as cartas viradas na mesa, um Herói de cada vez (todos veem); depois o resumo
+    if (st.step === 'upgrade-curses') {
+      if ((up.curseStep ?? 0) < up.cursesDrawn.length) {
+        const cur = up.cursesDrawn[up.curseStep ?? 0];
+        return curseRevealHtml(c, cur.guild === me && g.controller === 'human', name);
+      }
+      return `${curseSummaryHtml(c, name)}<div class="tb-actions">${st.upOk?.[me] || g.controller !== 'human' ? '<p class="tb-wait">✓ Aguardando os outros…</p>' : '<button class="primary" id="up-ok">Continuar para as Melhorias ▶</button>'}</div>`;
+    }
+    // depois das compras: o que cada Guilda comprou e descartou
+    if (st.step === 'upgrade-summary') {
+      return `${buySummaryHtml(c, name, me)}<div class="tb-actions">${st.upOk?.[me] || g.controller !== 'human' ? '<p class="tb-wait">✓ Aguardando os outros…</p>' : '<button class="primary" id="up-ok">Equipar meus Heróis ▶</button>'}</div>`;
+    }
     if (g.controller !== 'human') return `${results}<p>Você está assistindo.</p>`;
     if (st.step === 'upgrade-draft') {
       const hand = up.hands[me] ?? [];
-      const need = Math.min(2, hand.length);
-      if (st.upPick[me]) return `${results}<h3>Escolha de cartas — rodada ${up.round + 1} de 3</h3><p class="tb-wait">✓ Escolha enviada. Aguardando os outros…</p>`;
-      return `${results}<h3>Escolha de cartas — rodada ${up.round + 1} de 3</h3>
-        <p>Escolha <b>${need} cartas</b>; o resto passa para a esquerda. Ao fim você terá 6 cartas para comprar.</p>
+      const need = Math.min(picksPerRound(c), hand.length);
+      if (st.upPick[me]) return `${results}<h3>Escolha de cartas — rodada ${up.round + 1} de ${draftRounds(c)}</h3><p class="tb-wait">✓ Escolha enviada. Aguardando os outros…</p>`;
+      return `${results}<h3>Escolha de cartas — rodada ${up.round + 1} de ${draftRounds(c)}</h3>
+        <p>Escolha <b>${need === 1 ? '1 carta' : `${need} cartas`}</b>; o resto passa para a esquerda. Ao fim você terá 6 cartas para comprar.</p>
         <div class="cp-cards">${hand.map((id, i) => itemCard(id, this.upSel.has(i) ? 'sel' : '', `data-up="${i}"`)).join('')}</div>
         ${(up.picked[me] ?? []).length ? `<h4>Já escolhidas</h4><div class="cp-cards small">${up.picked[me]!.map(id => itemCard(id)).join('')}</div>` : ''}
         <div class="tb-actions"><button class="primary" id="up-go" ${this.upSel.size === need ? '' : 'disabled'}>Confirmar escolha</button></div>`;
@@ -479,11 +529,15 @@ export class OnlineLobby {
     const g = st.camp.guilds.find(x => x.id === me)!;
     this.page.querySelectorAll<HTMLElement>('[data-up]').forEach(el => { el.onclick = () => {
       const i = Number(el.dataset.up);
-      const max = st.step === 'upgrade-draft' ? Math.min(2, (up.hands[me] ?? []).length) : 3;
+      const max = st.step === 'upgrade-draft' ? Math.min(picksPerRound(st.camp!), (up.hands[me] ?? []).length) : 3;
       if (this.upSel.has(i)) this.upSel.delete(i); else if (this.upSel.size < max) this.upSel.add(i);
       this.renderTable();
     }; });
     if (this.invBind) { bindInvEditor(this.page, this.invBind.items, this.invBind.opts, () => this.renderTable()); this.invBind = null; }
+    paintCardArt(this.page);
+    this.page.querySelectorAll<HTMLElement>('[data-flip]').forEach(b => { b.onclick = () => { if (!b.hasAttribute('disabled')) { play('pick-item'); this.send({ t: 'curseFlip' }); } }; });
+    const ok = this.page.querySelector('#up-ok') as HTMLElement | null;
+    if (ok) ok.onclick = () => this.send({ t: 'upOk' });
     const go = this.page.querySelector('#up-go') as HTMLElement | null;
     if (!go) return;
     go.onclick = () => {

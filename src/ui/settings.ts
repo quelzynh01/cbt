@@ -16,6 +16,10 @@ export interface Settings {
   sound: boolean;
   /** Volume dos sons (0 a 1). */
   volume: number;
+  /** Sinalização de ajuda: Espaços azuis (andar) e vermelhos (atacar) no tabuleiro. */
+  hints: boolean;
+  /** Volume geral (controle rápido do topo): multiplica a música e os efeitos. */
+  master: number;
   /** Música ligada e volume da música. */
   music: boolean;
   musicVolume: number;
@@ -28,7 +32,7 @@ export interface Settings {
 }
 
 const KEY = 'cbt.settings';
-const DEFAULT: Settings = { battle: 'always', speed: 1, clock: true, reroll: 'choose', view: 'free', ai: 'normal', sound: true, volume: 0.7, music: true, musicVolume: 0.12, muted: false, alertConfirm: true, endConfirm: true };
+const DEFAULT: Settings = { battle: 'always', speed: 1, clock: true, reroll: 'choose', view: 'free', ai: 'normal', sound: true, volume: 0.7, master: 1, hints: true, music: true, musicVolume: 0.12, muted: false, alertConfirm: true, endConfirm: true };
 
 export function getSettings(): Settings {
   try { return { ...DEFAULT, ...JSON.parse(localStorage.getItem(KEY) ?? '{}') }; } catch { return { ...DEFAULT }; }
