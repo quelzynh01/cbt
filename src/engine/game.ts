@@ -1422,12 +1422,7 @@ export class Game {
       for (const st of this.pathTo(nodes, cell)) {
         if (!h.alive) break;
         const from = h.cell!;
-        if (!st.portal && this.ab(h) !== 'furtivo') for (const m of this.monstersCloseTo(from)) {
-          if (!h.alive) break;
-          this.emit({ t: 'reaction', monsterId: m.id, kind: 'alerta' });
-          this.monsterAttack(m, h, 'alerta');
-        }
-        if (!h.alive) break;
+        // o movimento das Botas não aciona Reação de Alerta
         h.cell = { ...st.cell };
         this.emit({ t: 'move', id: h.id, from, to: st.cell, portal: st.portal });
         this.bloodCrown(h, from);
