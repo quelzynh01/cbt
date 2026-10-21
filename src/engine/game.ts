@@ -246,6 +246,8 @@ export class Game {
       });
     }
     for (const m of s.missions) s.missionDone[m.id] = [];
+    // posição inicial padrão: os 2 Heróis com mais cartas no Espaço da porta, o 3º no Espaço seguinte
+    for (const gid of s.guildOrder) g.defaultPlacement(gid);
     // todas as Guildas posicionam (a IA posiciona sozinha na hora: 2 Heróis no Espaço da porta)
     const deployers = opts.deploy ? s.guildOrder.slice() : [];
     if (deployers.length) s.deploying = deployers;
@@ -569,6 +571,65 @@ export class Game {
     return true;
   }
 
+  /** Espaços da Área Inicial, do mais perto da saída (porta) ao mais longe. */
+  startCellsByExit(guild: GuildId): Cell[] {
+    const area = this.map.startAreas[this.guild(guild).startArea];
+    const inArea = (c: Cell) => area.some(a => sameCell(a, c));
+    const dist = new Map<string, number>();
+    // saída direta: porta (0) ou passagem aberta (0.5) para fora da Área Inicial
+    const queue: Cell[] = [];
+    for (const c of area) {
+      let d = Infinity;
+      for (const nb of this.board.neighbors(c)) {
+        if (inArea(nb) || !this.board.playable(nb)) continue;
+        const e = this.board.edge(c, nb);
+        if (e === 'door') d = Math.min(d, 0); else if (e === 'open') d = Math.min(d, 0.5);
+      }
+      if (d < Infinity) { dist.set(key(c), d); queue.push(c); }
+    }
+    // os outros: quantos passos dentro da Área até um Espaço de saída
+    while (queue.length) {
+      const c = queue.shift()!;
+      for (const nb of this.board.neighbors(c)) {
+        if (!inArea(nb) || this.board.edge(c, nb) === 'wall') continue;
+        const nd = dist.get(key(c))! + 1;
+        if (nd < (dist.get(key(nb)) ?? Infinity)) { dist.set(key(nb), nd); queue.push(nb); }
+      }
+    }
+    return area.slice().sort((a, b) => (dist.get(key(a)) ?? 99) - (dist.get(key(b)) ?? 99));
+  }
+
+  /** Começo da partida: os 2 Heróis com mais cartas no Espaço da porta, o 3º no Espaço mais perto dele. */
+  defaultPlacement(guild: GuildId) {
+    const cells = this.startCellsByExit(guild);
+    if (!cells.length) return;
+    const heroes = this.heroesOf(guild).filter(h => h.alive).sort((a, b) => b.cards.length - a.cards.length || a.num - b.num);
+    heroes.forEach((h, i) => { h.cell = { ...cells[Math.min(cells.length - 1, Math.floor(i / 2))] }; });
+  }
+
+  /** Vários Heróis da Guilda de uma vez (troca de lugar, aleatório): tudo ou nada, máx. 2 por Espaço no final. */
+  placeHeroes(by: GuildId, moves: { heroId: string; cell: Cell }[]): boolean {
+    if (!this.s.deploying?.includes(by) || !moves.length) return false;
+    const area = this.map.startAreas[this.guild(by).startArea];
+    const final = new Map<string, Cell>();
+    for (const m of moves) {
+      const h = this.s.units[m.heroId];
+      if (!h || h.kind !== 'hero' || h.guild !== by || !h.cell || !area.some(c => sameCell(c, m.cell))) return false;
+      final.set(h.id, { ...m.cell });
+    }
+    const count = new Map<string, number>();
+    for (const u of this.onBoard()) { const c = final.get(u.id) ?? u.cell!; count.set(key(c), (count.get(key(c)) ?? 0) + 1); }
+    if ([...count.values()].some(n => n > 2)) return false;
+    for (const [id, cell] of final) {
+      const h = this.s.units[id];
+      if (sameCell(h.cell, cell)) continue;
+      const from = h.cell!;
+      h.cell = { ...cell };
+      this.emit({ t: 'move', id, from, to: { ...cell } });
+    }
+    return true;
+  }
+
   /** A Guilda terminou de posicionar. Quando a última termina, a partida começa. */
   deployDone(by: GuildId): boolean {
     if (!this.s.deploying?.includes(by)) return false;
@@ -651,7 +712,9 @@ export class Game {
 
   canMove(): boolean {
     const a = this.s.activation;
-    return !!a && !a.moveLocked && a.mp > 0;
+    if (!a || a.moveLocked || a.mp <= 0) return false;
+    const h = this.s.units[a.heroId];
+    return !!h?.alive && !!h.cell;
   }
 
   /** Prévia do movimento até `target`: Monstros que fariam Reação de Alerta no caminho (sem mudar nada). */
@@ -692,7 +755,8 @@ export class Game {
     const a = this.s.activation;
     if (!this.canAct() || !a || a.moveLocked) return false;
     const h = this.unit(a.heroId);
-    const nodes = this.reachable(h, a.mp, h.cell!, openDoors);
+    if (!h.alive || !h.cell) return false; // o Herói ativo morreu (ex.: numa Reação)
+    const nodes = this.reachable(h, a.mp, h.cell, openDoors);
     const node = nodes.get(key(target));
     if (!node || !node.canEnd || node.prev === null) return false;
     const steps = this.pathTo(nodes, target);
@@ -845,39 +909,67 @@ export class Game {
     if (fx.critExtra && atk.crits) { atk.successes += atk.crits * fx.critExtra; notes.push(`${def.name}: +${atk.crits * fx.critExtra} acerto(s) por ✷`); }
     if (this.hasPerm(h, 'soulseeker') && def.group === 'Arco' && atk.crits) { atk.successes += atk.crits; notes.push(`Caça-Almas: +${atk.crits}`); }
 
-    // alvos
+    // alvos: o principal e os que não dependem de escolha (Incinerar, Fender II). Os adicionais escolhidos
+    // (Raio Nova, Fender) vêm depois que a Defesa do alvo principal aparece, num segundo ataque com os mesmos dados.
     const targets: Unit[] = [target];
     const enemiesCloseTo = (c: Cell, except: Unit[]) => this.onBoard().filter(u => !except.includes(u) && this.isEnemy(h, u) && this.board.isClose(u.cell!, c));
-    if (fx.extraOnCrit && atk.crits > 0) {
-      const extra = enemiesCloseTo(target.cell!, targets);
-      const chosen = this.chooseExtra(h, def.name, extra, atk.faces);
-      const pick = chosen !== undefined ? chosen : extra.find(u => u.id === secondaryId) ?? extra.sort((p, q) => this.killScore(p) - this.killScore(q))[0];
-      if (pick) { targets.push(pick); notes.push(`${def.name} atinge também ${this.name(pick)}`); }
-    }
     if (fx.allClose) for (const u of enemiesCloseTo(target.cell!, targets)) { targets.push(u); notes.push(`${def.name} atinge também ${this.name(u)}`); }
     const cleave = this.permFx(h, 'cleave');
+    const cleaveOk = cleave.length > 0 && (def.group === 'Espada' || def.group === 'Machado');
     let cleaved = false;
-    if (cleave.length && (def.group === 'Espada' || def.group === 'Machado')) {
-      const extra = enemiesCloseTo(h.cell!, targets);
-      const one = cleave.includes('all') ? null : this.chooseExtra(h, 'Fender', extra, atk.faces);
-      const take = cleave.includes('all') ? extra : one !== undefined ? (one ? [one] : []) : extra.slice(0, 1);
-      for (const u of take) { targets.push(u); notes.push(`Fender: atinge também ${this.name(u)}`); cleaved = true; }
-    }
+    if (cleaveOk && cleave.includes('all')) for (const u of enemiesCloseTo(h.cell!, targets)) { targets.push(u); notes.push(`Fender: atinge também ${this.name(u)}`); cleaved = true; }
 
     const targetCells = new Map(targets.map(t => [t.id, { ...t.cell! }]));
     const pierce = (ab === 'magia_perfurante' && !!def.magic) || (fx.critNoDefense && atk.crits > 0);
     if (fx.critNoDefense && atk.crits > 0) notes.push(`${def.name}: alvo não rola Defesa`);
-    const results = targets.map(t => {
+    const defend = (t: Unit) => {
       const dr = this.defenseRoll(t, pierce ? 0 : this.defenseDice(t, h), h);
       const blocks = fx.onlyCritSaves ? dr.faces.filter(f => f === 'crit').length : dr.successes;
       if (fx.onlyCritSaves) dr.successes = blocks;
       return { t, dr, wounds: Math.max(0, atk.successes - blocks) };
-    });
+    };
+    const evTarget = (r: { t: Unit; dr: RollResult; wounds: number }) => ({ id: r.t.id, defense: r.dr.faces, blocks: r.dr.successes, wounds: r.wounds, stunnedNoDefense: r.t.stunned, rr: r.dr.rr });
+    const results = targets.map(defend);
     if (fx.onlyCritSaves) notes.push('Só ✷ na Defesa bloqueia');
+    // dano espalhado (Raio Nova, Fender): a escolha do alvo adicional vem antes da animação do golpe
+    const spreads: { source: string; from: Cell }[] = [];
+    if (fx.extraOnCrit && atk.crits > 0) spreads.push({ source: def.name, from: { ...target.cell! } });
+    if (cleaveOk && !cleave.includes('all')) spreads.push({ source: 'Fender', from: { ...h.cell! } });
+    const willSpread = spreads.some(sp => enemiesCloseTo(sp.from, targets).length > 0);
+    // som da habilidade: Bênção do Hobsbawm, crítico com Arco do Casacaverde
+    // Bênção: o som só toca se houver Aliado que ela pode ativar (em Linha de Visão, ainda não ativado)
+    const blessOk = !!this.s.blessing && this.heroesOf(h.guild!).some(x => this.canBless(x.id));
+    const sfx = blessOk ? 'hobsbawn' : ab === 'maestria_arco' && def.group === 'Arco' && atk.crits ? 'bow-critico' : undefined;
+    const thrown = ab === 'arremesso' && def.group === 'Espada' && !this.board.isClose(h.cell!, target.cell!);
     this.emit({
-      t: 'attack', attackerId: h.id, reason: 'heroi', cardName: def.name, attackType: def.attackType!, baseDice: n, ...(cleaved ? { cleave: true } : {}),
+      t: 'attack', attackerId: h.id, reason: 'heroi', cardName: def.name, attackType: def.attackType!, baseDice: n, ...(cleaved ? { cleave: true } : {}), ...(sfx ? { sfx } : {}), ...(thrown ? { thrown: true } : {}), ...(willSpread ? { noAnim: true } : {}),
       dice: atk.faces, hits: atk.successes, crits: atk.crits, notes, rr: atk.rr,
-      targets: results.map(r => ({ id: r.t.id, defense: r.dr.faces, blocks: r.dr.successes, wounds: r.wounds, stunnedNoDefense: r.t.stunned, rr: r.dr.rr })),
+      targets: results.map(evTarget),
+    });
+    // dano espalhado: quem atacou escolhe o alvo adicional depois de ver o ataque e a Defesa do alvo principal
+    let fenderHit = false;
+    for (const sp of spreads) {
+      const extra = enemiesCloseTo(sp.from, targets);
+      if (!extra.length) continue;
+      const chosen = this.chooseExtra(h, sp.source, extra, atk.faces);
+      const pick = chosen !== undefined ? chosen
+        : sp.source === def.name ? extra.find(u => u.id === secondaryId) ?? extra.sort((p, q) => this.killScore(p) - this.killScore(q))[0] : extra[0];
+      if (!pick) continue;
+      targets.push(pick);
+      targetCells.set(pick.id, { ...pick.cell! });
+      const r = defend(pick);
+      results.push(r);
+      this.emit({
+        t: 'attack', attackerId: h.id, reason: 'heroi', cardName: sp.source, attackType: def.attackType!, baseDice: n, spread: true, noAnim: true,
+        dice: atk.faces, hits: atk.successes, crits: atk.crits, notes: [`${sp.source}: atinge também ${this.name(pick)} (mesmos dados)`],
+        targets: [evTarget(r)],
+      });
+      if (sp.source === 'Fender') fenderHit = true;
+    }
+    // e só agora o golpe no mapa, em todos os alvos de uma vez (Fender: o Herói gira com a espada)
+    if (willSpread) this.emit({
+      t: 'strike', attackerId: h.id, cardName: def.name, attackType: def.attackType!, targets: results.map(r => ({ id: r.t.id })),
+      ...(cleaved || fenderHit ? { cleave: true } : {}), ...(thrown ? { thrown: true } : {}), ...(sfx ? { sfx } : {}),
     });
 
     const dying: Unit[] = [];
@@ -1752,7 +1844,8 @@ export class Game {
   /** Rola e usa o Conjunto de Rerrolagem nos dados que falharam (p.27). */
   rollRerolls(n: number, die: DieFace[], success: DieFace, rerolls: number, who?: Unit, kind: 'attack' | 'defense' = 'attack', target?: Unit): RollResult {
     const r = this.roll(n, die, success, 'normal');
-    if (!rerolls || !r.faces.some(f => f !== success && f !== 'crit')) return r;
+    // o jogador pode rerrolar também um dado que acertou (tentando ✷); só ✷ não pode
+    if (!rerolls || !r.faces.some(f => f !== 'crit')) return r;
     // Monstro: quem decide é o jogador que controla os Monstros agora
     const mon = who?.kind === 'monster';
     const card = mon ? { name: MONSTERS[who!.defId].attackName, type: success, dice: n } : kind === 'attack' && this.curCard ? { ...this.curCard, dice: n } : undefined;
@@ -1776,7 +1869,7 @@ export class Game {
         faces = [...faces, ...extra].slice(0, this.diceLimit(die));
         used.push(...idx);
         left -= idx.length;
-        if (left <= 0 || !faces.some(f => f !== success && f !== 'crit')) break;
+        if (left <= 0 || !faces.some(f => f !== 'crit')) break;
         pick = ask(faces, left, ++round);
       }
       return { faces, successes: faces.filter(f => f === success || f === 'crit').length, crits: faces.filter(f => f === 'crit').length, rerolled: used.length,

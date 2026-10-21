@@ -13,12 +13,15 @@ export type Action =
   | { type: 'end' }
   | { type: 'vengeance'; dest: Cell | null; attack: boolean }
   | { type: 'place'; heroId: string; cell: Cell }
+  /** Posicionamento de vários Heróis de uma vez (troca de lugar, aleatório). */
+  | { type: 'placeMany'; moves: { heroId: string; cell: Cell }[] }
   | { type: 'ready' };
 
 /** Aplica a jogada se `by` tiver o direito de fazê-la agora. */
 export function applyAction(g: Game, by: GuildId, a: Action): boolean {
   if (g.s.winner) return false;
   if (a.type === 'place') return g.placeHero(by, a.heroId, a.cell);
+  if (a.type === 'placeMany') return g.placeHeroes(by, a.moves);
   if (a.type === 'ready') return g.deployDone(by);
   if (g.s.deploying?.length) return false;
   if (a.type === 'vengeance') {

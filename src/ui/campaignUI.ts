@@ -1,3 +1,4 @@
+import { gameConfirm } from './dialog';
 import {
   useCampaignNames,
   CIRCLES, CIRCLE_NEED, STARTER_CARDS, type CampaignState, aiChoice, draftHero, finishEquip, voteMap, availableScenarios, draftPick, finishArrange, finishBuy, guildName,
@@ -230,8 +231,8 @@ export class CampaignUI {
     this.page.querySelectorAll<HTMLElement>('[data-map]').forEach(el => { el.onclick = () => this.onPlay(el.dataset.map!); });
     const go = this.page.querySelector('#cp-go') as HTMLElement | null;
     if (go && aiPick) go.onclick = () => this.onPlay(aiPick);
-    (this.page.querySelector('#cp-reset') as HTMLElement).onclick = () => {
-      if (!confirm('Abandonar a campanha atual? O progresso será perdido.')) return;
+    (this.page.querySelector('#cp-reset') as HTMLElement).onclick = async () => {
+      if (!await gameConfirm({ icon: '🏳️', title: 'Abandonar a campanha?', body: 'Todo o progresso da campanha atual (Heróis, cartas, moedas e cenários jogados) será perdido.', yes: 'Abandonar', no: 'Voltar', danger: true })) return;
       this.c = null; this.save(); this.editions();
     };
   }

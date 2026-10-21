@@ -3,9 +3,9 @@ import { getSettings } from '../ui/settings';
 // Efeitos sonoros (public/sounds). Volume e liga/desliga ficam nas Configurações.
 
 export type Sfx = 'healing' | 'refresh' | 'teletransport' | 'trap' | 'pick-item' | 'scan' | 'skill-wisp' | 'skill-spike'
-  | 'dice' | 'atack-sword' | 'atack-bow' | 'atack-magic' | 'stun' | 'foot-step' | 'gold' | 'cleave' | 'rajada-de-vento';
+  | 'dice' | 'atack-sword' | 'atack-bow' | 'atack-magic' | 'stun' | 'foot-step' | 'gold' | 'cleave' | 'rajada-de-vento' | 'hobsbawn' | 'bow-critico';
 const NAMES: Sfx[] = ['healing', 'refresh', 'teletransport', 'trap', 'pick-item', 'scan', 'skill-wisp', 'skill-spike',
-  'dice', 'atack-sword', 'atack-bow', 'atack-magic', 'stun', 'foot-step', 'gold', 'cleave', 'rajada-de-vento'];
+  'dice', 'atack-sword', 'atack-bow', 'atack-magic', 'stun', 'foot-step', 'gold', 'cleave', 'rajada-de-vento', 'hobsbawn', 'bow-critico'];
 export const SOUND_COUNT = NAMES.length;
 const buffers = new Map<Sfx, HTMLAudioElement>();
 /** Sons cujo arquivo não existe (ainda não colocado): não tentam tocar. */

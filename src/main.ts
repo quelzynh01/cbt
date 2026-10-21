@@ -20,6 +20,22 @@ import { initMusic, setMusic } from './audio/music';
 import { soundWidget } from './audio/widget';
 import { hideLoading, loader, showLoading } from './ui/loading';
 
+// ---------------------------------------------------------------- celular: tela deitada
+// O navegador só deixa travar a orientação em tela cheia, e só depois de um toque: no primeiro toque o jogo
+// entra em tela cheia e trava deitado (Android). Onde não dá (iPhone), o aviso "Gire o celular" aparece em pé.
+const isTouch = matchMedia('(pointer: coarse)').matches;
+document.documentElement.classList.toggle('touch', isTouch);
+async function landscape() {
+  try {
+    if (!document.fullscreenElement) await document.documentElement.requestFullscreen?.({ navigationUI: 'hide' });
+    await (screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> }).lock?.('landscape');
+  } catch { /* sem suporte (iPhone) ou recusado: fica o aviso */ }
+}
+if (isTouch) {
+  window.addEventListener('pointerdown', () => { void landscape(); }, { once: true, capture: true });
+  document.getElementById('rot-full')!.addEventListener('click', () => { void landscape(); });
+}
+
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const hud = document.getElementById('hud')!;
 const menu = document.getElementById('menu')!;

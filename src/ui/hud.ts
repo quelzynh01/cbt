@@ -8,8 +8,9 @@ import { play, playOnce } from '../audio/sfx';
 import { soundWidget } from '../audio/widget';
 import { drawFace, getArtVersion } from '../render/chibi';
 import { CURSES } from '../engine/cards';
-import { ITEM_LEVEL, richText, bonusImg, curseCard, medal, heroCard, itemCard, itemColor, monsterCard, paintCardArt } from './cardview';
+import { ITEM_LEVEL, itemArt, richText, bonusImg, curseCard, medal, heroCard, itemCard, itemColor, monsterCard, paintCardArt } from './cardview';
 import { getSettings, onSettings, saveSettings } from './settings';
+import { CARD_ART } from './cardArt';
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string, root: ParentNode = document) => root.querySelector(sel) as T;
 
@@ -17,6 +18,8 @@ export interface HudActions {
   activate(heroId: string): void;
   /** Botão "▶ Ativar" do Herói selecionado. */
   confirmActivate(heroId: string): void;
+  /** Quadradinho do Herói na faixa "Sua vez": seleciona e leva a câmera até ele. */
+  pick(heroId: string): void;
   selectCard(uid: string): void;
   useToken(tokenId: string): void;
   /** Carta ativável (ícone ⚡). */
@@ -53,6 +56,16 @@ function atkInfo(type: string, n: number): string {
   return `<div class="cd-atkinfo">${medal(melee ? 'melee' : 'ranged', n, `${n} dados de ataque`)}<span>${melee ? 'Ataque Próximo' : 'Ataque a Distância'} · <b>${n}</b> dado${n === 1 ? '' : 's'}</span></div>`;
 }
 
+/** Celular / tablet: sem teclado nem mouse. */
+const isTouch = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches;
+/** Dicas no toque: "toque" em vez de "clique" e sem os atalhos de teclado (Espaço, Esc, R…). */
+function touchHint(t: string): string {
+  return t.split(' · ')
+    .filter(part => !/(<b>)?(Espaço|Esc|Enter|[A-Z0-9](-[0-9])?)(<\/b>)? (encerra|cancela|Descansar|descansar|carta|mapa)/.test(part))
+    .join(' · ')
+    .replace(/Clique/g, 'Toque').replace(/clique/g, 'toque');
+}
+
 export class Hud {
   root: HTMLElement;
   game!: Game;
@@ -80,6 +93,7 @@ export class Hud {
         <button id="menubtn" title="Menu da partida (Esc)">☰</button>
       </div>
       <div id="activebar" class="hidden"></div>
+      <div id="heropick" class="hidden"></div>
       <div id="gamemenu" class="hidden"></div>
       <div id="restbox" class="panel hidden"></div>
       <div id="deploybox" class="panel hidden"></div>
@@ -120,6 +134,7 @@ export class Hud {
       <div id="prizebox" class="hidden"></div>
       <div id="confirmbox" class="hidden"></div>
       <div id="actprompt" class="hidden"></div>
+      <div id="zoombtns"><button id="zoom-in" title="Aproximar">＋</button><button id="zoom-out" title="Afastar">－</button></div>
       <div id="turnframe" class="hidden"></div>
       <div id="dice" class="hidden"></div>
       <div id="banner" class="hidden"></div>
@@ -257,8 +272,16 @@ export class Hud {
       el.classList.add('hidden');
       return;
     }
-    const swap = g.s.activation && !g.canBless(u.id) ? ' (troca o Herói ativado)' : g.s.activation ? ' (ativação extra)' : '';
-    el.innerHTML = `<img src="${this.portrait(u.defId, cur.color)}"/><div><b>${g.name(u)}</b><small>Clique em Ativar para jogar com este Herói${swap}</small></div>
+    // o que acontece ao ativar: começar o turno com ele, trocar o Herói ativado ou ativação extra (Bênção / Grito de Guerra)
+    const note = g.s.activation && !g.canBless(u.id) ? `↔ Troca o Herói ativado (${g.name(g.unit(g.s.activation.heroId))})` : g.s.activation ? '✨ Ativação extra' : '';
+    const max = g.maxHp(u);
+    const ready = u.cards.filter(c => !c.exhausted && g.isAttackCard(c)).length;
+    el.innerHTML = `<img src="${this.portrait(u.defId, cur.color)}"/>
+      <div class="ap-info">
+        <b>${HEROES[u.defId].name}</b><span class="ap-title">${HEROES[u.defId].title}</span>
+        <span class="ap-stats"><span title="Vida">❤ ${max - u.wounds}/${max}</span><span title="Defesa">⛨ ${g.defenseDice(u)}</span><span title="Cartas de Ataque prontas">⚔ ${ready} pronta${ready === 1 ? '' : 's'}</span>${u.stunned ? '<span class="ap-stun">✷ Atordoado</span>' : ''}</span>
+        ${note ? `<span class="ap-note">${note}</span>` : ''}
+      </div>
       <button class="primary" id="ap-go">▶ Ativar</button><button id="ap-x" title="Cancelar (Esc)">✕</button>`;
     el.classList.remove('hidden');
     ($('#ap-go', el) as HTMLElement).onclick = () => this.actions.confirmActivate(u.id);
@@ -269,7 +292,7 @@ export class Hud {
   private renderActiveBar() {
     const g = this.game;
     const bar = $('#activebar', this.root);
-    if (g.s.winner || g.s.deploying?.length) { bar.classList.add('hidden'); return; }
+    if (g.s.winner || g.s.deploying?.length) { bar.classList.add('hidden'); $('#heropick', this.root).classList.add('hidden'); return; }
     const cur = g.currentGuild();
     const who = this.isMine(cur.id) ? 'Sua vez!' : cur.controller === 'ai' ? `Vez da IA · ${guildShort(cur.id)}` : `Vez de ${this.nameOf(cur.id) ?? guildShort(cur.id)}`;
     const a = g.s.activation;
@@ -279,6 +302,29 @@ export class Hud {
       ? `<span class="ab-hero"><img src="${this.portrait(h.defId, cur.color)}"/><b>${HEROES[h.defId]?.name ?? g.name(h)}</b><span class="ab-on">✔ ATIVADO</span><small>${a!.attacked ? 'atacou' : a!.moved ? 'movendo' : ''}</small></span>`
       : '<span class="ab-hero"><small>escolhendo Herói…</small></span>'}`;
     bar.classList.remove('hidden');
+    this.renderHeroPick();
+  }
+
+  /** Sua vez: os quadradinhos dos seus Heróis logo abaixo da faixa (toque = seleciona e a câmera vai até ele). */
+  private renderHeroPick() {
+    const g = this.game;
+    const el = $('#heropick', this.root);
+    const cur = g.currentGuild();
+    const a = g.s.activation;
+    // aparece enquanto dá para escolher quem ativar: no começo do turno, antes de agir, ou com Bênção / Grito de Guerra
+    const choosing = !a || (!a.moved && !a.attacked && a.mp >= 3) || g.heroesOf(cur.id).some(h => h.id !== a.heroId && g.canBless(h.id));
+    if (!this.isMine(cur.id) || g.s.winner || g.s.pending || !choosing) { el.classList.add('hidden'); return; }
+    const done = g.s.activatedThisTurn ?? [];
+    el.innerHTML = g.heroesOf(cur.id).map(h => {
+      const max = g.maxHp(h);
+      const state = !h.alive || !h.cell ? 'dead' : h.spent ? 'spent' : a?.heroId === h.id ? 'on' : done.includes(h.id) && !g.canBless(h.id) ? 'used' : '';
+      const tag = state === 'dead' ? '☠' : state === 'spent' ? '💤' : state === 'on' ? '✔' : state === 'used' ? '✓' : '';
+      return `<button class="hp-hero ${state} ${this.pendingActivate === h.id ? 'sel' : ''}" data-hp="${h.id}" ${state === 'dead' ? 'disabled' : ''} title="${HEROES[h.defId].name}">
+        <img src="${this.portrait(h.defId, cur.color)}"/><span class="hp-num">${h.num}</span>${tag ? `<span class="hp-tag">${tag}</span>` : ''}
+        <span class="hp-life"><i style="width:${h.alive ? ((max - h.wounds) / max) * 100 : 0}%"></i></span></button>`;
+    }).join('');
+    el.classList.remove('hidden');
+    el.querySelectorAll<HTMLElement>('[data-hp]').forEach(b => { b.onclick = () => this.actions.pick(b.dataset.hp!); });
   }
 
   /** Guilda de quem está olhando a tela (a da vez, se for sua). */
@@ -711,11 +757,11 @@ export class Hud {
         <button class="lupa" id="hb-card" title="Ver a carta com os valores atuais">🔍</button>
         ${this.inspected ? '<button class="x" id="hb-close">✕</button>' : ''}
       </div>
-      <div class="stats">
-        <span title="Vida atual (carta: ${hd.hp})" class="${stat(u.alive ? max - u.wounds : 0, hd.hp)}">❤ ${u.alive ? max - u.wounds : 0}/${max}</span>
-        ${g.rerollsOf(u) ? `<span title="Rerrolagem" class="up">↻ ${g.rerollsOf(u)}</span>` : ''}
-        <span title="Dados de Defesa (inclui bônus)" class="${stat(g.defenseDice(u), hd.defense)}">⛨ ${g.defenseDice(u)}</span>
-        <span title="Mortes neste cenário">☠ ${u.deaths}</span>
+      <div class="stats hb-meds">
+        ${u.alive && max - u.wounds > 0 ? medal('hp', max - u.wounds, `Vida: ${max - u.wounds} de ${max} (carta: ${hd.hp})`, 'hbm') : `<span class="hbm-zero" title="Sem Vida"><img src="${import.meta.env.BASE_URL}bonus/hp1.webp" alt=""/><b>0</b></span>`}
+        ${g.defenseDice(u) > 0 ? medal('def', g.defenseDice(u), `${g.defenseDice(u)} dado${g.defenseDice(u) === 1 ? '' : 's'} de Defesa (carta: ${hd.defense})`, 'hbm') : `<span class="hbm-zero" title="Sem dados de Defesa"><img src="${import.meta.env.BASE_URL}bonus/def1.webp" alt=""/><b>0</b></span>`}
+        ${g.rerollsOf(u) ? medal('rr', g.rerollsOf(u), `Rerrolagem ${g.rerollsOf(u)}`, 'hbm') : ''}
+        ${u.deaths ? medal('skull', u.deaths, `Morreu ${u.deaths} vez${u.deaths === 1 ? '' : 'es'} neste cenário`, 'hbm') : ''}
         ${isActive ? (g.freeMode ? '<span class="mp" title="Modo Livre">👣 ∞</span>' : `<span class="mp" title="Pontos de Movimento">👣 ${[0, 1, 2].map(i => `<i class="${i < act!.mp && !act!.moveLocked ? 'on' : ''}"></i>`).join('')}</span>`) : ''}
         ${isActive ? `<span title="Ataque">${act!.attacked ? '⚔ usado' : '⚔ disponível'}</span>` : ''}
       </div>
@@ -752,10 +798,13 @@ export class Hud {
     const maya = HEROES[u.defId].ability === 'dominio_magia' && d.magic;
     const sel = this.selectedCard === c.uid && usable.has(c.uid);
     const bonus = d.kind === 'attack' ? this.game.attackBonus(u).n : 0;
-    return `<div class="card k-${d.kind} ${c.exhausted ? 'exhausted' : ''} ${sel ? 'selected' : ''} ${usable.has(c.uid) ? 'usable' : ''}" data-card="${c.uid}" style="--lv:${itemColor(c.defId)}" title="${ITEM_LEVEL[d.level]?.name ?? ''}">
+    // mini carta: nome, arte e os números (dados de ataque, Defesa, Vida, Rerrolagem); o texto fica no toque longo / mouse e na lupa
+    const tip = `${d.name} — ${ITEM_LEVEL[d.level]?.name ?? ''}${d.text ? `: ${d.text}` : ''}`.replace(/"/g, '&quot;');
+    const fill = CARD_ART[c.defId]?.kind === 'fill';
+    return `<div class="card mini k-${d.kind} ${c.exhausted ? 'exhausted' : ''} ${sel ? 'selected' : ''} ${usable.has(c.uid) ? 'usable' : ''}" data-card="${c.uid}" style="--lv:${itemColor(c.defId)}" title="${tip}">
       <div class="cname">${d.name}</div>${actBtn}
-      ${`<div class="cicons">${d.kind === 'attack' ? medal(d.attackType === 'melee' ? 'melee' : 'ranged', d.dice + bonus, `${d.dice + bonus} dados de ataque ${d.attackType === 'melee' ? 'Próximo' : 'a Distância'}${bonus ? ` (carta ${d.dice} + ${bonus} de bônus)` : ''}`, `catk${bonus > 0 ? ' up' : ''}`) : ''}${d.defBonus ? bonusImg('def', d.defBonus) : ''}${d.hpBonus ? bonusImg('hp', d.hpBonus) : ''}${d.rerolls ? bonusImg('rr', d.rerolls) : ''}</div>`}
-      ${d.text ? `<div class="ctext">${richText(d.text)}</div>` : ''}
+      <div class="cart ${fill ? 'fill' : ''}">${itemArt(c.defId)}</div>
+      ${d.kind === 'attack' ? `<div class="cicons">${medal(d.attackType === 'melee' ? 'melee' : 'ranged', d.dice + bonus, `${d.dice + bonus} dados de ataque ${d.attackType === 'melee' ? 'Próximo' : 'a Distância'}${bonus ? ` (carta ${d.dice} + ${bonus} de bônus)` : ''}`, `catk${bonus > 0 ? ' up' : ''}`)}</div>` : ''}
       ${maya && !c.exhausted && c.uses > 0 ? '<div class="cuses">1 uso restante</div>' : ''}
       ${c.exhausted ? '<div class="cexh">EXAUSTADA</div>' : ''}
     </div>`;
@@ -791,7 +840,7 @@ export class Hud {
 
   setModeBadge(text: string) { $('.badge-test', this.root).textContent = text; }
 
-  setHint(text: string) { $('#hint', this.root).innerHTML = text; }
+  setHint(text: string) { $('#hint', this.root).innerHTML = isTouch ? touchHint(text) : text; }
 
   // ------------------------------------------------------------------
   // Eventos visuais
@@ -955,9 +1004,11 @@ export class Hud {
       } else if (!carry) {
         if (!e.dice.length) atkRow.innerHTML = '<span class="muted">sem dados</span>';
         else {
-          if (mineAtk && !e.rr?.asked) await askClick(box.querySelector('.cd-btn.atk')!, 'Rolar ataque');
+          if (mineAtk && !e.rr?.asked && !e.spread) await askClick(box.querySelector('.cd-btn.atk')!, 'Rolar ataque');
           if (!alive()) return;
-          await rollRow(atkRow, e.dice, true, e.attackType, e.rr, false, e.baseDice, mineAtk, box.querySelector('.cd-btn.atk'));
+          // dano espalhado: mesmos dados do ataque anterior, já rolados
+          if (e.spread) await rollRow(atkRow, e.dice, true, e.attackType, undefined, true);
+          else await rollRow(atkRow, e.dice, true, e.attackType, e.rr, false, e.baseDice, mineAtk, box.querySelector('.cd-btn.atk'));
         }
       }
       if (!alive()) return;
@@ -1191,7 +1242,7 @@ export class Hud {
         const paint = () => {
           dice.forEach((d, i) => d.classList.toggle('pick', sel.has(i)));
           const hits = req.faces.filter(f => ok(f, req.success)).length;
-          sum.innerHTML = `<b>${hits}</b> ${black ? 'acerto' : 'bloqueio'}${hits === 1 ? '' : 's'} · ↻ ${(req.round ?? 1) > 1 ? `Ainda tem ${req.rerolls} Rerrolagem` : `Rerrolagem ${req.rerolls}`}: clique nos dados para rolar de novo (${sel.size}/${req.rerolls})`;
+          sum.innerHTML = `<b>${hits}</b> ${black ? 'acerto' : 'bloqueio'}${hits === 1 ? '' : 's'} · ↻ ${(req.round ?? 1) > 1 ? `Ainda tem ${req.rerolls} Rerrolagem` : `Rerrolagem ${req.rerolls}`}: clique nos dados para rolar de novo (${sel.size}/${req.rerolls})${[...sel].some(i => ok(req.faces[i], req.success)) ? `<div class="rr-warn">⚠ Rerrolar um dado que já acertou pode fazer você perder esse ${req.kind === 'attack' ? 'acerto' : 'bloqueio'} — mas pode sair ✷ (crítico)!</div>` : ''}`;
           btn.innerHTML = `<button id="cd-keep">Manter</button><button class="primary" id="cd-rr" ${sel.size ? '' : 'disabled'}>↻ Rerrolar ${sel.size || ''}</button>`;
           (btn.querySelector('#cd-keep') as HTMLElement).onclick = () => finish([]);
           (btn.querySelector('#cd-rr') as HTMLElement).onclick = () => finish([...sel]);

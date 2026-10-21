@@ -263,6 +263,10 @@ export class BattlePanel {
     const atkTray = this.el.querySelector('.bt-tray.atk') as HTMLElement;
     if (c?.atk) {
       if (!c.atk.settled && c.atk.idx.length) await rerollDice(atkTray, c.atk.dice, { before: c.atk.before, idx: c.atk.idx, asked: true }, e.dice, e.attackType, true, sp, () => this.newDie(atkTray, true), () => this.stopPickSpin(), n => this.critAsk(atkTray, n, humanAtk, sp));
+    } else if (!c && e.spread) {
+      // dano espalhado: os dados são os mesmos do ataque anterior (já rolados)
+      await this.rollTray(atkTray, e.dice, e.attackType, ATK_FACES, sp, true);
+      await wait(350);
     } else if (!c) {
       if (humanAtk && atk.kind === 'monster') await button(`🎲 Rolar ataque de ${g.name(atk)} (${e.baseDice ?? e.dice.length} dado${(e.baseDice ?? e.dice.length) > 1 ? 's' : ''})`);
       else if (!humanAtk || e.reason !== 'heroi') await wait(450);
@@ -457,7 +461,8 @@ export class BattlePanel {
       const paint = () => {
         const hits = req.faces.filter(ok).length;
         dice.forEach((d, i) => d.classList.toggle('pick', sel.has(i)));
-        countEl.innerHTML = `<b>${hits}</b> ${req.kind === 'attack' ? 'acerto' : 'bloqueio'}${hits === 1 ? '' : 's'} · <span class="bt-rrhint">↻ Rerrolagem ${req.rerolls}: toque nos dados para rolar de novo (${sel.size}/${req.rerolls})</span>`;
+        const risky = [...sel].some(i => ok(req.faces[i]));
+        countEl.innerHTML = `<b>${hits}</b> ${req.kind === 'attack' ? 'acerto' : 'bloqueio'}${hits === 1 ? '' : 's'} · <span class="bt-rrhint">↻ Rerrolagem ${req.rerolls}: toque nos dados para rolar de novo (${sel.size}/${req.rerolls})</span>${risky ? `<div class="rr-warn">⚠ Rerrolar um dado que já acertou pode fazer você perder esse ${req.kind === 'attack' ? 'acerto' : 'bloqueio'} — mas pode sair ✷ (crítico)!</div>` : ''}`;
         btns.innerHTML = `<button id="bt-keep">Manter</button><button class="primary" id="bt-rr" ${sel.size ? '' : 'disabled'}>↻ Rerrolar ${sel.size || ''}</button>`;
         (btns.querySelector('#bt-keep') as HTMLElement).onclick = () => finish([]);
         (btns.querySelector('#bt-rr') as HTMLElement).onclick = () => finish([...sel]);

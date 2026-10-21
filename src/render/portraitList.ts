@@ -1,0 +1,2 @@
+// Gerado por tools/build_portraits.py — personagens com retrato próprio (public/portraits/<id>.webp).
+export const PORTRAITS: string[] = ['diva', 'casacaverde', 'grom', 'hobsbawm', 'johan', 'kanga', 'maya', 'escarlate', 'seth', 'espetado', 'vapor', 'zazu', 'goblin', 'capitao_orc', 'orc', 'feral_martelador', 'feral_lanceiro', 'troll', 'minotauro', 'irma_dor', 'irma_prazer', 'lorde_presas'];

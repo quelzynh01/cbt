@@ -1,4 +1,5 @@
 import { GUILDS, HEROES } from '../engine/data';
+import { gameConfirm } from './dialog';
 import { Game } from '../engine/game';
 import { MAPS, getMap } from '../engine/maps';
 import type { GameState, GuildId } from '../engine/types';
@@ -395,7 +396,9 @@ export class OnlineLobby {
     this.bindChat();
     paintCardArt(this.page);
     this.page.querySelectorAll<HTMLCanvasElement>('canvas[data-face]').forEach(cv => drawFace(cv, cv.dataset.face!, '#3a5a8a'));
-    (this.page.querySelector('.mp-back') as HTMLElement).onclick = () => { if (confirm('Sair da sala? A mesa continua sem você (a IA assume).')) this.leave(); };
+    (this.page.querySelector('.mp-back') as HTMLElement).onclick = async () => {
+      if (await gameConfirm({ icon: '🚪', title: 'Sair da sala?', body: 'A mesa continua sem você — a IA assume o seu lugar.', yes: 'Sair', no: 'Ficar', danger: true })) this.leave();
+    };
     this.page.querySelectorAll<HTMLElement>('[data-h]').forEach(el => { el.onclick = () => { this.pickHero = el.dataset.h!; this.renderTable(); }; });
     const pick = this.page.querySelector('#tb-pick') as HTMLElement | null;
     if (pick) pick.onclick = () => { if (this.pickHero) this.send({ t: 'draft', hero: this.pickHero }); };

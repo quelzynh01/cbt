@@ -1,0 +1,10 @@
+{
+  "name": "Champions Battle Tactics",
+  "short_name": "CBT",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#15280c",
+  "theme_color": "#2e2116",
+  "start_url": ".",
+  "icons": []
+}

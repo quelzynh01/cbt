@@ -92,6 +92,12 @@ export function itemCard(id: string, extra = '', attrs = '', qty = false, atkBon
   </div>`;
 }
 
+/** Só a arte de uma carta de item (mini carta da ficha do Herói); sem arte, o ícone do grupo. */
+export function itemArt(id: string): string {
+  const art = CARD_ART[id];
+  return art ? artImg(art, `art-${art.img}`) : `<span class="ac-icon">${GROUP_ICON[CARDS[id]?.group ?? ''] ?? '✦'}</span>`;
+}
+
 /** Imagem da arte da carta (public/cards). */
 const artImg = (a: { img: string; kind: string }, cls = '') => `<img class="ac-img ${a.kind} ${cls}" src="${import.meta.env.BASE_URL}cards/${a.img}.webp" alt="" draggable="false"/>`;
 

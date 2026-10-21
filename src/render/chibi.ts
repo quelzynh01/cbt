@@ -3,6 +3,8 @@
 // depois só é carimbado no mapa. Para trocar por arte própria, coloque PNGs em public/sprites/<id>.png
 // (pés no centro da base da imagem) — eles substituem o desenho automaticamente.
 
+import { PORTRAITS } from './portraitList';
+
 type C = CanvasRenderingContext2D;
 type P = [number, number];
 
@@ -968,6 +970,22 @@ export function getArtVersion() { return artVersion; }
 
 /** Carrega os PNGs listados em public/sprites/manifest.json (chame uma vez no início). */
 export async function preloadArt(onEach?: () => void, expect?: (n: number) => void): Promise<void> {
+  expect?.(PORTRAITS.length);
+  const faces = Promise.all(PORTRAITS.map(id => new Promise<void>(resolve => {
+    const img = new Image();
+    img.onload = () => { portraits.set(id, img); onEach?.(); resolve(); };
+    img.onerror = () => { onEach?.(); resolve(); };
+    img.src = `${import.meta.env.BASE_URL}portraits/${id}.webp`;
+  })));
+  await loadSprites(onEach, expect);
+  await faces;
+  artVersion++;
+}
+
+/** Retratos (quadradinhos) dos personagens: public/portraits/<id>.webp (tools/build_portraits.py). */
+const portraits = new Map<string, HTMLImageElement>();
+
+async function loadSprites(onEach?: () => void, expect?: (n: number) => void): Promise<void> {
   try {
     const res = await fetch(`${import.meta.env.BASE_URL}sprites/manifest.json`, { cache: 'no-cache' });
     if (!res.ok) return;
@@ -1117,6 +1135,8 @@ export function drawFace(canvas: HTMLCanvasElement, id: string, bg: string) {
   grd.addColorStop(1, mix(bg, -0.4));
   ctx.fillStyle = grd;
   ctx.fillRect(0, 0, w, h);
+  const face = portraits.get(artId(id)) ?? portraits.get(id.replace(/\d+$/, ''));
+  if (face) { ctx.drawImage(face, 0, 0, w, h); return; }
   const s = sprite(id, 'se', false);
   const [sx, sy, sw, sh] = s.head;
   ctx.drawImage(s.cv, sx, sy, sw, sh, 0, 0, w, h);

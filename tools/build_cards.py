@@ -56,6 +56,8 @@ ITEMS = {
     'geneis-glass': ['vidro_genesis', 'vidro_genesis2'],
     'shield-of-souls': ['escudo_almas'],
     'incinerar': ['incinerar', 'incinerar2'],
+    'dizimador': ['dizimador'],
+    'bomb1': ['bomba'],  # a Bomba da Recompensa (Distrito do Alquimista)
     # Maldições Mortais: a 1ª imagem é a carta "Sem Maldição"; a 2ª, todas as outras
     'death-curse1': ['curse:sem_maldicao'],
     'death-curse2': ['curse:aquafobia', 'curse:choque', 'curse:sangramento', 'curse:amnesia', 'curse:sangramento_grave', 'curse:propenso', 'curse:atordoado'],

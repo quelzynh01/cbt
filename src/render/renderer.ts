@@ -1,5 +1,5 @@
 import { entryPlaque } from './dice';
-import { play, playOnce } from '../audio/sfx';
+import { play, playOnce, type Sfx } from '../audio/sfx';
 import { CARDS } from '../engine/cards';
 import { drawTokenImage, tokenImage, tokenImageId } from './tokens';
 import { key, sameCell } from '../engine/board';
@@ -44,6 +44,8 @@ interface UnitView {
   fade: { from: number; to: number; t0: number; dur: number } | null;
   hurtT0: number;
   lunge: { dx: number; dy: number; t0: number; dur: number } | null;
+  /** Fender: gira com a espada (golpe em volta). */
+  spin?: { t0: number; dur: number } | null;
   flip: boolean;
   dir: Dir;
 }
@@ -69,6 +71,25 @@ const DUR: Partial<Record<GameEvent['t'], number>> = {
   spawn: 420, respawn: 420, spawnRoll: 0, mission: 1500, reaction: 520, turn: 950, rest: 700, card: 800, coins: 0, log: 0, gameover: 0,
 };
 
+/** Espada (lâmina para +x, cabo na origem): Fender girando e Arremesso de Lâmina. */
+function drawSword(ctx: CanvasRenderingContext2D, s: number) {
+  ctx.save();
+  ctx.scale(s, s);
+  ctx.strokeStyle = '#2a2a36'; ctx.lineWidth = 1.4 / s * 1.6; ctx.lineJoin = 'round';
+  // cabo e pomo
+  ctx.fillStyle = '#6b3d1c'; ctx.fillRect(-2, -2.5, 10, 5); ctx.strokeRect(-2, -2.5, 10, 5);
+  ctx.fillStyle = '#d9a72c'; ctx.beginPath(); ctx.arc(-3, 0, 3, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  // guarda
+  ctx.fillStyle = '#d9a72c'; ctx.fillRect(8, -9, 4.5, 18); ctx.strokeRect(8, -9, 4.5, 18);
+  // lâmina com brilho
+  ctx.fillStyle = '#e6ebf5'; ctx.beginPath(); ctx.moveTo(12.5, -4); ctx.lineTo(40, -3); ctx.lineTo(48, 0); ctx.lineTo(40, 3); ctx.lineTo(12.5, 4); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(14, -1); ctx.lineTo(42, -0.6); ctx.stroke();
+  ctx.restore();
+}
+
+/** O que a animação do golpe precisa saber (evento de ataque ou 'strike'). */
+type Strike = Pick<Extract<GameEvent, { t: 'strike' }>, 'attackerId' | 'cardName' | 'attackType' | 'targets' | 'cleave' | 'thrown' | 'sfx'>;
+
 export class Renderer {
   readonly canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
@@ -88,7 +109,7 @@ export class Renderer {
   private doors = new Map<string, boolean>();
   private floor: Record<string, Token[]> = {};
   private queue: GameEvent[] = [];
-  private current: { e: GameEvent; end: number } | null = null;
+  private current: { e: GameEvent; end: number; also?: GameEvent[] } | null = null;
   private floaters: Floater[] = [];
   /** Entradas de Monstro sorteadas recentemente: chave do Espaço -> instante. */
   private spawnFlash = new Map<string, { t0: number; ok: boolean }>();
@@ -251,7 +272,8 @@ export class Renderer {
       if (!u.alive || !u.cell) continue;
       const p = g2s(u.pos.gx, u.pos.gy);
       const s = charScale(u.defId);
-      if (w.x > p.x - 22 * s && w.x < p.x + 22 * s && w.y > p.y - 74 * s && w.y < p.y + 8) {
+      // a área de toque cobre o boneco desenhado inteiro (cabeça incluída), senão tocar na cabeça acerta o Espaço de trás
+      if (w.x > p.x - 26 * s && w.x < p.x + 26 * s && w.y > p.y - 96 * s && w.y < p.y + 8) {
         // o mais próximo do centro do corpo vence (personagens no mesmo Espaço se sobrepõem)
         const d = Math.hypot((w.x - p.x) * 1.4, w.y - (p.y - 32 * s));
         if (!best || d < best.d) best = { id: u.id, d };
@@ -316,7 +338,7 @@ export class Renderer {
   }
 
   /** Tipo do projétil/som pelo ataque: Mágica = orbe, Arco = flecha, Espada arremessada = lâmina, Arremesso = pedra. */
-  private attackKind(e: Extract<GameEvent, { t: 'attack' }>, attacker: string): Projectile['kind'] {
+  private attackKind(e: Strike, attacker: string): Projectile['kind'] {
     const base = attacker.replace(/\d+$/, '');
     if (['irma_prazer', 'lorde_presas'].includes(base)) return 'orb';
     if (['goblin', 'feral_lanceiro'].includes(base)) return 'arrow';
@@ -416,6 +438,13 @@ export class Renderer {
         if (t.kind === 'hero' || t.kind === 'monster') t.dir = dirFromScreen(pa.x - pt.x, pa.y - pt.y);
         break; // a investida / o projétil vêm depois da rolagem (animateAttack)
       }
+      case 'strike': {
+        // golpe depois da escolha do dano espalhado: vira para o alvo principal e anima contra todos
+        const a = this.units.get(e.attackerId), t = this.units.get(e.targets[0]?.id);
+        if (a && t && a !== t) { const pa = g2s(a.pos.gx, a.pos.gy), pt = g2s(t.pos.gx, t.pos.gy); a.flip = pt.x < pa.x; a.dir = dirFromScreen(pt.x - pa.x, pt.y - pa.y); }
+        dur = this.animateAttack(e) + 80 / this.speed;
+        break;
+      }
       case 'damage': {
         const u = this.units.get(e.id)!;
         u.wounds = e.wounds;
@@ -435,7 +464,7 @@ export class Renderer {
   }
 
   /** Animação do ataque (investida ou projétil). Retorna quanto tempo leva (ms). */
-  animateAttack(e: Extract<GameEvent, { t: 'attack' }>): number {
+  animateAttack(e: Strike): number {
     const now = this.t;
     const a = this.units.get(e.attackerId);
     const t = this.units.get(e.targets[0]?.id);
@@ -446,13 +475,20 @@ export class Renderer {
         const kind = this.attackKind(e, a.defId);
         const sp = this.speed;
         // o tipo da animação vem da carta usada (Próximo = investida, Distância = projétil), mesmo no mesmo Espaço
-        if (e.attackType === 'melee') {
+        if (e.sfx) setTimeout(() => play(e.sfx as Sfx), (e.attackType === 'melee' && !e.thrown ? 450 : 380) / sp);
+        if (e.cleave && !e.thrown) {
+          // Fender: gira no lugar com a espada, atingindo quem está em volta
+          a.spin = { t0: now + 100 / sp, dur: 700 / sp };
+          setTimeout(() => play('cleave'), 200 / sp);
+          return 820 / sp;
+        }
+        if (e.attackType === 'melee' && !e.thrown) {
           // investida: corre até encostar no inimigo e volta
           let dx = pt.x - pa.x, dy = pt.y - pa.y;
           const d = Math.hypot(dx, dy);
           if (d < 8) { dx = (pt.x < pa.x ? -1 : 1) * 26; dy = 0; } else { const k = Math.min(0.72, Math.max(0.35, (d - 34) / d)); dx *= k; dy *= k; }
           a.lunge = { dx, dy, t0: now + 150 / sp, dur: 620 / sp };
-          setTimeout(() => play(e.cleave ? 'cleave' : 'atack-sword'), 330 / sp);
+          setTimeout(() => play('atack-sword'), 330 / sp);
         } else {
           for (const tg of e.targets) {
             const tv = this.units.get(tg.id)!;
@@ -461,11 +497,12 @@ export class Renderer {
             // mesmo Espaço (ou colados): afasta as pontas para o tiro aparecer num arco
             if (Math.hypot(to.x - from.x, to.y - from.y) < 40) { const s = to.x >= from.x ? 1 : -1; from.x -= 30 * s; to.x += 30 * s; }
             const dist = Math.hypot(to.x - from.x, to.y - from.y);
-            this.projectiles.push({ from, to, t0: now + 250 / sp, dur: Math.min(900, 380 + dist * 0.35) / sp, kind, arc: Math.max(50, Math.min(220, dist * 0.5)) });
+            // Jøhan arremessa a Espada: voa girando, quase reta
+            this.projectiles.push({ from, to, t0: now + 250 / sp, dur: Math.min(900, 380 + dist * 0.35) / sp, kind: e.thrown ? 'blade' : kind, arc: e.thrown ? Math.max(20, Math.min(70, dist * 0.15)) : Math.max(50, Math.min(220, dist * 0.5)) });
           }
-          setTimeout(() => play(kind === 'orb' ? 'atack-magic' : 'atack-bow'), 230 / sp);
+          setTimeout(() => play(e.thrown ? 'atack-sword' : kind === 'orb' ? 'atack-magic' : 'atack-bow'), 230 / sp);
         }
-        if (e.attackType === 'melee') return 820 / sp;
+        if (e.attackType === 'melee' && !e.thrown) return 820 / sp;
         const far = e.targets.map(tg => { const tv = this.units.get(tg.id)!; const p2 = g2s(tv.pos.gx, tv.pos.gy); return Math.hypot(p2.x - pa.x, p2.y - pa.y); });
         return (250 + Math.min(900, 380 + Math.max(...far) * 0.35)) / sp;
       }
@@ -576,6 +613,7 @@ export class Renderer {
       if (this.current) {
         if (this.t < this.current.end) return;
         this.finishEvent(this.current.e);
+        for (const x of this.current.also ?? []) this.finishEvent(x);
         this.current = null;
       }
       const e = this.queue.shift();
@@ -588,9 +626,19 @@ export class Renderer {
         return;
       }
       this.idleSent = false;
-      const d = this.startEvent(e);
+      let d = this.startEvent(e);
+      // mortes (e danos) em seguida acontecem juntas: quem cai no mesmo ataque (ex.: Fender) morre ao mesmo tempo
+      const also: GameEvent[] = [];
+      if (d > 0 && (e.t === 'death' || e.t === 'damage')) {
+        const along = new Set<string>([e.t, 'coins', 'log', 'cemetery', 'heal']);
+        while (this.queue.length && along.has(this.queue[0].t) && d !== Infinity) {
+          const q = this.queue.shift()!;
+          d = Math.max(d, this.startEvent(q));
+          also.push(q);
+        }
+      }
       if (d > 0) {
-        this.current = { e, end: this.t + d };
+        this.current = { e, end: this.t + d, also };
         return;
       }
       this.finishEvent(e);
@@ -1147,7 +1195,51 @@ export class Renderer {
     ctx.translate(lx, ly);
     const hurt = Math.max(0, 1 - (this.t - u.hurtT0) / (350 / this.speed));
     const idleT = tt + (u.num || u.id.length) * 0.37;
-    drawCharacter(ctx, u.defId, { dir: u.dir, flip: u.flip, t: idleT, hurt, alpha: 1, stunned: u.stunned, lunge: 0, scale: L.scale * 0.66 });
+    // Fender: o Herói gira (vira para as 4 direções) e um arco de corte dá a volta nele
+    let dir = u.dir, flip = u.flip;
+    let spinFx: (() => void) | null = null, spinFront = false;
+    if (u.spin) {
+      const k = (this.t - u.spin.t0) / u.spin.dur;
+      if (k > 1) u.spin = null;
+      else if (k >= 0) {
+        // uma volta só: vira para as 4 direções e a espada dá a volta em torno dele
+        const turn: [Dir, boolean][] = [['se', false], ['sw', false], ['nw', false], ['ne', false]];
+        [dir, flip] = turn[Math.min(3, Math.floor(k * 4))];
+        const ease = 1 - Math.pow(1 - k, 2);
+        const a0 = Math.PI * 0.5 + ease * Math.PI * 2; // começa na frente e gira 360°
+        const R = 58 * L.scale;
+        const fade = k < 0.85 ? 1 : (1 - k) / 0.15;
+        spinFx = () => {
+        ctx.save();
+        ctx.translate(0, -26 * L.scale);
+        // rastro do corte (atrás da espada), num círculo achatado no chão
+        ctx.save();
+        ctx.scale(1, 0.5);
+        ctx.lineCap = 'round';
+        const trail = Math.min(ease * Math.PI * 2, Math.PI * 1.4);
+        for (let i = 0; i < 6; i++) {
+          ctx.beginPath();
+          ctx.arc(0, 0, R - i * 3, a0 - trail * (1 - i * 0.12), a0);
+          ctx.strokeStyle = `rgba(235,245,255,${fade * (0.75 - i * 0.11)})`;
+          ctx.lineWidth = 10 - i * 1.4;
+          ctx.stroke();
+        }
+        ctx.restore();
+        // a espada girando: cabo perto do Herói, ponta para fora
+        const sx = Math.cos(a0) * R * 0.55, sy = Math.sin(a0) * R * 0.5 * 0.55;
+        ctx.translate(sx, sy);
+        ctx.rotate(Math.atan2(Math.sin(a0) * 0.5, Math.cos(a0)));
+        ctx.globalAlpha = fade;
+        drawSword(ctx, 1.5 * L.scale);
+        ctx.restore();
+        };
+        // atrás do Herói na metade de cima do círculo; na frente na metade de baixo
+        spinFront = Math.sin(a0) > 0;
+        if (!spinFront) { spinFx(); spinFx = null; }
+      }
+    }
+    drawCharacter(ctx, u.defId, { dir, flip, t: idleT, hurt, alpha: 1, stunned: u.stunned, lunge: 0, scale: L.scale * 0.66 });
+    if (spinFx && spinFront) spinFx();
     if (u.stunned) for (let i = 0; i < 3; i++) {
       const ang = tt * 3 + (i * Math.PI * 2) / 3;
       star(ctx, Math.cos(ang) * 16, -84 * L.scale + Math.sin(ang) * 5, 5, '#ffe14d');
@@ -1223,7 +1315,13 @@ export class Renderer {
         ctx.fillStyle = grd; ctx.beginPath(); ctx.arc(0, 0, 14, 0, Math.PI * 2); ctx.fill();
       } else if (p.kind === 'arrow' || p.kind === 'blade') {
         ctx.rotate(Math.atan2(nxt.y - y, nxt.x - x));
-        if (p.kind === 'blade') { ctx.rotate(this.t / 40); ctx.fillStyle = '#e6ebf5'; ctx.strokeStyle = '#3a3a48'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(-12, -3); ctx.lineTo(12, 0); ctx.lineTo(-12, 3); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore(); continue; }
+        if (p.kind === 'blade') {
+          // espada arremessada girando (Jøhan): do tamanho de uma espada de verdade
+          ctx.rotate(this.t / 45);
+          ctx.translate(-12, 0);
+          drawSword(ctx, 2.1);
+          ctx.restore(); continue;
+        }
         ctx.strokeStyle = '#5a3a1a'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(-12, 0); ctx.lineTo(10, 0); ctx.stroke();
         ctx.fillStyle = '#ccc'; ctx.beginPath(); ctx.moveTo(14, 0); ctx.lineTo(8, -4); ctx.lineTo(8, 4); ctx.fill();
       } else {

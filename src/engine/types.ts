@@ -228,9 +228,19 @@ export type GameEvent =
       rr?: RerollInfo;
       /** Fender: o ataque atingiu Inimigos adicionais Perto do Herói. */
       cleave?: boolean;
+      /** Dano espalhado (Raio Nova, Fender): mesmos dados do ataque anterior, só a Defesa do alvo adicional. */
+      spread?: boolean;
+      /** Som da habilidade (ex.: 'hobsbawn', 'bow-critico'). */
+      sfx?: string;
+      /** Arremesso de Lâmina (Jøhan): a Espada é arremessada a Distância. */
+      thrown?: boolean;
       /** Ataque de Monstro: a Guilda que controla os Monstros (rola os dados dele). */
       ctl?: GuildId;
+      /** Só a rolagem: a animação no mapa vem depois, num evento 'strike' (dano espalhado escolhido antes). */
+      noAnim?: boolean;
     }
+  /** Animação do golpe no mapa (investida, giro do Fender ou projétil) contra todos os alvos de uma vez. */
+  | { t: 'strike'; attackerId: string; cardName: string; attackType: AttackType; targets: { id: string }[]; cleave?: boolean; thrown?: boolean; sfx?: string }
   | { t: 'damage'; id: string; amount: number; wounds: number; maxHp: number }
   | { t: 'heal'; id: string; amount: number; wounds: number }
   | { t: 'death'; id: string; exterminated?: boolean }

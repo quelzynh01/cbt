@@ -1,4 +1,5 @@
 import { SimpleAI, type AILevel } from '../ai/ai';
+import { gameConfirm } from './dialog';
 import { actingGuild, applyAction, type Action } from '../engine/actions';
 import type { GameState } from '../engine/types';
 import type { ClientSession, HostSession, Lobby, Session, SessionEvents } from '../net/net';
@@ -20,6 +21,9 @@ import { itemColor } from './cardview';
 import { play } from '../audio/sfx';
 
 /** Liga motor + renderer + HUD + IA + rede. Modos: local (teste), anfitrião e cliente (online). */
+/** Opção do menu do clique (Atacar / Mover). */
+interface ClickOpt { kind: 'atk' | 'move'; img?: string; icon?: string; title: string; name: string; info: string; run: () => void }
+
 export class Controller {
   game!: Game;
   readonly renderer: Renderer;
@@ -68,7 +72,7 @@ export class Controller {
         // se a rolagem já começou na tela de combate do centro (Rerrolagem), continua nela — sem abrir outra tela
         if (showBattle && e.t === 'attack' && (this.battle.hasCarry || !this.hud.hasCarry)) {
           this.battle.playAttack(e, () => {
-            const ms = this.renderer.animateAttack(e);
+            const ms = e.noAnim ? 0 : this.renderer.animateAttack(e);
             setTimeout(() => this.renderer.release(), ms + 80);
           });
           return true;
@@ -77,7 +81,7 @@ export class Controller {
         if (e.t === 'attack') {
           // primeiro a rolagem (ataque e defesa) no centro da tela; com o resultado, a investida / o projétil
           this.hud.centerDice(e, () => {
-            const ms = this.renderer.animateAttack(e);
+            const ms = e.noAnim ? 0 : this.renderer.animateAttack(e);
             setTimeout(() => this.renderer.release(), ms + 80);
           });
           return true;
@@ -97,13 +101,21 @@ export class Controller {
         if (e.t === 'gameover') setTimeout(() => this.showGameOver(), 900);
         if (e.t === 'turn') {
           this.hud.refresh();
-          // sua vez: a câmera vai até o último Herói que você ativou (se ele não estiver no tabuleiro, até os seus Heróis)
+          // sua vez: já deixa selecionado (com o "▶ Ativar") o último Herói que você ativou — ou o primeiro que pode jogar —
+          // e a câmera vai até ele; sem nenhum disponível, a câmera mostra os seus Heróis
           if (this.isMine(e.guild) && !this.game.s.deploying?.length) {
-            const last = this.game.s.lastHero?.[e.guild];
-            const lh = last ? this.game.unit(last) : null;
-            if (lh?.alive && lh.cell) this.renderer.glideCells([lh.cell]);
-            else {
-              const cells = this.game.heroesOf(e.guild).filter(h => h.alive && h.cell).map(h => h.cell!);
+            const g = this.game;
+            const ready = (id: string | undefined) => { const u = id ? g.s.units[id] : null; return !!u && u.alive && !!u.cell && !u.spent; };
+            const last = g.s.lastHero?.[e.guild];
+            const pick = ready(last) ? last! : g.heroesOf(e.guild).find(h => ready(h.id))?.id;
+            if (pick && !g.s.activation) {
+              this.renderer.glideCells([g.unit(pick).cell!]);
+              if (this.renderer.camGoal) this.renderer.camGoal.y += window.innerHeight < 560 ? 70 : 50;
+              this.hud.pendingActivate = pick;
+              this.hud.inspected = pick;
+              this.hud.refresh();
+            } else {
+              const cells = g.heroesOf(e.guild).filter(h => h.alive && h.cell).map(h => h.cell!);
               if (cells.length) this.renderer.focus(cells, this.renderer.cam.zoom);
             }
           }
@@ -115,6 +127,10 @@ export class Controller {
     // nada mais a fazer no turno: o botão "Encerrar Turno" pisca
     this.hud.nothingLeft = () => !!this.game && this.isHumanTurn() && !this.renderer.busy && !this.game.s.pending && !!this.game.s.activation && !this.game.freeMode && this.leftovers().length === 0;
     this.bindInput(canvas);
+    // celular: botões de zoom (no lugar da roda do mouse / pinça)
+    const zoomBy = (f: number) => this.renderer.zoomAt(window.innerWidth / 2, window.innerHeight / 2, f);
+    (hudRoot.querySelector('#zoom-in') as HTMLElement).onclick = () => zoomBy(1.25);
+    (hudRoot.querySelector('#zoom-out') as HTMLElement).onclick = () => zoomBy(1 / 1.25);
     this.buildTestPanel(hudRoot);
     this.buildOnlinePanel(hudRoot);
     let last = performance.now();
@@ -138,6 +154,15 @@ export class Controller {
     this.hud.bind(this.game, {
       activate: id => this.selectHero(id),
       confirmActivate: id => this.doActivate(id),
+      pick: id => {
+        const u = this.game.unit(id);
+        if (u.cell) {
+          this.renderer.glideCells([u.cell]);
+          // o Herói fica um pouco abaixo do centro, para não ficar atrás do painel "Ativar"
+          if (this.renderer.camGoal) this.renderer.camGoal.y += window.innerHeight < 560 ? 70 : 50;
+        }
+        this.selectHero(id);
+      },
       selectCard: uid => { this.hud.selectedCard = uid; this.refresh(); },
       useToken: id => this.act({ type: 'token', tokenId: id }),
       useCard: (heroId, cardUid) => this.useCard(heroId, cardUid),
@@ -310,6 +335,8 @@ export class Controller {
     // eventos que já foram animados antes de uma decisão (ex.: o ataque, antes de a Vingança pedir a sua Defesa)
     let shown = 0;
     const attempt = () => {
+      // refaz a jogada do começo (o RNG é o mesmo, então os dados também)
+      if (decided.length) this.game.s = JSON.parse(snap);
       this.decisionQueue = decided.slice();
       try {
         const ok = fn();
@@ -320,7 +347,8 @@ export class Controller {
         if (!(e instanceof NeedDecision)) throw e;
         const evs = this.game.drain();
         const fresh = evs.slice(shown);
-        this.game.s = JSON.parse(snap);
+        // o estado fica como está (no meio da jogada) enquanto o jogador decide: assim o mapa não "desfaz"
+        // o que já foi animado (ex.: o Monstro que andou para a Vingança não volta para trás)
         this.deciding = true;
         this.clearHighlights();
         this.hud.tooltip(null);
@@ -334,7 +362,7 @@ export class Controller {
         // o que aconteceu antes desta decisão é mostrado primeiro (na ordem do jogo)
         if (fresh.some(x => x.t !== 'log')) {
           shown = evs.length;
-          if (this.mode === 'host') (this.net as HostSession).update(fresh, JSON.parse(snap));
+          if (this.mode === 'host') (this.net as HostSession).update(fresh, JSON.parse(JSON.stringify(this.game.s)));
           this.renderer.enqueue(fresh);
           const waitIdle = () => { if (this.renderer.busy) requestAnimationFrame(waitIdle); else ask(); };
           requestAnimationFrame(waitIdle);
@@ -356,7 +384,7 @@ export class Controller {
     }
     if (this.deciding) return false;
     const snap = this.mode === 'local' ? JSON.stringify(this.game.s) : '';
-    const guild = (a.type === 'place' || a.type === 'ready') ? this.myDeployGuild() : actingGuild(this.game);
+    const guild = (a.type === 'place' || a.type === 'placeMany' || a.type === 'ready') ? this.myDeployGuild() : actingGuild(this.game);
     if (!guild) return false;
     let result: boolean | null = null;
     this.withDecisions(() => applyAction(this.game, guild, a), ok => {
@@ -672,8 +700,10 @@ export class Controller {
       if (t) this.net?.chat(t);
       inp.value = '';
     };
-    (p.querySelector('#op-leave') as HTMLElement).onclick = () => {
-      if (!confirm(this.mode === 'host' ? 'Você é o anfitrião: sair encerra a partida para todos. Sair?' : 'Sair da partida?')) return;
+    (p.querySelector('#op-leave') as HTMLElement).onclick = async () => {
+      if (!await gameConfirm(this.mode === 'host'
+        ? { icon: '🚪', title: 'Encerrar a partida?', body: 'Você é o <b>anfitrião</b>: sair encerra a partida para todos os jogadores.', yes: 'Sair e encerrar', no: 'Continuar jogando', danger: true }
+        : { icon: '🚪', title: 'Sair da partida?', body: 'A IA assume os seus Heróis até o fim.', yes: 'Sair', no: 'Continuar jogando', danger: true })) return;
       this.leaveOnline();
       this.onExit();
     };
@@ -847,12 +877,49 @@ export class Controller {
   private bindInput(canvas: HTMLCanvasElement) {
     canvas.addEventListener('contextmenu', e => e.preventDefault());
     setCursor(canvas, 'default');
+    // pinça (dois dedos): zoom no ponto entre os dedos
+    const touches = new Map<number, { x: number; y: number }>();
+    let pinch = 0;
+    const spread = () => { const [a, b] = [...touches.values()]; return Math.hypot(a.x - b.x, a.y - b.y); };
     canvas.addEventListener('pointerdown', e => {
+      if (e.pointerType === 'touch') touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (touches.size === 2) { pinch = spread(); if (this.drag) this.drag.moved = true; this.deployDrag = null; return; }
+      // posicionamento: segurar um Herói seu e arrastar até o Espaço
+      const dg = this.myDeployGuild();
+      const grab = dg && e.button === 0 ? this.renderer.pickUnit(e.clientX, e.clientY) : null;
+      if (dg && grab && this.game.unit(grab).guild === dg) {
+        this.deployDrag = { id: grab, x: e.clientX, y: e.clientY, moved: false };
+        canvas.setPointerCapture(e.pointerId);
+        return;
+      }
       this.drag = { x: e.clientX, y: e.clientY, cx: this.renderer.cam.x, cy: this.renderer.cam.y, moved: false };
       canvas.setPointerCapture(e.pointerId);
     });
+    const lift = (e: PointerEvent) => { touches.delete(e.pointerId); if (touches.size < 2) pinch = 0; };
+    canvas.addEventListener('pointercancel', lift);
     canvas.addEventListener('pointermove', e => {
+      if (touches.has(e.pointerId)) touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (touches.size === 2 && pinch) {
+        const d = spread();
+        const [a, b] = [...touches.values()];
+        if (d > 0) this.renderer.zoomAt((a.x + b.x) / 2, (a.y + b.y) / 2, d / pinch);
+        pinch = d;
+        return;
+      }
       this.mouse = { x: e.clientX, y: e.clientY };
+      if (this.deployDrag) {
+        const dd = this.deployDrag;
+        if (Math.abs(e.clientX - dd.x) + Math.abs(e.clientY - dd.y) > 8) dd.moved = true;
+        if (dd.moved) {
+          // mostra o Espaço onde ele vai cair
+          const c = this.renderer.pickCell(e.clientX, e.clientY);
+          this.deploySel = dd.id;
+          this.renderer.hl.activeUnit = dd.id;
+          this.renderer.hl.path = c && this.renderer.hl.move.has(key(c)) ? [c] : [];
+          setCursor(canvas, 'grabbing');
+        }
+        return;
+      }
       if (this.drag) {
         const dx = e.clientX - this.drag.x, dy = e.clientY - this.drag.y;
         if (Math.abs(dx) + Math.abs(dy) > 6) this.drag.moved = true;
@@ -867,6 +934,20 @@ export class Controller {
       else if (!this.drag) setCursor(canvas, 'default');
     });
     canvas.addEventListener('pointerup', e => {
+      const wasPinch = touches.size === 2 || pinch > 0;
+      lift(e);
+      if (wasPinch) { this.drag = null; return; }
+      if (this.deployDrag) {
+        const dd = this.deployDrag;
+        this.deployDrag = null;
+        setCursor(canvas, 'default');
+        this.renderer.hl.path = [];
+        const c = this.renderer.pickCell(e.clientX, e.clientY);
+        if (!dd.moved) { this.deploySel = dd.id; this.refresh(); return; }
+        if (c && this.renderer.hl.move.has(key(c))) this.deployPlace(dd.id, c);
+        else this.refresh();
+        return;
+      }
       const d = this.drag;
       this.drag = null;
       if (d?.moved) setCursor(canvas, 'default');
@@ -1153,6 +1234,29 @@ export class Controller {
     const cell = this.renderer.pickCell(x, y);
     const hl = this.renderer.hl;
     const a = this.game.s.activation;
+    // Espaço que dá para andar E inimigo atacável ali (ou o boneco dele embaixo do dedo): pergunta o que fazer
+    if (a && this.isHumanTurn() && !this.renderer.busy) {
+      const foes = new Set<string>();
+      if (unitId && hl.attackUnits.has(unitId)) foes.add(unitId);
+      if (cell) for (const u of this.game.unitsAt(cell)) if (hl.attackUnits.has(u.id)) foes.add(u.id);
+      const canMove = !!cell && hl.move.has(key(cell)) && !sameCell(cell, this.game.unit(a.heroId).cell);
+      if (foes.size && (canMove || foes.size > 1)) {
+        const g = this.game;
+        const opts: ClickOpt[] = [...foes].map(id => {
+          const u = g.unit(id);
+          const max = g.maxHp(u);
+          return { kind: 'atk', img: this.hud.portraitOf(u), title: '⚔ Atacar', name: g.name(u),
+            info: `❤ ${max - u.wounds}/${max} · ⛨ ${g.defenseDice(u)}${u.stunned ? ' · ✷ Atordoado' : ''}`, run: () => this.openBattle(a.heroId, id) };
+        });
+        if (canMove) {
+          const mp = hl.move.get(key(cell!)) ?? 0;
+          const left = Math.max(0, a.mp - mp);
+          opts.push({ kind: 'move', icon: '👣', title: 'Mover para cá', name: `${mp} PM`, info: `sobra${left === 1 ? '' : 'm'} ${left} PM`, run: () => this.confirmMove(cell!) });
+        }
+        this.clickMenu(x, y, opts);
+        return;
+      }
+    }
     // Sprite na frente de um Espaço azul: o Espaço tem prioridade se o personagem não estiver nele.
     if (unitId && cell && hl.move.has(key(cell)) && !sameCell(this.game.unit(unitId).cell, cell) && !hl.attackUnits.has(unitId)) unitId = null;
     if (this.isHumanTurn() && !this.renderer.busy) {
@@ -1174,6 +1278,32 @@ export class Controller {
       if (a && cell && hl.move.has(key(cell))) { this.confirmMove(cell); return; }
     }
     if (unitId) { this.hud.inspected = unitId === this.game.s.activation?.heroId && !this.freeView() ? null : unitId; this.refresh(); }
+  }
+
+  /** Menu pequeno no ponto do clique (ex.: Atacar ou Mover). Fecha ao escolher, no ✕, tocando fora ou com Esc. */
+  private clickMenu(x: number, y: number, opts: ClickOpt[]) {
+    let el = document.getElementById('clickmenu');
+    if (!el) { el = document.createElement('div'); el.id = 'clickmenu'; document.body.append(el); }
+    const box = el;
+    box.innerHTML = `<div class="cm-box"><div class="cm-head">O que fazer aqui?</div>
+      ${opts.map((o, i) => `<button class="cm-opt ${o.kind}" data-i="${i}">
+        ${o.img ? `<img src="${o.img}" alt=""/>` : `<span class="cm-ic">${o.icon ?? ''}</span>`}
+        <span class="cm-txt"><b>${o.title}</b><span>${o.name}</span><small>${o.info}</small></span></button>`).join('')}
+      <button class="cm-x">Cancelar</button></div>`;
+    box.classList.remove('hidden');
+    const card = box.firstElementChild as HTMLElement;
+    // perto do dedo, sem sair da tela
+    const w = card.offsetWidth, h = card.offsetHeight;
+    card.style.left = `${Math.max(6, Math.min(window.innerWidth - w - 6, x - w / 2))}px`;
+    card.style.top = `${Math.max(6, Math.min(window.innerHeight - h - 6, y + 14))}px`;
+    const close = () => { box.classList.add('hidden'); box.innerHTML = ''; window.removeEventListener('keydown', key, true); };
+    const key = (e: KeyboardEvent) => { if (e.code === 'Escape') { e.stopImmediatePropagation(); close(); } };
+    window.addEventListener('keydown', key, true);
+    box.onpointerdown = e => { if (e.target === box) close(); };
+    box.oncontextmenu = e => { e.preventDefault(); close(); };
+    box.querySelectorAll<HTMLElement>('[data-i]').forEach(b => { b.onclick = () => { close(); opts[Number(b.dataset.i)].run(); }; });
+    (box.querySelector('.cm-x') as HTMLElement).onclick = close;
+    play('scan');
   }
 
   /** Visão livre: a ficha mostra sempre o último personagem clicado. */
@@ -1213,26 +1343,46 @@ export class Controller {
     const area = this.game.map.startAreas[g.startArea];
     const heroes = this.game.heroesOf(g.id);
     // hotseat: ao passar para a próxima Guilda, a câmera vai até a Área Inicial dela
-    if (this.deployFocused !== gid) { this.deployFocused = gid; this.renderer.focus(area); }
+    const refocus = this.deployFocused !== gid;
+    this.deployFocused = gid;
     if (!this.deploySel || !heroes.some(h => h.id === this.deploySel)) this.deploySel = heroes[0].id;
+    // a ficha da esquerda mostra o Herói escolhido (status e cartas)
+    if (this.hud.inspected !== this.deploySel) { this.hud.inspected = this.deploySel; this.hud.refresh(); }
     const hl = this.renderer.hl;
     hl.moveColor = 'green';
     for (const c of area) hl.move.set(key(c), 0);
     hl.activeUnit = this.deploySel;
     const others = pending.filter(x => x !== gid);
     const el = this.hud.panel('deploybox', `
-      <div class="panel-h">📍 Posicione seus Heróis — ${g.name}</div>
-      <div class="rb-body">
-        <p>Escolha um Herói e clique num Espaço verde da sua Área Inicial (no máximo 2 personagens por Espaço). Você também pode clicar no Herói no mapa.</p>
-        <div class="dp-heroes">${heroes.map(h => `<button class="${this.deploySel === h.id ? 'on' : ''}" data-dp="${h.id}">${h.num}. ${HEROES[h.defId].name} <small>(${h.cell!.c},${h.cell!.r})</small></button>`).join('')}</div>
+      <div class="panel-h">📍 Posicione seus Heróis <small>${g.name}</small><span class="dp-short"> · toque ou arraste até um Espaço verde</span></div>
+      <div class="rb-body dp-body">
+        <p class="dp-tip">Toque num Herói e depois num <b>Espaço verde</b> — ou <b>arraste</b> o Herói no mapa. Soltar sobre um Aliado num Espaço cheio troca os dois de lugar. Máximo 2 por Espaço.</p>
+        <div class="dp-row">
+          <div class="dp-heroes">${heroes.map(h => `<button class="dp-hero ${this.deploySel === h.id ? 'on' : ''}" data-dp="${h.id}" title="${HEROES[h.defId].name}">
+            <img src="${this.hud.portraitOf(h)}"/><span>${h.num}. ${HEROES[h.defId].name}</span></button>`).join('')}</div>
+          <div class="dp-btns"><button class="primary" id="dp-ok">✔ Pronto</button></div>
+        </div>
         ${others.length ? `<p class="muted">Também posicionando: ${others.map(x => this.hud.nameOf(x) ?? guildShort(x)).join(', ')}.</p>` : ''}
-        <div class="rb-btns"><button class="primary" id="dp-ok">✔ Pronto</button></div>
       </div>`);
-    el.querySelectorAll<HTMLElement>('[data-dp]').forEach(b => { b.onclick = () => { this.deploySel = b.dataset.dp!; this.refresh(); }; });
-    (el.querySelector('#dp-ok') as HTMLElement).onclick = () => { this.deploySel = null; this.act({ type: 'ready' }); };
+    el.querySelectorAll<HTMLElement>('[data-dp]').forEach(b => { b.onclick = () => {
+      this.deploySel = b.dataset.dp!;
+      const c = this.game.unit(this.deploySel).cell;
+      if (c) this.renderer.glideCells([c]);
+      this.refresh();
+    }; });
+    // hotseat: ao passar para a próxima Guilda, a câmera vai até a Área Inicial dela — no espaço livre abaixo do painel
+    if (refocus) {
+      this.renderer.focus(area);
+      const r = el.getBoundingClientRect();
+      this.renderer.cam.y += (r.bottom - 50) / 2;
+    }
+    (el.querySelector('#dp-ok') as HTMLElement).onclick = () => { this.deploySel = null; this.hud.inspected = null; this.act({ type: 'ready' }); };
     this.renderer.hl.activeUnit = this.deploySel;
     this.hud.setHint('Posicionamento: escolha o Herói e o Espaço da Área Inicial');
   }
+
+  /** Herói sendo arrastado no posicionamento. */
+  private deployDrag: { id: string; x: number; y: number; moved: boolean } | null = null;
 
   private deployClick(x: number, y: number) {
     const gid = this.myDeployGuild();
@@ -1241,11 +1391,30 @@ export class Controller {
     const cell = this.renderer.pickCell(x, y);
     const mine = this.game.heroesOf(gid).map(h => h.id);
     const sel = this.deploySel;
+    // tocar num Herói seu (fora de um Espaço verde diferente do dele) = escolher esse Herói
     if (unitId && mine.includes(unitId) && !(cell && this.renderer.hl.move.has(key(cell)) && sel && !sameCell(this.game.unit(unitId).cell, cell))) { this.deploySel = unitId; this.refresh(); return; }
     if (!cell || !sel || !this.renderer.hl.move.has(key(cell))) return;
-    if (this.game.unitsAt(cell).filter(u => u.id !== sel).length >= 2) { this.hud.toast('Máximo de 2 personagens por Espaço.', '#c0392b'); return; }
-    const next = mine.find(id => mine.indexOf(id) > mine.indexOf(sel));
-    if (this.act({ type: 'place', heroId: sel, cell }) && next) this.deploySel = next;
+    this.deployPlace(sel, cell);
+  }
+
+  /** Coloca o Herói no Espaço; com o Espaço cheio, troca de lugar com um Aliado que está lá. Depois escolhe o próximo Herói. */
+  private deployPlace(heroId: string, cell: Cell) {
+    const gid = this.myDeployGuild();
+    if (!gid) return;
+    const mine = this.game.heroesOf(gid).map(h => h.id);
+    const h = this.game.unit(heroId);
+    const from = h.cell ? { ...h.cell } : null;
+    if (from && sameCell(from, cell)) { this.deploySel = heroId; this.refresh(); return; }
+    const others = this.game.unitsAt(cell).filter(u => u.id !== heroId);
+    if (others.length >= 2) {
+      // Espaço cheio: troca de lugar com um Aliado que está lá (as duas mudanças numa jogada só)
+      const ally = others.find(u => mine.includes(u.id));
+      if (!ally || !from) { this.hud.toast('Máximo de 2 personagens por Espaço.', '#c0392b'); return; }
+      if (!this.act({ type: 'placeMany', moves: [{ heroId, cell }, { heroId: ally.id, cell: from }] })) { this.hud.toast('Não dá para trocar esses dois de lugar.', '#c0392b'); return; }
+    } else if (!this.act({ type: 'place', heroId, cell })) return;
+    const next = mine.find(id => mine.indexOf(id) > mine.indexOf(heroId));
+    this.deploySel = next ?? heroId;
+    this.refresh();
   }
 
   /** Começo da partida (ou fim do posicionamento): focar a Área de quem joga. */
@@ -1434,29 +1603,35 @@ export class Controller {
     this.menuOpen = true;
     const host = this.canRestart();
     const where = this.campaignEnd ? 'Campanha' : this.mode === 'local' ? 'Modo Teste' : 'Online';
-    el.innerHTML = `<div class="gm-box"><h3>☰ ${where}</h3>
-      <button id="gm-continue" class="primary">▶ Continuar</button>
-      <button id="gm-restart" ${host ? '' : 'disabled'}>🔄 Reiniciar partida <small>${host ? '' : '(só o anfitrião)'}</small></button>
-      <button id="gm-turn" ${host && this.turnStart ? '' : 'disabled'}>⏮ Reiniciar turno <small>${host ? '' : '(só o anfitrião)'}</small></button>
-      <button id="gm-lib">📚 Biblioteca</button>
-      <button id="gm-set">⚙️ Configurações</button>
-      <button id="gm-exit">🚪 Sair da partida</button></div>`;
+    const item = (id: string, icon: string, label: string, sub: string, cls = '', off = false) =>
+      `<button id="${id}" class="gm-item ${cls}" ${off ? 'disabled' : ''}><span class="gm-ic">${icon}</span><span class="gm-txt"><b>${label}</b><small>${sub}</small></span></button>`;
+    el.innerHTML = `<div class="gm-box">
+      <div class="gm-head"><span class="gm-badge">${where}</span><b>${this.game.map.name}</b><small>Rodada ${this.game.s.turn}</small></div>
+      ${item('gm-continue', '▶', 'Continuar', 'Voltar para o jogo', 'primary')}
+      <div class="gm-grid">
+        ${item('gm-turn', '⏮', 'Reiniciar turno', host ? 'Volta para o começo deste turno' : 'Só o anfitrião', '', !(host && this.turnStart))}
+        ${item('gm-restart', '🔄', 'Reiniciar partida', host ? 'Começa este mapa de novo' : 'Só o anfitrião', '', !host)}
+        ${item('gm-lib', '📚', 'Biblioteca', 'Heróis, cartas, regras')}
+        ${item('gm-set', '⚙️', 'Configurações', 'Som, tela, velocidade')}
+      </div>
+      ${item('gm-exit', '🚪', this.campaignEnd ? 'Sair do cenário' : 'Sair da partida', this.campaignEnd ? 'A campanha continua salva' : 'Voltar ao menu inicial', 'danger')}
+    </div>`;
     el.classList.remove('hidden');
     const close = () => { el.classList.add('hidden'); this.menuOpen = false; };
     (el.querySelector('#gm-continue') as HTMLElement).onclick = close;
     el.onclick = e => { if (e.target === el) close(); };
-    (el.querySelector('#gm-restart') as HTMLElement).onclick = () => {
-      if (!confirm('Reiniciar a partida desde o começo?')) return;
+    (el.querySelector('#gm-restart') as HTMLElement).onclick = async () => {
+      if (!await gameConfirm({ icon: '🔄', title: 'Reiniciar a partida?', body: 'A partida volta para o começo, com o mesmo mapa e os mesmos Heróis.', yes: 'Reiniciar', no: 'Voltar', danger: true })) return;
       close();
       this.restartMatch();
     };
     (el.querySelector('#gm-turn') as HTMLElement).onclick = () => { close(); this.restartTurn(); };
     (el.querySelector('#gm-lib') as HTMLElement).onclick = () => { close(); this.openLibrary(); };
     (el.querySelector('#gm-set') as HTMLElement).onclick = () => { close(); this.openSettings(); };
-    (el.querySelector('#gm-exit') as HTMLElement).onclick = () => {
-      const msg = this.campaignEnd ? 'Sair do cenário? O progresso desta partida será perdido (a campanha continua salva).'
-        : this.mode === 'host' ? 'Você é o anfitrião: sair encerra a partida para todos. Sair?' : 'Sair da partida?';
-      if (!confirm(msg)) return;
+    (el.querySelector('#gm-exit') as HTMLElement).onclick = async () => {
+      const body = this.campaignEnd ? 'O progresso <b>deste cenário</b> será perdido. A campanha continua salva e você pode voltar depois.'
+        : this.mode === 'host' ? 'Você é o <b>anfitrião</b>: sair encerra a partida para todos os jogadores.' : 'O progresso desta partida será perdido.';
+      if (!await gameConfirm({ icon: '🚪', title: this.campaignEnd ? 'Sair do cenário?' : 'Sair da partida?', body, yes: 'Sair', no: 'Continuar jogando', danger: true })) return;
       close();
       this.battle.close();
       this.stop();

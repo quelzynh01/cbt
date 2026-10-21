@@ -210,6 +210,14 @@ export const CARD_ART: Record<string, { img: string; kind: 'fill' | 'icon' }> = 
     "img": "incinerar",
     "kind": "fill"
   },
+  "dizimador": {
+    "img": "dizimador",
+    "kind": "icon"
+  },
+  "bomba": {
+    "img": "bomba",
+    "kind": "icon"
+  },
   "curse:sem_maldicao": {
     "img": "curse_sem_maldicao",
     "kind": "icon"

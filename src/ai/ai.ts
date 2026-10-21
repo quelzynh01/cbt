@@ -108,7 +108,7 @@ export class SimpleAI {
     if (a.type === 'attack') {
       const t = g.unit(a.targetId);
       const card = h?.cards.find(c => c.uid === a.cardUid);
-      if (!h || !card || card.exhausted || !t.alive || !g.canCardHit(h, card, h.cell!, t)) return this.next(g);
+      if (!h || !h.alive || !h.cell || !card || card.exhausted || !t.alive || !t.cell || !g.canCardHit(h, card, h.cell, t)) return this.next(g);
     }
     return a;
   }
