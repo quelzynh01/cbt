@@ -168,11 +168,15 @@ export interface GameState {
   current: number;
   activation: Activation | null;
   extraTurn: boolean;
+  /** Turno adicional (Poção): só este Herói (o que usou a poção) é reativado (p.25). */
+  extraHero?: string | null;
   floor: Record<string, Token[]>;
   entryBoard: string[];
   entryMarkers: EntryMarker[];
   missions: MissionDef[];
   missionDone: Record<string, GuildId[]>;
+  /** Quem cumpriu cada Missão: o Herói e, nas de matar, o Herói morto (ids de personagem). */
+  missionBy?: Record<string, Partial<Record<GuildId, { hero?: string; victim?: string }>>>;
   rewardDeck: string[];
   missionsToWin: number;
   winner: GuildId | null;
@@ -267,7 +271,7 @@ export type GameEvent =
   | { t: 'spawnRoll'; id: string; faces: DieFace[]; cell: Cell | null; reason: string; target?: Cell }
   | { t: 'respawn'; id: string; cell: Cell }
   | { t: 'coins'; guild: GuildId; amount: number; reason: string }
-  | { t: 'mission'; guild: GuildId; missionId: string; name: string; first: boolean }
+  | { t: 'mission'; guild: GuildId; missionId: string; name: string; first: boolean; how?: string }
   | { t: 'reaction'; monsterId: string; kind: 'alerta' | 'vinganca' }
   | { t: 'turn'; guild: GuildId; turn: number }
   | { t: 'rest'; guild: GuildId }

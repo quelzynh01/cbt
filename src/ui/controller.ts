@@ -1,6 +1,7 @@
 import { SimpleAI, type AILevel } from '../ai/ai';
 import { gameConfirm } from './dialog';
-import { bindInvEditor, invEditorHtml, poolErrors, type InvItem, type InvOptions } from './inventoryEditor';
+import { bindInvEditor, invEditorHtml, poolErrors, type BagTok, type InvItem, type InvOptions } from './inventoryEditor';
+import { tokenImageId, tokenUrl } from '../render/tokens';
 import { showRoulette } from './roulette';
 import { actingGuild, applyAction, type Action } from '../engine/actions';
 import type { GameState } from '../engine/types';
@@ -11,7 +12,7 @@ import { CARDS, GUILDS, HEROES, MONSTERS } from '../engine/data';
 import { type TestConfig, loadTestConfig } from './testConfig';
 import { Game } from '../engine/game';
 import { getMap } from '../engine/maps';
-import type { Cell, DiceMode, GameEvent, GuildId } from '../engine/types';
+import type { Cell, DiceMode, GameEvent, GuildId, Token } from '../engine/types';
 import { Renderer } from '../render/renderer';
 import { BattlePanel } from './battle';
 import { Hud, daTime, guildShort, toggleView } from './hud';
@@ -426,6 +427,7 @@ export class Controller {
     const u = g.unit(id);
     const a = g.s.activation;
     if (!this.isHumanTurn() || !u || u.kind !== 'hero' || u.guild !== g.currentGuild().id || !u.alive || !u.cell || u.spent) return false;
+    if (g.s.extraHero && u.id !== g.s.extraHero && !g.freeMode) return false; // turno adicional: só quem usou a poção
     if (u.id === a?.heroId) return false;
     if ((g.s.activatedThisTurn ?? []).includes(u.id) && !(a && !a.moved && !a.attacked)) return g.freeMode;
     return !a || (!a.moved && !a.attacked && a.mp >= 3) || g.canBless(u.id) || g.freeMode;
@@ -928,6 +930,8 @@ export class Controller {
         const dd = this.deployDrag;
         if (Math.abs(e.clientX - dd.x) + Math.abs(e.clientY - dd.y) > 8) dd.moved = true;
         if (dd.moved) {
+          // o Herói segue o ponteiro (como uma carta sendo arrastada)
+          this.renderer.dragUnit = { id: dd.id, x: e.clientX, y: e.clientY };
           // mostra o Espaço onde ele vai cair
           const c = this.renderer.pickCell(e.clientX, e.clientY);
           this.deploySel = dd.id;
@@ -957,6 +961,7 @@ export class Controller {
       if (this.deployDrag) {
         const dd = this.deployDrag;
         this.deployDrag = null;
+        this.renderer.dragUnit = null;
         setCursor(canvas, 'default');
         this.renderer.hl.path = [];
         const c = this.renderer.pickCell(e.clientX, e.clientY);
@@ -1489,14 +1494,22 @@ export class Controller {
     // ressuscitar e marcadores de Exploração (por Herói); as cartas ficam no editor (o mesmo da campanha)
     const extras = heroes.map(h => {
       const dead = !h.alive ? `<div class="rb-dead">☠ Morto — ressuscita em <b>${d.res[h.id] ? `(${d.res[h.id].c},${d.res[h.id].r})` : '—'}</b> <button data-pick="${h.id}" class="${d.picking === h.id ? 'on' : ''}">${d.picking === h.id ? 'clique no mapa…' : 'Escolher no mapa'}</button></div>` : '';
-      const toks = [
-        ...h.tokens.filter(t => t.type === 'missao').map(() => `<div class="rb-item"><span>★ Marcador de Missão</span><small class="muted">não move</small></div>`),
-        ...Object.keys(d.tokens).filter(id => d.tokens[id] === h.id).map(id => { const t = tokPool.find(x => x.id === id)!; return `<div class="rb-item"><span>${TOKEN_INFO[t.type].name}${t.type === 'bau' ? ` (${t.value})` : ''}</span>${sel(h.id, true, `data-tok="${id}"`)}</div>`; }),
-      ].join('');
-      return dead || toks ? `<div class="rb-col"><h4>${h.num}. ${HEROES[h.defId].name}</h4>${dead}${toks}</div>` : '';
+      return dead ? `<div class="rb-col"><h4>${h.num}. ${HEROES[h.defId].name}</h4>${dead}</div>` : '';
     }).join('');
     const byDef = (defId: string) => heroes.find(h => h.defId === defId)!;
+    // bolsas: marcadores de Exploração trocam de Herói (os de Missão ficam onde estão)
+    const tokName = (t: Token) => t.type === 'missao' ? 'Marcador de Missão' : `${TOKEN_INFO[t.type].name}${t.type === 'bau' ? ` (${t.value})` : ''}`;
+    const bagToks: BagTok[] = [
+      ...heroes.flatMap(h => h.tokens.filter(t => t.type === 'missao').map(t => ({ id: t.id, to: h.defId, img: tokenImageId(t) ? tokenUrl(tokenImageId(t)!) : null, name: tokName(t), locked: true }))),
+      ...Object.keys(d.tokens).map(id => { const t = tokPool.find(x => x.id === id)!; const img = tokenImageId(t); return { id, to: this.game.unit(d.tokens[id]).defId, img: img ? tokenUrl(img) : null, name: tokName(t) }; }),
+    ];
     const invOpts: InvOptions = {
+      bags: {
+        toks: bagToks,
+        // o morto também recebe: ele ressuscita neste mesmo Descanso (p.18)
+        canHold: hd => byDef(hd).alive || this.game.resurrectCells(byDef(hd)).length > 0,
+        move: (id, hd) => { if (d.tokens[id] !== undefined) d.tokens[id] = byDef(hd).id; },
+      },
       heroes: heroes.map(h => h.defId), color: g.color, discard: false,
       slots: (hd, ids) => {
         const s = this.game.slotsUsed(byDef(hd), ids.map((defId, i) => ({ uid: `_${i}`, defId, exhausted: false, uses: 0 })));
@@ -1526,7 +1539,6 @@ export class Controller {
       for (const it of d.items) d.cards[it.uid] = it.to === 'pool' ? 'pool' : byDef(it.to).id;
       this.refresh();
     });
-    el.querySelectorAll<HTMLSelectElement>('[data-tok]').forEach(s => { s.onchange = () => { d.tokens[s.dataset.tok!] = s.value; this.refresh(); }; });
     el.querySelectorAll<HTMLElement>('[data-pick]').forEach(b => { b.onclick = () => {
       d.picking = b.dataset.pick!;
       this.renderer.fitCells(this.game.resurrectCells(this.game.unit(d.picking)));
@@ -1899,6 +1911,7 @@ export class Controller {
   private showGameOver() {
     const g = this.game;
     if (!g.s.winner) return;
+    play('end-game');
     const el = document.createElement('div');
     el.id = 'gameover';
     const rows = g.guilds().slice().sort((a, b) => b.coins - a.coins).map(gs => `

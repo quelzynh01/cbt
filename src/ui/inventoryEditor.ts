@@ -21,7 +21,21 @@ export interface InvOptions {
   ready?: boolean;
   /** Modo Teste: qualquer carta do jogo pode ser equipada (escolhida por nível na janela do espaço). */
   catalog?: boolean;
+  /** Bolsa de cada Herói (marcadores de Exploração: poções, baús…): arrastar de um Herói para outro. */
+  bags?: {
+    toks: BagTok[];
+    /** O Herói pode receber marcadores (ex.: morto não pode). */
+    canHold: (hero: string) => boolean;
+    move: (tokId: string, hero: string) => void;
+  };
 }
+
+/** Marcador numa bolsa: `locked` não se move (marcador de Missão). */
+export interface BagTok { id: string; to: string; img: string | null; name: string; locked?: boolean }
+
+/** Marcador escolhido com um toque (o próximo toque numa bolsa move ele para lá). */
+let selTok: string | null = null;
+const BAG_SLOTS = 4;
 
 /** Nível aberto no catálogo do Modo Teste. */
 let catLevel = 'I';
@@ -47,8 +61,9 @@ export function invEditorHtml(items: InvItem[], o: InvOptions): string {
     return `<div class="inv-hero ${sl.used > sl.max ? 'over' : ''}" data-hero="${h}" style="--gc:${o.color}">
       <div class="inv-hh"><canvas width="56" height="56" data-iface="${h}"></canvas><div><b>${HEROES[h].name}</b><small>${HEROES[h].title}</small></div>
         <span class="inv-count ${sl.used > sl.max ? 'bad' : ''}">${sl.used}/${sl.max}${sl.magicExtra ? ` +${sl.magicExtra}✨` : ''}</span></div>
+      <div class="inv-ab" title="${esc(HEROES[h].abilityText)}"><b>${esc(HEROES[h].abilityName)}</b> — ${esc(HEROES[h].abilityText)}</div>
       ${curse ? `<div class="inv-curse">☠ ${esc(curse)}</div>` : ''}
-      <div class="inv-slots">${slots.join('')}</div></div>`;
+      <div class="inv-slots">${slots.join('')}</div>${o.bags ? bagHtml(h, o) : ''}</div>`;
   }).join('');
   const pool = items.map((x, i) => ({ ...x, i })).filter(x => x.to === 'pool');
   const disc = items.map((x, i) => ({ ...x, i })).filter(x => x.to === 'descartar');
@@ -56,6 +71,18 @@ export function invEditorHtml(items: InvItem[], o: InvOptions): string {
     <div class="inv-heroes">${heroCols}</div>
     ${pool.length ? `<div class="inv-pool" data-pool="pool"><h4>🎒 Cartas sem Herói <small>— clique para equipar${o.discard ? ' ou descartar' : ''}</small></h4><div class="inv-row">${pool.map(x => `<button class="inv-slot full" data-item="${x.i}" ${o.ready ? 'disabled' : ''}>${itemCard(x.id)}</button>`).join('')}</div></div>` : ''}
     ${disc.length ? `<div class="inv-pool disc"><h4>🗑 Descartadas <small>— clique para recuperar</small></h4><div class="inv-row">${disc.map(x => `<button class="inv-slot full disc" data-item="${x.i}" ${o.ready ? 'disabled' : ''}>${itemCard(x.id)}</button>`).join('')}</div></div>` : ''}
+  </div>`;
+}
+
+/** Bolsa do Herói: os marcadores e espaços vazios (sempre pelo menos 4). */
+function bagHtml(h: string, o: InvOptions): string {
+  const b = o.bags!;
+  const mine = b.toks.filter(t => t.to === h);
+  const hold = b.canHold(h);
+  const empty = Math.max(0, BAG_SLOTS - mine.length);
+  return `<div class="inv-bag ${hold ? '' : 'off'}" data-bag="${h}">
+    <div class="inv-bagh">🎒 Bolsa ${hold ? '' : '<small>(não pode receber agora)</small>'}</div>
+    <div class="inv-toks">${mine.map(t => `<button class="inv-tok ${t.locked ? 'locked' : ''} ${selTok === t.id ? 'sel' : ''}" data-tok="${t.id}" title="${esc(t.name)}${t.locked ? ' (não se move)' : ''}">${t.img ? `<img src="${t.img}" alt="" draggable="false"/>` : `<span>${esc(t.name)}</span>`}</button>`).join('')}${'<span class="inv-tok empty"></span>'.repeat(empty)}</div>
   </div>`;
 }
 
@@ -73,6 +100,7 @@ export function bindInvEditor(root: ParentNode, items: InvItem[], o: InvOptions,
       openPicker(items, o, hero, item, rerender);
     };
   });
+  if (o.bags) bindBags(root, o, rerender);
   // arrastar uma carta: soltar em outra carta troca as duas de lugar; num espaço vazio ou no Herói, ela vai para ele
   root.querySelectorAll<HTMLElement>('.inv-slot.full[data-item]').forEach(b => {
     b.onpointerdown = e => {
@@ -126,6 +154,69 @@ export function bindInvEditor(root: ParentNode, items: InvItem[], o: InvOptions,
       window.addEventListener('pointermove', move);
       window.addEventListener('pointerup', up);
     };
+  });
+}
+
+/** Bolsas: arrastar um marcador para a bolsa (ou o quadro) de outro Herói; ou tocar no marcador e depois na bolsa. */
+function bindBags(root: ParentNode, o: InvOptions, rerender: () => void) {
+  const b = o.bags!;
+  const dest = (x: number, y: number) => {
+    const el = (document.elementFromPoint(x, y) as HTMLElement | null)?.closest<HTMLElement>('[data-bag], .inv-hero');
+    const h = el?.dataset.bag ?? el?.dataset.hero;
+    return h && b.canHold(h) ? h : null;
+  };
+  root.querySelectorAll<HTMLElement>('[data-bag]').forEach(bag => {
+    bag.onclick = () => {
+      if (!selTok || !b.canHold(bag.dataset.bag!)) return;
+      const id = selTok;
+      selTok = null;
+      b.move(id, bag.dataset.bag!);
+      rerender();
+    };
+  });
+  root.querySelectorAll<HTMLElement>('.inv-tok[data-tok]').forEach(t => {
+    const id = t.dataset.tok!;
+    if (t.classList.contains('locked')) return;
+    t.onpointerdown = e => {
+      if (e.button !== 0) return;
+      e.stopPropagation();
+      const x0 = e.clientX, y0 = e.clientY;
+      let ghost: HTMLElement | null = null;
+      let over: HTMLElement | null = null;
+      const move = (ev: PointerEvent) => {
+        if (!ghost) {
+          if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < 6) return;
+          ghost = t.cloneNode(true) as HTMLElement;
+          ghost.classList.add('inv-tokghost');
+          document.body.append(ghost);
+          t.classList.add('inv-dragging');
+        }
+        ghost.style.left = `${ev.clientX}px`;
+        ghost.style.top = `${ev.clientY}px`;
+        const el = (document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null)?.closest<HTMLElement>('[data-bag]') ?? null;
+        if (el !== over) { over?.classList.remove('inv-over'); over = el && b.canHold(el.dataset.bag!) ? el : null; over?.classList.add('inv-over'); }
+      };
+      const up = (ev: PointerEvent) => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        over?.classList.remove('inv-over');
+        if (!ghost) {
+          // toque: escolhe o marcador (o próximo toque numa bolsa move ele)
+          selTok = selTok === id ? null : id;
+          rerender();
+          return;
+        }
+        ghost.remove();
+        t.classList.remove('inv-dragging');
+        const h = dest(ev.clientX, ev.clientY);
+        selTok = null;
+        if (h) b.move(id, h);
+        rerender();
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+    };
+    t.onclick = e => e.stopPropagation();
   });
 }
 

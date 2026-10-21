@@ -258,6 +258,9 @@ export class Renderer {
   // ---------------------------------------------------------------------
   // Picking
   // ---------------------------------------------------------------------
+  /** Herói sendo arrastado no posicionamento: segue o ponteiro (posição na tela). */
+  dragUnit: { id: string; x: number; y: number } | null = null;
+
   screenToWorld(sx: number, sy: number): Pt { return { x: (sx - this.cam.x) / this.cam.zoom, y: (sy - this.cam.y) / this.cam.zoom }; }
 
   pickCell(sx: number, sy: number): Cell | null {
@@ -490,7 +493,9 @@ export class Renderer {
           const d = Math.hypot(dx, dy);
           if (d < 8) { dx = (pt.x < pa.x ? -1 : 1) * 26; dy = 0; } else { const k = Math.min(0.72, Math.max(0.35, (d - 34) / d)); dx *= k; dy *= k; }
           a.lunge = { dx, dy, t0: now + 150 / sp, dur: 620 / sp, depth: Math.floor(t.pos.gx) + Math.floor(t.pos.gy) };
-          setTimeout(() => play('atack-sword'), 330 / sp);
+          // som de cada Monstro (Orcs) ou da arma
+          const base = a.defId.replace(/\d+$/, '');
+          setTimeout(() => play(base === 'orc' || base === 'capitao_orc' ? 'orc-sound' : 'atack-sword'), 330 / sp);
         } else {
           for (const tg of e.targets) {
             const tv = this.units.get(tg.id)!;
@@ -502,7 +507,8 @@ export class Renderer {
             // Jøhan arremessa a Espada: voa girando, quase reta
             this.projectiles.push({ from, to, t0: now + 250 / sp, dur: Math.min(900, 380 + dist * 0.35) / sp, kind: e.thrown ? 'blade' : kind, arc: e.thrown ? Math.max(20, Math.min(70, dist * 0.15)) : Math.max(50, Math.min(220, dist * 0.5)) });
           }
-          setTimeout(() => play(e.thrown ? 'atack-sword' : kind === 'orb' ? 'atack-magic' : 'atack-bow'), 230 / sp);
+          const base = a.defId.replace(/\d+$/, '');
+          setTimeout(() => play(e.thrown ? 'atack-sword' : base === 'goblin' ? 'archer-sound' : kind === 'orb' ? 'atack-magic' : 'atack-bow'), 230 / sp);
         }
         if (e.attackType === 'melee' && !e.thrown) return 820 / sp;
         const far = e.targets.map(tg => { const tv = this.units.get(tg.id)!; const p2 = g2s(tv.pos.gx, tv.pos.gy); return Math.hypot(p2.x - pa.x, p2.y - pa.y); });
@@ -709,6 +715,7 @@ export class Renderer {
     this.drawGroundOverlays();
     this.drawSprites();
     this.drawMissionBadges();
+    this.drawDragged();
     this.drawFlashArrows();
     this.drawPings();
     this.drawFx();
@@ -1189,6 +1196,8 @@ export class Renderer {
       if (k > 1) u.lunge = null;
     }
     ctx.translate(lx, ly);
+    // arrastando este Herói: no lugar dele fica só um "fantasma"
+    if (this.dragUnit?.id === u.id) ctx.globalAlpha = 0.3;
     const hurt = Math.max(0, 1 - (this.t - u.hurtT0) / (350 / this.speed));
     const idleT = tt + (u.num || u.id.length) * 0.37;
     // Fender: o Herói gira (vira para as 4 direções) e um arco de corte dá a volta nele
@@ -1283,6 +1292,24 @@ export class Renderer {
       ctx.fillStyle = '#ffe14d'; ctx.strokeStyle = '#5a3c00'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.moveTo(-8, ay - 8); ctx.lineTo(8, ay - 8); ctx.lineTo(0, ay + 2); ctx.closePath(); ctx.fill(); ctx.stroke();
     }
+    ctx.restore();
+  }
+
+  /** O Herói arrastado desenhado no ponteiro (por cima de tudo, levemente inclinado, como uma carta sendo segurada). */
+  private drawDragged() {
+    const d = this.dragUnit;
+    const u = d ? this.units.get(d.id) : null;
+    if (!d || !u) return;
+    const ctx = this.ctx;
+    const w = this.screenToWorld(d.x, d.y);
+    const sc = charScale(u.defId) * 0.66 * 1.12;
+    ctx.save();
+    // sombra no chão debaixo do ponteiro
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath(); ctx.ellipse(w.x, w.y + 34, 26, 10, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.translate(w.x, w.y + 30);
+    ctx.rotate(-0.06);
+    drawCharacter(ctx, u.defId, { dir: u.dir, flip: u.flip, t: this.t / 1000, hurt: 0, alpha: 1, stunned: false, lunge: 0, scale: sc });
     ctx.restore();
   }
 

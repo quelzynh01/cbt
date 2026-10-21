@@ -227,6 +227,9 @@ export class Hud {
         <div class="mrow"><span class="mkind">${m.kind === 'pve' ? 'Contra o Jogo' : 'Contra Jogador'}</span>
         <span class="mdone">${done.map((gid, i) => `<span class="dot" title="${guildShort(gid)}${i === 0 ? ' (1º bônus)' : ''}" style="background:${GUILDS[gid].color}"></span>`).join('')}</span></div>
         <div class="mname">${m.name}</div><div class="mtext">${m.text}${m.id === 'monstros3' ? ` <i>(${g.guilds().map(x => `${guildShort(x.id)}: ${Math.min(3, x.monsterKills)}/3`).join(' · ')})</i>` : ''}</div>
+        ${done.length ? `<div class="mby">${done.map((gid, i) => { const by = g.s.missionBy?.[m.id]?.[gid];
+          const who = by?.hero && by.victim ? `<b>${HEROES[by.hero]?.name ?? ''}</b> matou <b>${HEROES[by.victim]?.name ?? MONSTERS[by.victim]?.name ?? ''}</b>` : by?.hero ? `<b>${HEROES[by.hero]?.name ?? ''}</b>` : '';
+          return `<div class="mby-row" style="--gc:${GUILDS[gid].color}">✔ <span class="dot" style="background:${GUILDS[gid].color}"></span> ${guildShort(gid)}${who ? ` — ${who}` : ''}${i === 0 ? ' <small>1º</small>' : ''}</div>`; }).join('')}</div>` : ''}
       </div>`;
     }).join('');
     this.root.querySelectorAll<HTMLElement>('[data-mission]').forEach(el => { el.onclick = () => this.actions.mission(el.dataset.mission!); });
@@ -439,7 +442,10 @@ export class Hud {
       const done = gs.missions.map(m => g.s.missions.find(x => x.id === m)?.name ?? m);
       const titles = g.s.titles?.[id] ?? [];
       const who = this.nameOf(id) ?? (gs.controller === 'ai' ? 'IA' : this.isMine(id) ? 'Você' : 'Jogador');
-      return `<div class="sc-guild ${id === cur.id && !g.s.winner ? 'cur' : ''} ${g.s.winner === id ? 'win' : ''}" style="--gc:${gs.color}">
+      // falta 1 Missão para vencer: o placar pega fogo
+      const hot = !g.s.winner && gs.missions.length === g.s.missionsToWin - 1;
+      return `<div class="sc-guild ${id === cur.id && !g.s.winner ? 'cur' : ''} ${g.s.winner === id ? 'win' : ''} ${hot ? 'hot' : ''}" style="--gc:${gs.color}">
+        ${hot ? '<div class="sc-hot">🔥 Falta 1 Missão para vencer!</div>' : ''}
         <div class="sc-row"><span class="dot" style="background:${gs.color}"></span><b class="sc-name">${guildShort(id)}</b><small>${who}</small>
           <span title="Moedas: ${gs.coins} + ${g.wealth(id) - gs.coins} dos Baús de Tesouro">🪙 ${g.wealth(id)}</span><span title="Monstros mortos">💀 ${gs.monsterKills}</span><span title="Missões cumpridas">🏆 ${gs.missions.length}/${g.s.missionsToWin}</span></div>
         <div class="sc-detail">
@@ -876,8 +882,9 @@ export class Hud {
         break;
       }
       case 'mission':
-        this.banner(`Missão cumprida!`, GUILDS[e.guild].color, `${guildShort(e.guild)}: ${e.name}${e.first ? ' (+1 moeda de Primeiro Bônus)' : ''}`);
-        this.log(`🏆 ${guildShort(e.guild)} cumpriu a Missão "${e.name}"`, GUILDS[e.guild].color);
+        play('mission');
+        this.banner(`Missão cumprida!`, GUILDS[e.guild].color, `${guildShort(e.guild)}: ${e.name}${e.how ? ` — ${e.how}` : ''}${e.first ? ' (+1 moeda de Primeiro Bônus)' : ''}`);
+        this.log(`🏆 ${guildShort(e.guild)} cumpriu a Missão "${e.name}"${e.how ? ` (${e.how})` : ''}`, GUILDS[e.guild].color);
         break;
       case 'coins': this.toast(`🪙 +${e.amount} ${guildShort(e.guild)} — ${e.reason}`, GUILDS[e.guild].color); playOnce('gold'); break;
       case 'rest': this.banner('Descanso', GUILDS[e.guild].color, 'Cartas restauradas · Heróis ressuscitados'); break;

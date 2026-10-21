@@ -682,6 +682,8 @@ export class Game {
 
   /** Ativar um Herói (p.14). Pode trocar de Herói enquanto nada foi feito. */
   activate(heroId: string): boolean {
+    // turno adicional: só o Herói que usou a poção joga
+    if (this.s.extraHero && heroId !== this.s.extraHero && !this.freeMode) return false;
     if (!this.canAct()) return false;
     const h = this.unit(heroId);
     if (!h || h.kind !== 'hero' || h.guild !== this.currentGuild().id || !h.alive || !h.cell) return false;
@@ -1330,6 +1332,8 @@ export class Game {
       if (!myTurn || !a) return no(label, 'Ative outro Herói primeiro');
       if (a.heroId === h.id) return no(label, 'Funciona quando outro Herói está ativado');
       if (usedAct) return no(label, 'Já usado nesta ativação');
+      // "Quando você ativa um Herói diferente": só logo ao ativar, antes de o Herói ativado mover ou atacar
+      if (a.moved || a.attacked || a.mp < 3) return no(label, 'Só logo ao ativar outro Herói');
       if (!h.alive || !h.cell) return no(label, 'Herói fora do tabuleiro');
       return { label, ok: true, pick: 'cell' };
     }
@@ -1458,7 +1462,8 @@ export class Game {
       const movable = heroes.flatMap(h => h.tokens.filter(t => t.type !== 'missao').map(t => t.id)).sort();
       const given = Object.values(o.tokens).flat().sort();
       if (JSON.stringify(movable) !== JSON.stringify(given)) return 'Marcadores inválidos (marcadores de Missão não podem ser movidos).';
-      for (const h of heroes) if (!h.alive && (o.tokens[h.id] ?? []).length) return 'Herói morto não pode receber marcadores.';
+      // p.18: os marcadores passam entre quaisquer Heróis — o morto também, porque ressuscita neste mesmo Descanso
+      for (const h of heroes) if (!h.alive && (o.tokens[h.id] ?? []).length && !this.resurrectCells(h).length) return 'Este Herói morto não tem onde ressuscitar: não pode receber marcadores.';
     }
     if (o.resurrect) {
       const count = new Map<string, number>();
@@ -1477,6 +1482,7 @@ export class Game {
   /** Descansar (p.18): restaura cartas, recupera atordoados, reorganiza itens e marcadores e ressuscita os mortos. */
   rest(o: RestOptions = {}): boolean {
     if (!this.canAct()) return false;
+    if (this.s.extraHero) return false; // turno adicional: é do Herói que usou a poção
     const a = this.s.activation;
     if (a && (a.moved || a.attacked || a.mp < 3)) return false;
     const g = this.currentGuild();
@@ -1555,6 +1561,7 @@ export class Game {
     } else if (t.type === 'turno') {
       if (this.s.extraTurn) return false;
       this.s.extraTurn = true;
+      this.s.extraHero = h.id;
       this.log(`${this.name(h)} fará um turno adicional ao final deste turno.`);
     } else return false;
     h.tokens.splice(i, 1);
@@ -1581,12 +1588,22 @@ export class Game {
       return true;
     }
     if (this.s.extraTurn) {
+      // Poção de Turno Adicional (p.25): um turno completo novo, e só o Herói que usou a poção é reativado
       this.s.extraTurn = false;
+      const hero = this.s.extraHero ? this.s.units[this.s.extraHero] : prevHero;
+      this.s.activatedThisTurn = [];
+      this.s.blessing = null;
+      this.s.warCry = null;
+      this.s.turnUsed = [];
       this.log('Turno adicional!');
       this.emit({ t: 'turn', guild: this.currentGuild().id, turn: this.s.turn });
-      if (prevHero && prevHero.alive) this.activate(prevHero.id);
+      if (hero && hero.alive && hero.cell) {
+        this.activate(hero.id);
+        this.s.extraHero = hero.id; // trava a ativação neste Herói até o fim do turno adicional
+      } else this.s.extraHero = null;
       return true;
     }
+    this.s.extraHero = null;
     this.s.current = (this.s.current + 1) % this.s.guildOrder.length;
     if (this.s.current === 0) this.s.turn++;
     this.s.activatedThisTurn = [];
@@ -1656,7 +1673,7 @@ export class Game {
         this.emit({ t: 'pickup', heroId: killer.id, token: pick });
         this.checkCarry(kg, killer);
       }
-      if (h.guild !== kg) this.completeMission(kg, `matar_${h.guild}`);
+      if (h.guild !== kg) this.completeMission(kg, `matar_${h.guild}`, killer, h);
     } else {
       for (const g of this.guilds()) if (g.id !== h.guild) this.gainCoins(g.id, 1, 'um Herói inimigo morreu');
     }
@@ -1996,7 +2013,7 @@ export class Game {
     this.log(`${this.name(holder)} recebeu a carta ${CARDS[defId].name}!`);
   }
 
-  completeMission(g: GuildId, missionId: string, by?: Unit): boolean {
+  completeMission(g: GuildId, missionId: string, by?: Unit, victim?: Unit): boolean {
     const m = this.s.missions.find(x => x.id === missionId);
     if (!m || this.s.winner) return false;
     if (m.kind === 'pvp' && m.targetGuild === g) return false;
@@ -2007,7 +2024,9 @@ export class Game {
     const gs = this.guild(g);
     gs.missions.push(missionId);
     const first = done.length === 1;
-    this.emit({ t: 'mission', guild: g, missionId, name: m.name, first });
+    ((this.s.missionBy ??= {})[missionId] ??= {})[g] = { ...(by ? { hero: by.defId } : {}), ...(victim ? { victim: victim.defId } : {}) };
+    const how = by && victim ? `${this.name(by)} matou ${this.name(victim)}` : by ? this.name(by) : '';
+    this.emit({ t: 'mission', guild: g, missionId, name: m.name, first, ...(how ? { how } : {}) });
     if (first) this.gainCoins(g, 1, `Primeiro Bônus: ${m.name}`);
     if (m.reward && by) this.giveReward(by);
     if (m.title && (first || !m.titleFirstOnly)) {

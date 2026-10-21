@@ -3,9 +3,13 @@ import { getSettings } from '../ui/settings';
 // Efeitos sonoros (public/sounds). Volume e liga/desliga ficam nas Configurações.
 
 export type Sfx = 'healing' | 'refresh' | 'teletransport' | 'trap' | 'pick-item' | 'scan' | 'skill-wisp' | 'skill-spike'
-  | 'dice' | 'atack-sword' | 'atack-bow' | 'atack-magic' | 'stun' | 'foot-step' | 'gold' | 'cleave' | 'rajada-de-vento' | 'hobsbawn' | 'bow-critico';
+  | 'dice' | 'atack-sword' | 'atack-bow' | 'atack-magic' | 'stun' | 'foot-step' | 'gold' | 'cleave' | 'rajada-de-vento' | 'hobsbawn' | 'bow-critico'
+  | 'archer-sound' | 'orc-sound' | 'mission' | 'end-game';
 const NAMES: Sfx[] = ['healing', 'refresh', 'teletransport', 'trap', 'pick-item', 'scan', 'skill-wisp', 'skill-spike',
-  'dice', 'atack-sword', 'atack-bow', 'atack-magic', 'stun', 'foot-step', 'gold', 'cleave', 'rajada-de-vento', 'hobsbawn', 'bow-critico'];
+  'dice', 'atack-sword', 'atack-bow', 'atack-magic', 'stun', 'foot-step', 'gold', 'cleave', 'rajada-de-vento', 'hobsbawn', 'bow-critico', 'archer-sound', 'orc-sound', 'mission', 'end-game'];
+/** Sons que não são .mp3. */
+const EXT: Partial<Record<Sfx, string>> = { mission: 'wav', 'end-game': 'wav' };
+const url = (n: Sfx) => `${import.meta.env.BASE_URL}sounds/${n}.${EXT[n] ?? 'mp3'}`;
 export const SOUND_COUNT = NAMES.length;
 const buffers = new Map<Sfx, HTMLAudioElement>();
 /** Sons cujo arquivo não existe (ainda não colocado): não tentam tocar. */
@@ -20,7 +24,7 @@ export function preloadSounds(onEach?: () => void): Promise<void> {
     a.addEventListener('canplaythrough', () => { buffers.set(n, a); done(); }, { once: true });
     a.addEventListener('error', () => { missing.add(n); done(); }, { once: true });
     setTimeout(done, 4000); // não trava o carregamento se o navegador não pré-carregar áudio
-    a.src = `${import.meta.env.BASE_URL}sounds/${n}.mp3`;
+    a.src = url(n);
     a.load();
   }))).then(() => undefined);
 }
@@ -39,7 +43,7 @@ export function play(n: Sfx, vol = 1) {
   const st = getSettings();
   if (st.muted || !st.sound || st.volume <= 0 || (st.master ?? 1) <= 0 || missing.has(n)) return;
   const base = buffers.get(n);
-  const a = base ? (base.cloneNode(true) as HTMLAudioElement) : new Audio(`${import.meta.env.BASE_URL}sounds/${n}.mp3`);
+  const a = base ? (base.cloneNode(true) as HTMLAudioElement) : new Audio(url(n));
   a.volume = Math.max(0, Math.min(1, st.volume * (st.master ?? 1) * vol));
   a.play().catch(() => { /* o navegador só deixa tocar depois do primeiro clique */ });
 }
