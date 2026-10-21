@@ -31,7 +31,7 @@ export class OnlineLobby {
   /** Editor de inventário desenhado nesta tela (liga os cliques depois de montar o HTML). */
   private invBind: { items: InvItem[]; opts: InvOptions } | null = null;
   private mode: 'single' | 'campaign' = 'single';
-  private unlimitedDice = false;
+  private diceCap = false;
   private lastTick = -1;
   /** Campanha online (anfitrião): a preparação guardada enquanto um cenário é jogado. */
   private stash: OnlineSetup | null = null;
@@ -164,7 +164,7 @@ export class OnlineLobby {
         <div class="lb-seats">${slots}</div>
         <div class="lb-actions">
           ${host ? `<label>Modo <select id="lb-mode"><option value="single">Partida única</option><option value="campaign" ${this.mode === 'campaign' ? 'selected' : ''}>Campanha (6 cenários)</option></select></label>
-            <label class="lb-cap"><input type="checkbox" id="lb-cap" ${this.unlimitedDice ? 'checked' : ''}/> Dados ilimitados (sem o limite de 8 ataque / 6 defesa)</label>
+            <label class="lb-cap"><input type="checkbox" id="lb-cap" ${this.diceCap ? 'checked' : ''}/> ⚙️ Configurações da partida: <b>Limite de dados</b> (8 ataque / 6 defesa)</label>
             <label>Dificuldade da IA <select id="lb-ai"><option value="normal">Normal</option><option value="hard" ${getSettings().ai === 'hard' ? 'selected' : ''}>Difícil</option></select></label>
             <button class="primary" id="lb-start" ${canStart ? '' : 'disabled'}>▶ Ir para a mesa</button>` : '<span class="lb-wait">Aguardando o anfitrião levar todos para a mesa…</span>'}
         </div>
@@ -188,14 +188,14 @@ export class OnlineLobby {
     const md = this.page.querySelector('#lb-mode') as HTMLSelectElement | null;
     if (md) md.onchange = () => { this.mode = md.value as 'single' | 'campaign'; };
     const cap = this.page.querySelector('#lb-cap') as HTMLInputElement | null;
-    if (cap) cap.onchange = () => { this.unlimitedDice = cap.checked; };
+    if (cap) cap.onchange = () => { this.diceCap = cap.checked; };
   }
 
   // ------------------------------------------------------------------ anfitrião: preparação
   private startSetup() {
     const host = this.session as HostSession;
     const l = host.lobby;
-    l.setup = newSetup(l.seats.map(s => ({ guild: s.guild, ai: s.ai })), getSettings().ai, Math.random, this.mode, this.unlimitedDice);
+    l.setup = newSetup(l.seats.map(s => ({ guild: s.guild, ai: s.ai })), getSettings().ai, Math.random, this.mode, this.diceCap);
     this.hostAdvance();
   }
 
@@ -284,7 +284,7 @@ export class OnlineLobby {
           guild: s.guild, controller: s.ai ? 'ai' as const : 'human' as const, name: s.team,
           heroes: st.picks[s.guild], cards: st.equip[s.guild] ?? undefined,
         })),
-        deploy: true, unlimitedDice: st.unlimitedDice,
+        deploy: true, diceCap: st.diceCap,
       });
     }
     game.drain();

@@ -322,3 +322,114 @@
   .mp-head h2 { font-size: 20px; }
   .mp-head button { padding: 4px 10px; font-size: 13px; }
 }
+
+/* ---------------- Maldições Mortais: cartas viradas na mesa ---------------- */
+.cr-step { text-align: center; }
+.cr-step h3 small { color: var(--muted); font-size: 14px; }
+.cr-who { display: inline-block; margin: 4px auto 10px; padding: 6px 14px; border-radius: 12px; background: rgba(0,0,0,.28); border: 2px solid color-mix(in srgb, var(--gc) 70%, #fff); }
+.cr-table { display: flex; justify-content: center; align-items: flex-start; gap: 14px; flex-wrap: wrap; min-height: 250px; padding: 14px; border-radius: 18px;
+  background: radial-gradient(ellipse at center, #2f5a26 0%, #1d3a17 80%); box-shadow: inset 0 0 30px rgba(0,0,0,.55); }
+.cr-slot { position: relative; width: 160px; display: grid; justify-items: center; }
+.cr-slot .acard { zoom: .72; animation: crFlip .45s ease-out; }
+@keyframes crFlip { from { transform: rotateY(90deg) scale(.9); opacity: .3; } to { transform: none; opacity: 1; } }
+.cr-back { height: 230px; padding: 0; border-radius: 14px; border: 3px solid #c66a9a; display: grid; place-content: center; gap: 6px; color: #ffc6e0;
+  background: repeating-linear-gradient(45deg, #3a1226 0 10px, #2a0d1c 10px 20px); box-shadow: 0 6px 18px rgba(0,0,0,.5); }
+.cr-back:disabled { opacity: 1; cursor: default; filter: saturate(.85); }
+.cr-back .cr-skull { font-size: 48px; filter: drop-shadow(0 3px 4px rgba(0,0,0,.6)); }
+.cr-back b { font-size: 15px; line-height: 1.1; }
+.cr-back small { font-size: 11px; color: #fff; }
+.cr-back.next { animation: actPulse 1.2s ease-in-out infinite; border-color: #ffe14d; cursor: var(--cur-pointer, pointer); }
+.cr-slot.kept .acard { box-shadow: 0 0 0 4px #ff6a4a, 0 0 24px #ff6a4a; border-radius: 14px; }
+.cr-slot.back-deck .acard { filter: grayscale(.7) brightness(.7); }
+.cr-tag { margin-top: 4px; font-size: 12px; font-weight: 800; padding: 1px 8px; border-radius: 8px; background: rgba(0,0,0,.45); }
+.cr-slot.kept .cr-tag { background: #8e2418; color: #fff; }
+.cr-result { margin: 10px 0 4px; font-size: 15px; min-height: 24px; }
+.cr-done { display: flex; flex-wrap: wrap; gap: 6px 14px; justify-content: center; margin-top: 12px; font-size: 13px; color: var(--muted); }
+.cr-sumg { text-align: left; margin: 10px 0; }
+.cr-sumg h4 { margin: 0 0 6px; }
+.cr-sumrow { display: flex; flex-wrap: wrap; gap: 12px; }
+.cr-sumhero { display: grid; justify-items: center; gap: 2px; padding: 6px; border-radius: 12px; background: rgba(0,0,0,.25); border: 2px solid #c66a9a; }
+.cr-sumhero.free { border-color: #6fe08e; }
+.cr-sumhero small { color: var(--muted); }
+.cr-sumhero .acard { zoom: .6; }
+
+/* ---------------- compras de todas as Guildas ---------------- */
+.by-guild { margin: 10px 0; padding: 8px 12px; border-radius: 14px; background: rgba(0,0,0,.25); border-left: 5px solid var(--gc); }
+.by-guild h4 { margin: 0 0 6px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.by-coins { margin-left: auto; font-size: 13px; color: var(--muted); font-weight: 600; }
+.by-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.by-cols h5 { margin: 0 0 4px; font-size: 13px; color: var(--gold); }
+.by-disc .acard { filter: grayscale(.6) brightness(.75); }
+@media (max-width: 760px) { .by-cols { grid-template-columns: 1fr; } }
+@media (max-height: 560px) { .cr-table { min-height: 0; padding: 8px; } .cr-slot { width: 120px; } .cr-slot .acard { zoom: .54; } .cr-back { height: 170px; } }
+
+/* editor de cartas (equipamento inicial, Melhorias e Descanso): Heróis lado a lado, cartas 2 em cima e 2 embaixo */
+.inv-heroes { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); align-items: start; }
+.inv-hero .inv-slots { display: grid; grid-template-columns: repeat(2, 118px); justify-content: center; gap: 10px; }
+.inv-hh b { font-size: 16px; }
+#restbox .inv-ed { margin: 4px 0; }
+#restbox .inv-heroes { grid-template-columns: repeat(auto-fit, minmax(236px, 1fr)); gap: 8px; }
+#restbox .inv-hero { padding: 8px; }
+#restbox .inv-hero .inv-slots { grid-template-columns: repeat(2, 104px); gap: 8px; }
+#restbox .inv-slot { width: 104px; height: 168px; }
+#restbox .inv-slot.full .acard { zoom: .485; }
+@media (max-height: 560px) {
+  .inv-heroes, #restbox .inv-heroes { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 6px; }
+  .inv-hero, #restbox .inv-hero { padding: 6px; }
+  .inv-hh { margin-bottom: 4px; gap: 6px; }
+  .inv-hh canvas { width: 32px; height: 32px; }
+  .inv-hero .inv-slots, #restbox .inv-hero .inv-slots { grid-template-columns: repeat(2, 76px); gap: 6px; }
+  .inv-slot, #restbox .inv-slot { width: 76px; height: 122px; }
+  .inv-slot.full .acard, #restbox .inv-slot.full .acard { zoom: .355; }
+  .inv-slot.empty span { font-size: 26px; }
+  .inv-slot.empty small { font-size: 9px; }
+}
+.cp-opt-h { margin: 10px 0 4px; color: var(--gold); }
+.by-drop { margin-top: 6px; } .by-drop h5 { margin: 0 0 4px; font-size: 13px; color: #ffb36b; }
+
+/* ---------------- campanha: tela entre os cenários ---------------- */
+.hub { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 12px; margin-top: 10px; }
+.hub-sec { background: rgba(0,0,0,.25); border-radius: 16px; padding: 10px 14px; border: 2px solid rgba(240,194,67,.18); }
+.hub-sec h3 { margin: 0 0 8px; color: var(--gold); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 17px; }
+.hub-sec h3 small { color: var(--muted); font-weight: 600; }
+.hub-next { grid-column: 1 / -1; }
+.hub-nextmap { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+.hub-nextmap .cp-vote.big { width: min(230px, 100%); }
+.hub-nextinfo .cp-big { font-size: 20px; padding: 12px 26px; }
+.hub-nextinfo { display: grid; gap: 8px; }
+.hub-nextinfo p { margin: 0; color: #e8dccb; }
+.hub-choices { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+.hub-me { grid-column: 1 / -1; border-color: color-mix(in srgb, var(--gc) 60%, transparent); }
+.hub-me h3 #cp-org { margin-left: auto; font-size: 14px; padding: 5px 14px; }
+.hub-coin { font-size: 13px; color: var(--muted); font-weight: 600; }
+.hub-heroes { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+.hub-hero { background: rgba(0,0,0,.25); border-radius: 12px; padding: 8px; }
+.hub-hh { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.hub-hh canvas { width: 44px; height: 44px; border-radius: 50%; border: 2px solid var(--gc); background: #2a1a10; }
+.hub-hh b { display: block; color: var(--gold); font-size: 16px; line-height: 1.1; }
+.hub-hh small { color: var(--muted); font-size: 12px; }
+.hub-curse { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #ffc6e0; background: #4a1d2e; border-radius: 8px; padding: 3px 8px; margin-bottom: 6px; }
+.hub-curse img { width: 30px; height: 30px; object-fit: contain; flex: none; }
+.hub-cards { display: grid; grid-template-columns: repeat(2, 96px); justify-content: center; gap: 6px; }
+.hub-card { width: 96px; height: 154px; }
+.hub-card .acard { zoom: .448; }
+@media (max-height: 560px) { .hub-cards { grid-template-columns: repeat(4, 64px); } .hub-card { width: 64px; height: 103px; } .hub-card .acard { zoom: .3; } }
+.hub-other { padding: 6px 8px; border-radius: 12px; background: rgba(0,0,0,.2); border-left: 4px solid var(--gc); margin-bottom: 8px; }
+.hub-ohs { display: grid; gap: 4px; margin-top: 4px; }
+.hub-oh { display: flex; align-items: center; gap: 6px; }
+.hub-oh canvas { width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--gc); background: #2a1a10; }
+.hub-oh span { display: grid; line-height: 1.1; }
+.hub-oh small { color: var(--muted); font-size: 11px; }
+.hub-circles { display: grid; gap: 8px; }
+.hub-circles .cp-circle h4 { margin: 0 0 4px; color: var(--gold); }
+.hub-circles .cp-circle h4 small { color: var(--muted); }
+.hub-circles .cp-scen { padding: 3px 8px; font-size: 13px; }
+.hub-orgbtns { display: flex; justify-content: center; gap: 10px; align-items: center; }
+@media (max-width: 860px) { .hub { grid-template-columns: 1fr; } }
+@media (max-height: 560px) { .hub-nextmap .cp-vote.big { width: 120px; } .hub-nextinfo .cp-big { font-size: 16px; padding: 8px 16px; } .hub-sec { padding: 8px 10px; } }
+/* outras Guildas: cartas pequenas de cada Herói */
+.hub-oh { display: grid; gap: 4px; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,.06); }
+.hub-ohh { display: flex; align-items: center; gap: 6px; }
+.hub-ocards { display: flex; flex-wrap: wrap; gap: 4px; }
+.hub-ocard { width: 58px; height: 93px; }
+.hub-ocard .acard { zoom: .27; }

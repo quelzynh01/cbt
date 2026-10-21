@@ -73,8 +73,8 @@ export interface NewGameOptions {
   fixedOrder?: boolean;
   /** true: as Guildas humanas posicionam os Heróis na Área Inicial antes do 1º turno. */
   deploy?: boolean;
-  /** Dados ilimitados (sem a opção, no máximo 8 dados de ataque e 6 de defesa por rolagem). */
-  unlimitedDice?: boolean;
+  /** Limite de dados (Configurações da partida): no máximo 8 dados de ataque e 6 de defesa por rolagem. Sem isso, ilimitado. */
+  diceCap?: boolean;
 }
 
 const FREE_MP = 99;
@@ -139,7 +139,7 @@ export class Game {
     const g = new Game(map, s);
     const suffix = levelSuffix(opts.level ?? map.level);
     s.level = opts.level ?? map.level ?? '1';
-    if (opts.unlimitedDice) s.unlimitedDice = true;
+    if (opts.diceCap) s.diceCap = true;
     s.titles = JSON.parse(JSON.stringify(opts.titles ?? {}));
     for (let i = 0; i < 4; i++) nextRandom(s); // aquece o RNG (seeds próximas não ficam correlacionadas)
 
@@ -184,6 +184,9 @@ export class Game {
           wounds: 0, alive: true, stunned: false, cards, tokens: [], deaths: 0, num: num++,
           curse: p.curses?.[hid] && p.curses[hid] !== 'sem_maldicao' ? p.curses[hid] : undefined,
         };
+        // Maldição que ocupa um espaço com o inventário cheio: a última carta fica debaixo dela (indisponível)
+        const hu = s.units[id];
+        if (hu.curse && CURSES[hu.curse]?.slot && g.slotsUsed(hu).used > g.slotsUsed(hu).max && hu.cards.length) hu.covered = hu.cards.pop();
         gs.heroIds.push(id);
       });
       s.guilds[p.guild] = gs;
@@ -396,6 +399,13 @@ export class Game {
     return this.hasLOS(attacker, from, target.cell);
   }
 
+  /** Lança do Feral: o primeiro Espaço na diagonal conta como Perto — só se houver passagem em "L" sem parede/porta fechada. */
+  diagonalClose(from: Cell, to: Cell): boolean {
+    if (Math.abs(to.c - from.c) !== 1 || Math.abs(to.r - from.r) !== 1 || !this.board.playable(to)) return false;
+    const via = [{ c: to.c, r: from.r }, { c: from.c, r: to.r }];
+    return via.some(m => this.board.playable(m) && this.board.isClose(from, m) && this.board.isClose(m, to));
+  }
+
   /** A carta alcança o alvo? (Jøhan: Espada a Distância; Golpe Astral: Inimigo Perto de um Aliado.) */
   canCardHit(hero: Unit, card: CardInst, from: Cell, target: Unit): boolean {
     const def = this.cardDef(card);
@@ -405,7 +415,7 @@ export class Game {
       return this.onBoard().some(a => a.kind === 'hero' && a.guild === hero.guild && this.board.isClose(a.cell!, target.cell!));
     }
     if (this.canAttackFrom(hero, from, def.attackType, target)) return true;
-    if (def.fx.diagonal && target.alive && target.cell && this.isEnemy(hero, target) && Math.abs(target.cell.c - from.c) === 1 && Math.abs(target.cell.r - from.r) === 1 && this.board.playable(target.cell)) return true;
+    if (def.fx.diagonal && target.alive && target.cell && this.isEnemy(hero, target) && this.diagonalClose(from, target.cell)) return true;
     return hero.kind === 'hero' && this.ab(hero) === 'arremesso' && def.group === 'Espada'
       && this.canAttackFrom(hero, from, 'ranged', target);
   }
@@ -458,7 +468,7 @@ export class Game {
       if (d.fx.rage && h.wounds) { n += h.wounds; notes.push(`${d.name} +${h.wounds}`); }
       if (d.fx.grrr) { n += d.fx.grrr; notes.push(`${d.name} +${d.fx.grrr}`); }
     }
-    if (!this.s.unlimitedDice && n > 8) { notes.push(`Limite de dados: ${n} → 8`); n = 8; }
+    if (this.s.diceCap && n > 8) { notes.push(`Limite de dados: ${n} → 8`); n = 8; }
     return { dice: n, notes };
   }
 
@@ -526,8 +536,8 @@ export class Game {
   // =========================================================================
   // Dados (p.17): críticos sempre acertam e rolam um dado adicional.
   // =========================================================================
-  /** Máximo de dados numa rolagem: 8 de ataque e 6 de defesa, contando ✷ e rerrolagens (sem limite com "Dados ilimitados"). */
-  diceLimit(die: DieFace[]): number { return this.s.unlimitedDice ? 40 : (die === DEFENSE_DIE ? 6 : 8); }
+  /** Máximo de dados numa rolagem: ilimitado; com o "Limite de dados", 8 de ataque e 6 de defesa, contando ✷ e rerrolagens. */
+  diceLimit(die: DieFace[]): number { return this.s.diceCap ? (die === DEFENSE_DIE ? 6 : 8) : 40; }
 
   roll(n: number, die: DieFace[], success: DieFace, mode: DiceMode, explode = true): RollResult {
     const faces: DieFace[] = [];
@@ -1530,6 +1540,12 @@ export class Game {
     const usable = t.type === 'cura' || t.type === 'revigorante' || (t.type === 'turno' && !this.s.extraTurn);
     if (usable) this.emit({ t: 'useToken', heroId: h.id, token: { ...t } }); // mostrado antes do efeito
     if (t.type === 'cura') {
+      // Poção de Cura (p.25): remove todos os Ferimentos e também a carta de Maldição Mortal
+      if (h.curse) {
+        this.log(`${this.name(h)} se livrou da Maldição ${CURSES[h.curse]?.name ?? ''}.`);
+        h.curse = undefined;
+        if (h.covered) { h.cards.push(h.covered); this.log(`${this.cardDef(h.covered).name} volta a ficar disponível.`); h.covered = undefined; }
+      }
       const amount = h.wounds;
       h.wounds = 0;
       this.emit({ t: 'heal', id: h.id, amount, wounds: 0 });
@@ -2139,7 +2155,7 @@ export class Game {
         this.emit({ t: 'spawn', id: m.id, cell: match.cell });
       } else {
         const reason = match ? 'Entrada ocupada — voltou para a caixa' : 'Nenhuma entrada com esses símbolos — voltou para a caixa';
-        this.emit({ t: 'spawnRoll', id: m.id, faces: r, cell: null, reason });
+        this.emit({ t: 'spawnRoll', id: m.id, faces: r, cell: null, reason, ...(match ? { target: { ...match.cell } } : {}) });
         this.log(`${MONSTERS[m.defId].name}: ${reason}.`);
       }
     }

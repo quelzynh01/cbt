@@ -1,5 +1,7 @@
 import { SimpleAI, type AILevel } from '../ai/ai';
 import { gameConfirm } from './dialog';
+import { bindInvEditor, invEditorHtml, poolErrors, type InvItem, type InvOptions } from './inventoryEditor';
+import { showRoulette } from './roulette';
 import { actingGuild, applyAction, type Action } from '../engine/actions';
 import type { GameState } from '../engine/types';
 import type { ClientSession, HostSession, Lobby, Session, SessionEvents } from '../net/net';
@@ -95,7 +97,13 @@ export class Controller {
         if (e.t === 'reward' || e.t === 'title') { this.hud.showAward(e, () => this.renderer.release()); return true; }
         if (e.t === 'useToken') { this.hud.showUsed(e.heroId, e.token, () => this.renderer.release()); return true; }
         if (e.t === 'spawnRoll') {
-          this.hud.spawnRoll(e, () => this.renderer.release());
+          // a câmera vai até a Entrada que os dados indicaram (mesmo ocupada); sem Entrada com esses símbolos, mostra todas
+          const follow = getSettings().view === 'players';
+          this.hud.spawnRoll(e, () => this.renderer.release(), follow ? () => {
+            const at = e.cell ?? e.target;
+            if (at) this.renderer.glideCells([at]);
+            else if (this.game.s.entryMarkers.length) this.renderer.glideCells(this.game.s.entryMarkers.map(m => m.cell));
+          } : undefined);
           return true;
         }
         if (e.t === 'gameover') setTimeout(() => this.showGameOver(), 900);
@@ -180,7 +188,7 @@ export class Controller {
   private campaignAI: AILevel | null = null;
   private aiFor(g: GuildId): SimpleAI { return (this.ais[g] ??= new SimpleAI(this.campaignEnd && this.campaignAI ? this.campaignAI : getSettings().ai)); }
 
-  startCampaign(mapId: string, opts: Omit<Parameters<typeof Game.create>[1], 'seed'>, onEnd: (g: Game) => void, info: { baseMs: number; onExit: () => void; aiLevel?: AILevel }) {
+  startCampaign(mapId: string, opts: Omit<Parameters<typeof Game.create>[1], 'seed'>, onEnd: (g: Game) => void, info: { baseMs: number; onExit: () => void; aiLevel?: AILevel; roulette?: boolean }) {
     this.campaignAI = info.aiLevel ?? null;
     this.leaveOnline(false);
     this.mode = 'local';
@@ -207,6 +215,14 @@ export class Controller {
     this.deployFocused = null;
     this.focusStart();
     this.onIdle();
+    // 1º cenário da campanha: o jogador inicial é sorteado (p.14) — a roleta mostra quem começa
+    if (info.roulette) this.rouletteFor(this.game);
+  }
+
+  /** Roleta com as Guildas (cores e nomes), parando em quem joga primeiro. */
+  private rouletteFor(g: Game) {
+    const gs = g.guilds();
+    void showRoulette(gs.map(x => ({ name: this.hud.nameOf(x.id) ?? guildShort(x.id), color: x.color })), Math.max(0, gs.findIndex(x => x.id === g.s.guildOrder[0])));
   }
 
   /** Configuração do último Modo Teste (para "Nova partida" e "Jogar novamente"). */
@@ -225,14 +241,13 @@ export class Controller {
     this.onlinePanel.classList.add('hidden');
     this.hud.setModeBadge('MODO TESTE');
     const debug = this.game?.s.debug;
-    const unlimitedDice = this.game?.s.unlimitedDice;
     // Modo Teste: o Time 1 fica na Área Inicial 1 e joga primeiro; os outros recebem Heróis diferentes, sorteados.
     this.game = Game.create(getMap(cfg.mapId), {
       seed,
       players: cfg.teams.map((t, i) => ({ guild: t.guild, controller: t.controller, name: t.name, heroes: i === 0 ? cfg.heroes : undefined, cards: i === 0 ? cfg.cards : undefined })),
       fixedOrder: true,
       deploy: true,
-      unlimitedDice,
+      diceCap: !!cfg.diceCap,
     });
     if (debug) this.game.s.debug = { ...debug };
     this.ais = {};
@@ -508,6 +523,8 @@ export class Controller {
     this.waitingNet = false;
     this.stopped = false;
     this.game = new Game(getMap(state.mapId), state);
+    // partida avulsa começando agora: a roleta mostra quem foi sorteado para começar (todos veem a mesma)
+    if (!lobby.campaign && state.turn === 1 && (state.deploying?.length ?? 0) > 0) this.rouletteFor(this.game);
     this.ais = {};
     this.history = [];
     this.turnStart = null;
@@ -1240,7 +1257,10 @@ export class Controller {
       if (unitId && hl.attackUnits.has(unitId)) foes.add(unitId);
       if (cell) for (const u of this.game.unitsAt(cell)) if (hl.attackUnits.has(u.id)) foes.add(u.id);
       const canMove = !!cell && hl.move.has(key(cell)) && !sameCell(cell, this.game.unit(a.heroId).cell);
-      if (foes.size && (canMove || foes.size > 1)) {
+      // tocar num Aliado que pode ser ativado continua selecionando ele (sem o menu)
+      const ally = !!unitId && this.game.unit(unitId).kind === 'hero' && this.canActivateNow(unitId);
+      // sempre pergunta quando dá para andar (mesmo que seja a única opção) ou quando há mais de um alvo
+      if ((canMove && !(ally && !foes.size)) || foes.size > 1) {
         const g = this.game;
         const opts: ClickOpt[] = [...foes].map(id => {
           const u = g.unit(id);
@@ -1427,7 +1447,9 @@ export class Controller {
   // ------------------------------------------------------------------
   // DESCANSO (p.18): restaurar, reorganizar cartas e marcadores, ressuscitar
   // ------------------------------------------------------------------
-  private restDraft: { cards: Record<string, string>; tokens: Record<string, string>; res: Record<string, Cell>; picking: string | null } | null = null;
+  private restDraft: { cards: Record<string, string>; tokens: Record<string, string>; res: Record<string, Cell>; picking: string | null;
+    /** Cartas no editor (mesmo da campanha): id da carta, Herói (id do personagem) e a carta no jogo. */
+    items: (InvItem & { uid: string })[] } | null = null;
 
   private openRest() {
     if (!this.isHumanTurn() || this.renderer.busy) return;
@@ -1446,6 +1468,7 @@ export class Controller {
       cards: Object.fromEntries(heroes.flatMap(h => h.cards.map(c => [c.uid, h.id]))),
       tokens: Object.fromEntries(heroes.flatMap(h => h.tokens.filter(t => t.type !== 'missao').map(t => [t.id, h.id]))),
       res, picking: null,
+      items: heroes.flatMap(h => h.cards.map(c => ({ id: c.defId, to: h.defId, uid: c.uid }))),
     };
     this.refresh();
   }
@@ -1469,20 +1492,27 @@ export class Controller {
       for (const c of this.game.resurrectCells(this.game.unit(d.picking))) hl.move.set(key(c), 0);
     }
     hl.path = Object.values(d.res);
-    const pool = heroes.flatMap(h => h.cards);
     const tokPool = heroes.flatMap(h => h.tokens);
     const sel = (cur: string, aliveOnly: boolean, attr: string) => `<select ${attr}>${heroes.filter(h => !aliveOnly || h.alive).map(h => `<option value="${h.id}" ${cur === h.id ? 'selected' : ''}>${HEROES[h.defId].name}</option>`).join('')}</select>`;
-    const cols = heroes.map(h => {
-      const cards = (opts.cards![h.id] ?? []).map(uid => pool.find(c => c.uid === uid)!);
-      const sl = this.game.slotsUsed(h, cards);
-      return `<div class="rb-col"><h4>${h.num}. ${HEROES[h.defId].name} <span class="${sl.used > sl.max ? 'bad' : ''}">${sl.used}/${sl.max}</span></h4>
-        ${!h.alive ? `<div class="rb-dead">☠ Morto — ressuscita em <b>${d.res[h.id] ? `(${d.res[h.id].c},${d.res[h.id].r})` : '—'}</b> <button data-pick="${h.id}" class="${d.picking === h.id ? 'on' : ''}">${d.picking === h.id ? 'clique no mapa…' : 'Escolher no mapa'}</button></div>` : ''}
-        ${h.curse ? `<div class="cp-curse">☠ ${CURSES[h.curse]?.name}</div>` : ''}
-        ${cards.map(c => { const cd = CARDS[c.defId]; return `<div class="rb-item" style="border-left:5px solid ${itemColor(c.defId)}" title="${cd.text}"><span>${cd.name}</span>${sel(d.cards[c.uid], false, `data-card="${c.uid}"`)}</div>`; }).join('') || '<i class="muted">sem cartas</i>'}
-        ${h.tokens.filter(t => t.type === 'missao').map(t => `<div class="rb-item"><span>★ Marcador de Missão</span><small class="muted">não move</small></div>`).join('')}
-        ${Object.keys(d.tokens).filter(id => d.tokens[id] === h.id).map(id => { const t = tokPool.find(x => x.id === id)!; return `<div class="rb-item"><span>${TOKEN_INFO[t.type].name}${t.type === 'bau' ? ` (${t.value})` : ''}</span>${sel(h.id, true, `data-tok="${id}"`)}</div>`; }).join('')}
-      </div>`;
+    // ressuscitar e marcadores de Exploração (por Herói); as cartas ficam no editor (o mesmo da campanha)
+    const extras = heroes.map(h => {
+      const dead = !h.alive ? `<div class="rb-dead">☠ Morto — ressuscita em <b>${d.res[h.id] ? `(${d.res[h.id].c},${d.res[h.id].r})` : '—'}</b> <button data-pick="${h.id}" class="${d.picking === h.id ? 'on' : ''}">${d.picking === h.id ? 'clique no mapa…' : 'Escolher no mapa'}</button></div>` : '';
+      const toks = [
+        ...h.tokens.filter(t => t.type === 'missao').map(() => `<div class="rb-item"><span>★ Marcador de Missão</span><small class="muted">não move</small></div>`),
+        ...Object.keys(d.tokens).filter(id => d.tokens[id] === h.id).map(id => { const t = tokPool.find(x => x.id === id)!; return `<div class="rb-item"><span>${TOKEN_INFO[t.type].name}${t.type === 'bau' ? ` (${t.value})` : ''}</span>${sel(h.id, true, `data-tok="${id}"`)}</div>`; }),
+      ].join('');
+      return dead || toks ? `<div class="rb-col"><h4>${h.num}. ${HEROES[h.defId].name}</h4>${dead}${toks}</div>` : '';
     }).join('');
+    const byDef = (defId: string) => heroes.find(h => h.defId === defId)!;
+    const invOpts: InvOptions = {
+      heroes: heroes.map(h => h.defId), color: g.color, discard: false,
+      slots: (hd, ids) => {
+        const s = this.game.slotsUsed(byDef(hd), ids.map((defId, i) => ({ uid: `_${i}`, defId, exhausted: false, uses: 0 })));
+        return { used: s.used, max: s.max, magicExtra: ids.reduce((n, id) => n + (CARDS[id]?.fx.magicSlots ?? 0), 0) };
+      },
+      curse: hd => { const h = byDef(hd); return h.curse ? `${CURSES[h.curse]?.name}${CURSES[h.curse]?.slot ? ` (ocupa 1 espaço${h.covered ? ` · cobre ${CARDS[h.covered.defId].name}` : ''})` : ''}` : null; },
+    };
+    const poolErr = poolErrors(d.items, false);
     if (d.picking) {
       const h = this.game.unit(d.picking);
       const el = this.hud.panel('restbox', `<div class="panel-h">💤 Ressuscitar ${HEROES[h.defId].name}: clique num Espaço verde <button id="rb-back">Voltar</button></div>`);
@@ -1493,12 +1523,17 @@ export class Controller {
     const el = this.hud.panel('restbox', `
       <div class="panel-h">💤 Descansar a Guilda</div>
       <div class="rb-body">
-        <p>Todas as cartas serão restauradas e os Heróis Atordoados se recuperam. Você pode <b>reorganizar as cartas</b> e os marcadores de Exploração entre os Heróis (marcadores de Missão e Maldições não se movem). Heróis mortos ressuscitam na <b>Área Inicial</b> ou <b>Perto de um Aliado</b> que já está no tabuleiro.</p>
-        <div class="rb-cols">${cols}</div>
-        ${err ? `<div class="rb-err">${err}</div>` : ''}
-        <div class="rb-btns"><button id="rb-cancel">Cancelar</button><button class="primary" id="rb-ok" ${err ? 'disabled' : ''}>💤 Descansar</button></div>
+        <p>Todas as cartas serão restauradas e os Heróis Atordoados se recuperam. Toque num <b>espaço vazio</b> ou numa <b>carta</b> para trocar as cartas entre os Heróis (marcadores de Missão e Maldições não se movem). Heróis mortos ressuscitam na <b>Área Inicial</b> ou <b>Perto de um Aliado</b> que já está no tabuleiro.</p>
+        ${invEditorHtml(d.items, invOpts)}
+        ${extras ? `<div class="rb-cols">${extras}</div>` : ''}
+        ${err || poolErr.length ? `<div class="rb-err">${[...poolErr, err].filter(Boolean).join('<br/>')}</div>` : ''}
+        <div class="rb-btns"><button id="rb-cancel">Cancelar</button><button class="primary" id="rb-ok" ${err || poolErr.length ? 'disabled' : ''}>💤 Descansar</button></div>
       </div>`);
-    el.querySelectorAll<HTMLSelectElement>('[data-card]').forEach(s => { s.onchange = () => { d.cards[s.dataset.card!] = s.value; this.refresh(); }; });
+    // o editor muda o Herói de cada carta; o Descanso usa o id do personagem no jogo
+    bindInvEditor(el, d.items, invOpts, () => {
+      for (const it of d.items) d.cards[it.uid] = it.to === 'pool' ? 'pool' : byDef(it.to).id;
+      this.refresh();
+    });
     el.querySelectorAll<HTMLSelectElement>('[data-tok]').forEach(s => { s.onchange = () => { d.tokens[s.dataset.tok!] = s.value; this.refresh(); }; });
     el.querySelectorAll<HTMLElement>('[data-pick]').forEach(b => { b.onclick = () => {
       d.picking = b.dataset.pick!;
@@ -1706,7 +1741,7 @@ export class Controller {
         <label>Defesa dos heróis <select id="tp-def"><option value="normal">Normal</option><option value="max">Sempre bloqueia</option><option value="zero">Nunca bloqueia</option></select></label>
         <label class="chk free"><input type="checkbox" id="tp-free"/> <b>🆓 Modo Livre</b> — jogadas ilimitadas</label>
         <div class="tp-note">PM e ataques infinitos, cartas não exaustam, troca de Herói a qualquer momento e a vez não passa para o adversário.</div>
-        <label class="chk"><input type="checkbox" id="tp-unlim"/> Dados ilimitados (sem o limite de 8 ataque / 6 defesa)</label>
+        <label class="chk"><input type="checkbox" id="tp-cap"/> Limite de dados (8 ataque / 6 defesa)</label>
         <label class="chk"><input type="checkbox" id="tp-immortal"/> Heróis imortais (ficam com 1 PV)</label>
         <label class="chk"><input type="checkbox" id="tp-reveal"/> Revelar marcadores de Exploração</label>
         <label class="chk"><input type="checkbox" id="tp-grid"/> Coordenadas + Entradas de Monstro (G)</label>
@@ -1759,7 +1794,7 @@ export class Controller {
       this.hud.toast(on ? '🆓 Modo Livre ligado: jogue quantas vezes quiser' : 'Modo Livre desligado: regras normais', '#a983d8');
       this.refresh();
     };
-    $<HTMLInputElement>('tp-unlim').onchange = e => { this.game.s.unlimitedDice = (e.target as HTMLInputElement).checked || undefined; };
+    $<HTMLInputElement>('tp-cap').onchange = e => { this.game.s.diceCap = (e.target as HTMLInputElement).checked || undefined; };
     $<HTMLInputElement>('tp-immortal').onchange = e => { this.game.s.debug.heroesImmortal = (e.target as HTMLInputElement).checked; };
     $<HTMLInputElement>('tp-reveal').onchange = e => { this.game.s.debug.revealTokens = (e.target as HTMLInputElement).checked; };
     $<HTMLInputElement>('tp-grid').onchange = e => { this.renderer.showGrid = (e.target as HTMLInputElement).checked; };
@@ -1859,7 +1894,7 @@ export class Controller {
     (p.querySelector('#tp-atk') as HTMLSelectElement).value = g.s.debug.attackDice;
     (p.querySelector('#tp-def') as HTMLSelectElement).value = g.s.debug.defenseDice;
     (p.querySelector('#tp-immortal') as HTMLInputElement).checked = g.s.debug.heroesImmortal;
-    (p.querySelector('#tp-unlim') as HTMLInputElement).checked = !!g.s.unlimitedDice;
+    (p.querySelector('#tp-cap') as HTMLInputElement).checked = !!g.s.diceCap;
     (p.querySelector('#tp-free') as HTMLInputElement).checked = !!g.s.debug.freeMode;
     (p.querySelector('#tp-reveal') as HTMLInputElement).checked = g.s.debug.revealTokens;
     (p.querySelector('#tp-grid') as HTMLInputElement).checked = this.renderer.showGrid;

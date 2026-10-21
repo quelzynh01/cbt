@@ -45,6 +45,17 @@ export interface Upgrade {
   /** Cartas compradas ainda sem Herói. */
   bought: Partial<Record<GuildId, string[]>>;
   cursesDrawn: { guild: GuildId; hero: string; drawn: string[]; kept: string }[];
+  /** Tela das Maldições: quantos Heróis já viraram as cartas e quantas cartas do atual estão viradas. */
+  curseStep?: number;
+  curseFlipped?: number;
+  /** Já mostrou as Maldições (e o resumo). */
+  curseDone?: boolean;
+  /** Depois da compra: mostra o que cada Guilda comprou e descartou. */
+  buySummary?: boolean;
+  /** Registro das compras de cada Guilda (a lista `bought` esvazia quando as cartas entram nos Heróis). */
+  purchased?: Partial<Record<GuildId, string[]>>;
+  /** Cartas que a Guilda tirou do inventário para dar lugar às novas (IA). */
+  dropped?: Partial<Record<GuildId, string[]>>;
 }
 
 /** Preparação da campanha: escolha de Heróis em rodadas, votação do mapa e equipamento inicial. */
@@ -64,6 +75,8 @@ export interface CampaignState {
   setup?: Setup;
   /** Mapa escolhido na votação (1º cenário). */
   voted?: string;
+  /** Mapa já escolhido para o próximo cenário (fica salvo: sair e voltar não muda). */
+  next?: string;
   /** Tempo total jogado (ms). */
   elapsed?: number;
   guilds: CGuild[];
@@ -74,8 +87,8 @@ export interface CampaignState {
   seed: number;
   /** Dificuldade das Guildas da IA. */
   aiLevel?: AILevel;
-  /** Dados ilimitados (sem a opção, no máximo 8 dados de ataque e 6 de defesa por rolagem). */
-  unlimitedDice?: boolean;
+  /** Limite de dados (Configurações da partida): no máximo 8 dados de ataque e 6 de defesa por rolagem. Sem isso, ilimitado. */
+  diceCap?: boolean;
 }
 
 // ------------------------------------------------------------------ persistência
@@ -100,9 +113,9 @@ function shuffled<T>(c: CampaignState, a: T[]): T[] {
 }
 
 // ------------------------------------------------------------------ criação
-export function newCampaign(opponents: number, name?: string, aiLevel: AILevel = 'normal', unlimitedDice = false): CampaignState {
+export function newCampaign(opponents: number, name?: string, aiLevel: AILevel = 'normal', diceCap = false): CampaignState {
   const ids: GuildId[] = ['azul', 'vermelho', 'verde', 'laranja'];
-  const c: CampaignState = { version: 1, guilds: [], played: [], chooser: 'azul', phase: 'setup', seed: (Date.now() ^ (Math.random() * 1e9)) | 0, elapsed: 0, aiLevel, unlimitedDice };
+  const c: CampaignState = { version: 1, guilds: [], played: [], chooser: 'azul', phase: 'setup', seed: (Date.now() ^ (Math.random() * 1e9)) | 0, elapsed: 0, aiLevel, diceCap };
   for (let i = 0; i <= opponents; i++) c.guilds.push({ id: ids[i], controller: i === 0 ? 'human' : 'ai', heroes: [], inventory: {}, saved: 0, titles: [], curses: {}, ...(i === 0 && name?.trim() ? { name: name.trim().slice(0, 20) } : {}) });
   useCampaignNames(c);
   // Recrutamento de Heróis (p.7): cada jogador recebe uma mão, escolhe 1 e passa o resto para a esquerda.
@@ -201,7 +214,7 @@ export function gameOptions(c: CampaignState) {
   else order = shuffled(c, order);
   return {
     fixedOrder: true,
-    unlimitedDice: !!c.unlimitedDice,
+    diceCap: !!c.diceCap,
     level: scenarioLevel(c),
     titles: Object.fromEntries(c.guilds.map(g => [g.id, g.titles.slice()])),
     players: order.map(g => ({ guild: g.id, controller: g.controller, heroes: g.heroes, cards: g.inventory, curses: g.curses, name: g.name })),
@@ -219,7 +232,8 @@ export function recordResult(c: CampaignState, game: Game) {
     const deathsByHero = Object.fromEntries(heroes.map(h => [h.defId, h.deaths]));
     // cartas ao fim do cenário (inclui Recompensas ganhas)
     const before = Object.values(cg.inventory).flat();
-    cg.inventory = Object.fromEntries(heroes.map(h => [h.defId, h.cards.map(x => x.defId)]));
+    // a carta que ficou debaixo de uma Maldição volta para o inventário
+    cg.inventory = Object.fromEntries(heroes.map(h => [h.defId, [...h.cards, ...(h.covered ? [h.covered] : [])].map(x => x.defId)]));
     const after = Object.values(cg.inventory).flat();
     const reward = after.some(id => CARDS[id]?.level === 'R' && after.filter(x => x === id).length > before.filter(x => x === id).length);
     const newTitles = (s.titles?.[cg.id] ?? []).filter(t => !cg.titles.includes(t));
@@ -228,6 +242,7 @@ export function recordResult(c: CampaignState, game: Game) {
   }
   c.played.push(res);
   c.chooser = res.winner;
+  c.next = undefined;
   if (c.played.length >= 6) { c.phase = 'done'; return; }
   startUpgrade(c, res);
 }
@@ -237,16 +252,25 @@ function startUpgrade(c: CampaignState, res: ScenarioResult) {
   const level = Math.min(5, c.played.length);
   const up: Upgrade = { level, step: 'draft', round: 0, hands: {}, picked: {}, coins: {}, bought: {}, cursesDrawn: [] };
   // Maldições Mortais: devolve as antigas, cada Herói compra 1 por marcador de Morte e fica com a de maior valor
+  // (na ordem dos jogadores; as cartas que o Herói não ficou voltam para o baralho, que é embaralhado de novo)
   for (const g of c.guilds) g.curses = {};
   let deck = shuffled(c, curseDeck());
-  for (const rg of res.guilds) for (const [hero, deaths] of Object.entries(rg.deathsByHero)) {
+  const order = c.guilds.map(g => g.id);
+  const byOrder = res.guilds.slice().sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+  for (const rg of byOrder) for (const [hero, deaths] of Object.entries(rg.deathsByHero)) {
     if (!deaths) continue;
-    if (deck.length < deaths) deck = shuffled(c, curseDeck());
-    const drawn = deck.splice(0, deaths);
+    const drawn = deck.splice(0, Math.min(deaths, deck.length));
+    if (!drawn.length) continue;
     const kept = drawn.slice().sort((a, b) => CURSES[b].value - CURSES[a].value)[0];
     if (kept !== 'sem_maldicao') guildOf(c, rg.id).curses[hero] = kept;
     up.cursesDrawn.push({ guild: rg.id, hero, drawn, kept });
+    const back = drawn.slice();
+    back.splice(back.indexOf(kept), 1);
+    deck = shuffled(c, [...deck, ...back]);
   }
+  up.curseStep = 0;
+  up.curseFlipped = 0;
+  up.curseDone = !up.cursesDrawn.length;
   // moedas do cenário + moeda guardada
   for (const rg of res.guilds) up.coins[rg.id] = rg.coins;
   for (const g of c.guilds) g.saved = 0;
@@ -353,6 +377,7 @@ export function finishBuy(c: CampaignState, g: CGuild, ids: string[]) {
   const ok: string[] = [];
   for (const id of ids.slice(0, 3)) if (CARDS[id].cost <= coins) { ok.push(id); coins -= CARDS[id].cost; }
   up.bought[g.id] = ok;
+  (up.purchased ??= {})[g.id] = ok.slice();
   up.coins[g.id] = coins;
   g.saved = Math.min(1, coins);
 }
@@ -362,7 +387,9 @@ export function heroSlots(c: CampaignState, g: CGuild, hero: string, cards = g.i
   const curse = g.curses[hero] ? CURSES[g.curses[hero]] : null;
   const magicExtra = cards.reduce((s, id) => s + (CARDS[id]?.fx.magicSlots ?? 0), 0);
   const magic = cards.filter(id => CARDS[id]?.magic && CARDS[id]?.kind === 'attack').length;
-  const used = cards.length - Math.min(magic, magicExtra) + (curse?.slot ? 1 : 0);
+  // Maldição que ocupa espaço não tira carta: se o Herói tiver 4, a última fica debaixo dela no próximo cenário (p.24)
+  void curse;
+  const used = cards.length - Math.min(magic, magicExtra);
   return { used, max: 4, magicExtra };
 }
 
@@ -405,7 +432,7 @@ function aiArrange(c: CampaignState, g: CGuild) {
       const worst = inv[h].slice().sort((a, b) => cardValue(a) - cardValue(b))[0];
       if (worst && cardValue(worst) < cardValue(id)) {
         const next = inv[h].filter(x => x !== worst).concat(id);
-        if (validateInventory(c, g, { ...inv, [h]: next }).length === 0) { inv[h] = next; break; }
+        if (validateInventory(c, g, { ...inv, [h]: next }).length === 0) { inv[h] = next; ((up.dropped ??= {})[g.id] ??= []).push(worst); break; }
       }
     }
   }
@@ -413,6 +440,7 @@ function aiArrange(c: CampaignState, g: CGuild) {
   for (const h of g.heroes) while (inv[h].length && validateInventory(c, g, inv).some(e => e.startsWith(HEROES[h].name))) {
     const worst = inv[h].slice().sort((a, b) => cardValue(a) - cardValue(b))[0];
     inv[h] = inv[h].filter(x => x !== worst);
+    ((up.dropped ??= {})[g.id] ??= []).push(worst);
   }
   g.inventory = inv;
   up.bought[g.id] = [];
@@ -434,6 +462,15 @@ export function finishArrange(c: CampaignState, inv: Record<string, string[]>): 
 export function aiChoice(c: CampaignState): string | null {
   const av = availableScenarios(c);
   return av.length ? av[Math.floor(rnd(c) * av.length)] : null;
+}
+
+/** Mapa do próximo cenário, se já está decidido: votação (1º), escolha salva ou a escolha da IA (que fica salva). */
+export function nextScenario(c: CampaignState): string | null {
+  const av = availableScenarios(c);
+  if (c.next && av.includes(c.next)) return c.next;
+  if (!c.played.length && c.voted && av.includes(c.voted)) return (c.next = c.voted);
+  if (guildOf(c, c.chooser).controller === 'ai') { const p = aiChoice(c); if (p) c.next = p; return p; }
+  return null;
 }
 
 // ------------------------------------------------------------------ fim da campanha (p.29)

@@ -174,6 +174,8 @@ export class MenuPages {
         <p class="muted">Clique num <b>espaço vazio</b> ou numa <b>carta</b> para escolher qual carta vai nele (qualquer carta do jogo, ou trocar entre Heróis).</p>
         <div class="ts-btnrow"><button id="ts-gear">Equipamento inicial padrão</button><button id="ts-clear">Remover todas as cartas</button></div>
         ${invEditorHtml(invItems, invOpts)}</section>
+      <section class="ts-sec ts-wide"><h3>5. Configurações da partida</h3>
+        <label class="set-opt"><input type="checkbox" id="ts-cap" ${c.diceCap ? 'checked' : ''}/> <b>Limite de dados</b> — no máximo 8 dados de ataque e 6 de defesa por rolagem (contando críticos e rerrolagens), como os dados físicos da caixa. Sem marcar, os dados são ilimitados.</label></section>
       <div class="ts-go"><button class="primary" id="ts-start">▶ Começar teste</button></div>
     </div>`);
     this.page.scrollTop = y;
@@ -182,6 +184,7 @@ export class MenuPages {
     attachMapPeek(this.page);
     this.page.querySelectorAll<HTMLCanvasElement>('canvas[data-face]').forEach(cv => drawFace(cv, cv.dataset.face!, '#3a5a8a'));
     const save = () => { this.test = normalizeTestConfig(c); saveTestConfig(this.test); saveMapId(this.test.mapId); this.onMapChange(); this.showTestSetup(onStart); };
+    (this.page.querySelector('#ts-cap') as HTMLInputElement).onchange = e => { c.diceCap = (e.target as HTMLInputElement).checked; save(); };
     (this.page.querySelector('#ts-ai') as HTMLSelectElement).onchange = e => saveSettings({ ...getSettings(), ai: (e.target as HTMLSelectElement).value as 'normal' | 'hard' });
     (this.page.querySelector('#ts-map') as HTMLSelectElement).onchange = e => { c.mapId = (e.target as HTMLSelectElement).value; save(); };
     this.page.querySelectorAll<HTMLElement>('[data-n]').forEach(b => { b.onclick = () => {

@@ -47,7 +47,7 @@ export function invEditorHtml(items: InvItem[], o: InvOptions): string {
     return `<div class="inv-hero ${sl.used > sl.max ? 'over' : ''}" style="--gc:${o.color}">
       <div class="inv-hh"><canvas width="56" height="56" data-iface="${h}"></canvas><div><b>${HEROES[h].name}</b><small>${HEROES[h].title}</small></div>
         <span class="inv-count ${sl.used > sl.max ? 'bad' : ''}">${sl.used}/${sl.max}${sl.magicExtra ? ` +${sl.magicExtra}✨` : ''}</span></div>
-      ${curse ? `<div class="inv-curse">☠ ${esc(curse)} <small>(ocupa 1 espaço)</small></div>` : ''}
+      ${curse ? `<div class="inv-curse">☠ ${esc(curse)}</div>` : ''}
       <div class="inv-slots">${slots.join('')}</div></div>`;
   }).join('');
   const pool = items.map((x, i) => ({ ...x, i })).filter(x => x.to === 'pool');

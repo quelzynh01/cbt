@@ -24,8 +24,8 @@ export interface SeatInfo { guild: GuildId; ai: boolean }
 export interface OnlineSetup {
   /** Partida única ou campanha (6 cenários com Fase de Melhorias entre eles). */
   mode: 'single' | 'campaign';
-  /** Dados ilimitados (sem a opção, no máximo 8 dados de ataque e 6 de defesa por rolagem). */
-  unlimitedDice: boolean;
+  /** Limite de dados (Configurações da partida): no máximo 8 dados de ataque e 6 de defesa por rolagem. Sem isso, ilimitado. */
+  diceCap: boolean;
   step: 'draft' | 'vote' | 'equip' | 'done' | 'upgrade-draft' | 'upgrade-buy' | 'upgrade-arrange' | 'choose' | 'final';
   /** Campanha online (estado completo, como no modo campanha). */
   camp?: CampaignState;
@@ -59,13 +59,13 @@ function shuffle<T>(a: T[], rnd: () => number): T[] {
   return r;
 }
 
-export function newSetup(seats: SeatInfo[], aiLevel: AILevel, rnd: () => number = Math.random, mode: 'single' | 'campaign' = 'single', unlimitedDice = false): OnlineSetup {
+export function newSetup(seats: SeatInfo[], aiLevel: AILevel, rnd: () => number = Math.random, mode: 'single' | 'campaign' = 'single', diceCap = false): OnlineSetup {
   const order = seats.map(s => s.guild);
   const size = order.length <= 3 ? 4 : 3;
   const pool = shuffle(ALL_HEROES, rnd);
   const st: OnlineSetup = {
     step: 'draft', round: 0, order, hands: {}, choice: {}, picks: {}, votes: {}, equip: {}, tick: 0, aiLevel,
-    mode, unlimitedDice, upPick: {}, upBuy: {}, upArr: {},
+    mode, diceCap, upPick: {}, upBuy: {}, upArr: {},
   };
   for (const g of order) { st.hands[g] = pool.splice(0, size); st.choice[g] = null; st.picks[g] = []; }
   return st;
@@ -170,7 +170,7 @@ export function advance(st: OnlineSetup, seats: SeatInfo[], rnd: () => number = 
 export function startCampaign(st: OnlineSetup, seats: (SeatInfo & { team?: string })[]) {
   const c: CampaignState = {
     version: 1, guilds: [], played: [], chooser: st.order[0], phase: 'choose', seed: (Date.now() ^ (Math.random() * 1e9)) | 0,
-    elapsed: 0, aiLevel: st.aiLevel, unlimitedDice: st.unlimitedDice, voted: st.map,
+    elapsed: 0, aiLevel: st.aiLevel, diceCap: st.diceCap, voted: st.map,
   };
   for (const g of st.order) {
     const s = seats.find(x => x.guild === g);

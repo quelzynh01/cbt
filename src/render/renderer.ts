@@ -43,7 +43,8 @@ interface UnitView {
   alpha: number;
   fade: { from: number; to: number; t0: number; dur: number } | null;
   hurtT0: number;
-  lunge: { dx: number; dy: number; t0: number; dur: number } | null;
+  /** depth: profundidade do Espaço do alvo (durante a investida o boneco é desenhado na frente das portas/paredes do caminho). */
+  lunge: { dx: number; dy: number; t0: number; dur: number; depth?: number } | null;
   /** Fender: gira com a espada (golpe em volta). */
   spin?: { t0: number; dur: number } | null;
   flip: boolean;
@@ -487,7 +488,7 @@ export class Renderer {
           let dx = pt.x - pa.x, dy = pt.y - pa.y;
           const d = Math.hypot(dx, dy);
           if (d < 8) { dx = (pt.x < pa.x ? -1 : 1) * 26; dy = 0; } else { const k = Math.min(0.72, Math.max(0.35, (d - 34) / d)); dx *= k; dy *= k; }
-          a.lunge = { dx, dy, t0: now + 150 / sp, dur: 620 / sp };
+          a.lunge = { dx, dy, t0: now + 150 / sp, dur: 620 / sp, depth: Math.floor(t.pos.gx) + Math.floor(t.pos.gy) };
           setTimeout(() => play('atack-sword'), 330 / sp);
         } else {
           for (const tg of e.targets) {
@@ -1141,7 +1142,10 @@ export class Renderer {
     for (const u of this.units.values()) {
       if (!u.alive || !u.cell) continue;
       const cx = Math.floor(u.pos.gx), cy = Math.floor(u.pos.gy);
-      list.push({ d: K(cx + cy, 2, (u.pos.gx + u.pos.gy - cx - cy) / 2), draw: () => this.drawUnit(u, tt) });
+      // investida / giro do Fender: o boneco sai do próprio Espaço — fica na frente das portas e paredes até o alvo
+      const busy = (u.lunge && this.t < u.lunge.t0 + u.lunge.dur) || (u.spin && this.t < u.spin.t0 + u.spin.dur);
+      const depth = busy ? Math.max(cx + cy, u.lunge?.depth ?? 0) + 1 : cx + cy;
+      list.push({ d: busy ? K(depth, 3.5) : K(cx + cy, 2, (u.pos.gx + u.pos.gy - cx - cy) / 2), draw: () => this.drawUnit(u, tt) });
     }
 
     for (const lb of g.map.labels ?? []) {

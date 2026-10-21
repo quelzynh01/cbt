@@ -81,6 +81,8 @@ export interface Unit {
   hitBy?: GuildId[];
   /** Maldição Mortal (campanha). */
   curse?: string;
+  /** Carta de Melhoria debaixo de uma Maldição que ocupa espaço (p.24): indisponível até a Maldição sair (Poção de Cura). */
+  covered?: CardInst;
   /** Herói exaustado por uma carta (Escudos, Escudo das Almas): não pode ser ativado até a Guilda Descansar. */
   spent?: boolean;
 }
@@ -192,8 +194,8 @@ export interface GameState {
   blessing?: { heroId: string } | null;
   /** Guilda que já cumpriu as Missões para vencer: a partida termina quando este turno acabar. */
   winnerPending?: GuildId | null;
-  /** Dados ilimitados. Sem isso (padrão), no máximo 8 dados de ataque e 6 de defesa por rolagem (críticos e rerrolagens inclusos). */
-  unlimitedDice?: boolean;
+  /** Limite de dados: no máximo 8 dados de ataque e 6 de defesa por rolagem (críticos e rerrolagens inclusos). Sem isso (padrão), ilimitado. */
+  diceCap?: boolean;
   /** Posicionamento inicial: Guildas que ainda estão escolhendo onde seus Heróis começam. */
   deploying?: GuildId[] | null;
   /** Arena do Sol Brilhante: marcadores de Guilda colocados nos marcadores de Missão (chaves dos Espaços). */
@@ -261,7 +263,8 @@ export type GameEvent =
   | { t: 'spawn'; id: string; cell: Cell }
   | { t: 'cemetery'; id: string; count: number; full: boolean }
   | { t: 'spawnStart'; ids: string[] }
-  | { t: 'spawnRoll'; id: string; faces: DieFace[]; cell: Cell | null; reason: string }
+  /** target: a Entrada de Monstro que os dados indicaram (mesmo ocupada, para a câmera mostrar). */
+  | { t: 'spawnRoll'; id: string; faces: DieFace[]; cell: Cell | null; reason: string; target?: Cell }
   | { t: 'respawn'; id: string; cell: Cell }
   | { t: 'coins'; guild: GuildId; amount: number; reason: string }
   | { t: 'mission'; guild: GuildId; missionId: string; name: string; first: boolean }

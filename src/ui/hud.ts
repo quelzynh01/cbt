@@ -66,6 +66,12 @@ function touchHint(t: string): string {
     .replace(/Clique/g, 'Toque').replace(/clique/g, 'toque');
 }
 
+/** Arte da carta de Maldição Mortal (public/cards). */
+function curseArt(id: string): string {
+  const a = CARD_ART[`curse:${id}`];
+  return a ? `<img class="ac-img icon curse-img" src="${import.meta.env.BASE_URL}cards/${a.img}.webp" alt="" draggable="false"/>` : '<span class="ac-icon">💀</span>';
+}
+
 export class Hud {
   root: HTMLElement;
   game!: Game;
@@ -646,7 +652,8 @@ export class Hud {
     box.classList.remove('hidden');
   }
 
-  spawnRoll(e: Extract<GameEvent, { t: 'spawnRoll' }>, done: () => void) {
+  /** onLand: chamado quando os dados param (a câmera vai até a Entrada indicada). */
+  spawnRoll(e: Extract<GameEvent, { t: 'spawnRoll' }>, done: () => void, onLand?: () => void) {
     if (e.faces.length) play('dice', 0.6);
     const row = this.root.querySelector(`[data-sp="${e.id}"]`) as HTMLElement | null;
     const finish = () => {
@@ -669,7 +676,9 @@ export class Hud {
       res.className = `sp-res ${e.cell ? 'good' : 'bad'}`;
       res.textContent = e.cell ? `${e.reason} (${e.cell.c},${e.cell.r})` : e.reason;
       row.classList.remove('active');
-      window.setTimeout(finish, 450 / this.speed);
+      onLand?.();
+      // tempo para a câmera chegar e mostrar a Entrada antes do próximo Monstro
+      window.setTimeout(finish, (onLand ? 1000 : 450) / this.speed);
     }, 750 / this.speed);
   }
 
@@ -746,7 +755,9 @@ export class Hud {
     const mine = human && u.guild === cur.id;
     const max = g.maxHp(u);
     const cards: (CardInst | null)[] = [...u.cards];
-    while (cards.length < g.slotCount(u)) cards.push(null);
+    // Maldição que ocupa espaço: aparece como uma carta no inventário (com a carta que ficou debaixo dela)
+    const curseSlot = u.curse && CURSES[u.curse]?.slot ? 1 : 0;
+    while (cards.length < g.slotCount(u) - curseSlot) cards.push(null);
     const usableIds = isActive && !act!.attacked ? new Set(g.usableCards(u).map(c => c.uid)) : new Set<string>();
     if (isActive && this.selectedCard && !usableIds.has(this.selectedCard)) this.selectedCard = null;
     if (isActive && !this.selectedCard && usableIds.size) this.selectedCard = [...usableIds][0];
@@ -766,12 +777,13 @@ export class Hud {
         ${isActive ? `<span title="Ataque">${act!.attacked ? '⚔ usado' : '⚔ disponível'}</span>` : ''}
       </div>
       <div class="ability ${u.curse === 'amnesia' ? 'off' : ''}"><b>${hd.abilityName}</b> — ${hd.abilityText}</div>
-      ${u.curse ? `<div class="tag dead" title="${CURSES[u.curse]?.text ?? ''}">☠ Maldição: ${CURSES[u.curse]?.name} — ${CURSES[u.curse]?.text}</div>` : ''}
+      ${u.curse ? `<div class="tag dead hb-curse" title="${CURSES[u.curse]?.text ?? ''}">${curseArt(u.curse)}<span>☠ Maldição: <b>${CURSES[u.curse]?.name}</b> — ${CURSES[u.curse]?.text}</span></div>` : ''}
       ${g.rerollsOf(u) ? `<div class="tag rr">↻ Rerrolagem ${g.rerollsOf(u)} ${getSettings().reroll === 'auto' ? '(automática nos dados que falharem)' : '(você escolhe os dados após cada rolagem)'}</div>` : ''}
       ${u.stunned ? '<div class="tag stun">✷ Atordoado — não rola Defesa até Descansar</div>' : ''}
       ${!u.alive ? '<div class="tag dead">☠ Morto — ressuscita quando a Guilda Descansar</div>' : ''}
       ${u.spent ? '<div class="tag stun">💤 Exausto por uma carta — não pode ser ativado até a Guilda Descansar</div>' : ''}
-      <div class="cards">${cards.map(c => this.cardHtml(c, u, usableIds, mine || (human && this.isMine(u.guild!)))).join('')}</div>
+      <div class="cards">${cards.map(c => this.cardHtml(c, u, usableIds, mine || (human && this.isMine(u.guild!)))).join('')}${curseSlot ? `<div class="card mini curse-slot" title="${CURSES[u.curse!].name}: ${CURSES[u.curse!].text}${u.covered ? ` Debaixo dela: ${CARDS[u.covered.defId].name} (indisponível até uma Poção de Cura).` : ''}">
+        <div class="cname">☠ ${CURSES[u.curse!].name}</div><div class="cart">${curseArt(u.curse!)}</div>${u.covered ? `<div class="ccov">cobre: ${CARDS[u.covered.defId].name}</div>` : '<div class="ccov">Maldição</div>'}</div>` : ''}</div>
       <div class="tokrow"><button class="tok-bag" id="hb-bag2" title="Abrir a bolsa">🎒</button>${u.tokens.length ? `${sortTokens(u.tokens).slice(0, 3).map(t => `<img class="tok-mini" src="${tokenUrl(tokenImageId(t) ?? 'fundo')}" title="${tokenName(t)}"/>`).join('')}${u.tokens.length > 3 ? `<span class="tok-more">+${u.tokens.length - 3}</span>` : ''}` : '<span class="muted">Bolsa vazia</span>'}</div>
       ${actions}`;
     if (this.inspected) $('#hb-close', box).onclick = () => this.actions.inspect(null);
