@@ -8,7 +8,7 @@ import {
   validateInventory, victoryRank,
 } from '../campaign/campaign';
 import { CARDS, CURSES } from '../engine/cards';
-import { GUILDS, HEROES } from '../engine/data';
+import { GUILDS, HEROES, HERO_SETS, heroSetName, starterCards, type HeroSet } from '../engine/data';
 import { MAPS, campaignList, difficultyBadge, type Edition } from '../engine/maps';
 import { TITLES, TITLE_TEXT } from '../engine/titles';
 import { drawFace } from '../render/chibi';
@@ -72,7 +72,7 @@ export class CampaignUI {
   /** Entrada: continua a campanha salva ou mostra a criação. */
   open() {
     this.c = loadCampaign();
-    if (!this.c) return this.editions();
+    if (!this.c) return this.setup();
     useCampaignNames(this.c);
     if (this.c.phase === 'setup') return this.setupFlow();
     if (this.c.phase === 'upgrade') return this.upgrade();
@@ -81,19 +81,6 @@ export class CampaignUI {
   }
 
   // ---------------------------------------------------------------- criação
-  /** Escolha da edição da campanha: Clássica e Beyond the Grave (Inferno em breve). */
-  private edition: Edition = 'classic';
-  private editions() {
-    const eds = [
-      { id: 'classic', name: 'CBT', sub: 'Clássico', icon: '⚔️', text: 'A campanha original: 11 cenários pela cidade de Arcadia, do Círculo Exterior ao Templo do Amanhecer Crepuscular.', ok: true },
-      { id: 'btg', name: 'CBT Beyond the Grave', sub: 'Além do Túmulo', icon: '💀', text: 'O Rei Pavoroso se ergueu! 9 cenários novos, mortos-vivos, cartas de Lápide, Fantasmas que atravessam paredes e os Heróis Chaz e Darryn.', ok: true },
-      { id: 'inferno', name: 'CBT Inferno', sub: 'Em breve', icon: '🔥', text: 'Nova campanha com novos cenários. Em desenvolvimento.', ok: false },
-    ];
-    this.show('Nova Campanha', `<div class="ed-list">${eds.map(e => `<button class="ed-card ed-${e.id} ${e.ok ? '' : 'soon'}" data-ed="${e.id}" ${e.ok ? '' : 'disabled'}>
-        <span class="ed-icon">${e.icon}</span><b>${e.name}</b><span class="ed-sub">${e.ok ? e.sub : '🔒 Em breve'}</span><small>${e.text}</small></button>`).join('')}</div>`);
-    this.page.querySelectorAll<HTMLElement>('[data-ed="classic"], [data-ed="btg"]').forEach(b => { b.onclick = () => { this.edition = b.dataset.ed as Edition; this.setup(); }; });
-  }
-
   private setup() {
     this.show('Nova Campanha', `
       <div class="cp-box">
@@ -106,18 +93,18 @@ export class CampaignUI {
         </ol>
         <p>Entre os cenários: <b>Maldições Mortais</b>, <b>Fase de Melhorias</b> e <b>Títulos</b>. O vencedor de cada cenário escolhe o próximo.</p>
         <label class="lb-field">Nome da sua Guilda <input id="cp-name" maxlength="20" placeholder="Azul (opcional)"/></label>
-        <label class="lb-field">Dificuldade da IA <select id="cp-ai"><option value="normal">Normal</option><option value="hard" ${getSettings().ai === 'hard' ? 'selected' : ''}>Difícil</option></select></label>
         <div class="cp-cfgrow"><span class="lb-sum" id="cp-cfgsum"></span><button id="cp-cfg">⚙️ Configurações da partida</button></div>
-        <label class="lb-field">Adversários (IA) <select id="cp-opp"><option value="1">1</option><option value="2">2</option><option value="3" selected>3</option></select></label>
         <button class="primary cp-big" id="cp-start">🏰 Começar campanha</button>
       </div>`);
     const cfg = this.cfg;
-    const sum = () => { (this.page.querySelector('#cp-cfgsum') as HTMLElement).textContent = [cfg.diceCap ? 'Limite de dados' : 'Dados ilimitados', cfg.pickOne ? 'Pegar 1 carta' : 'Pegar 2 cartas', cfg.allHeroes ? 'Todos os Heróis' : 'Apenas Core Heroes'].join(' · '); };
+    const sum = () => {
+      (this.page.querySelector('#cp-cfgsum') as HTMLElement).textContent = [cfg.edition === 'btg' ? '💀 CBT Beyond the Grave' : '⚔️ CBT Clássico', heroSetName(cfg.heroSet),
+        `IA ${cfg.ai === 'hard' ? 'Difícil' : 'Normal'}`, `${cfg.opp} adversário${cfg.opp > 1 ? 's' : ''}`, cfg.diceCap ? 'Limite de dados' : 'Dados ilimitados', cfg.pickOne ? 'Pegar 1 carta' : 'Pegar 2 cartas'].join(' · ');
+    };
     sum();
     (this.page.querySelector('#cp-cfg') as HTMLElement).onclick = () => this.matchSettings(sum);
     (this.page.querySelector('#cp-start') as HTMLElement).onclick = () => {
-      const n = Number((this.page.querySelector('#cp-opp') as HTMLSelectElement).value);
-      this.c = newCampaign(n, (this.page.querySelector('#cp-name') as HTMLInputElement).value, (this.page.querySelector('#cp-ai') as HTMLSelectElement).value as 'normal' | 'hard', cfg.diceCap, cfg.pickOne, cfg.allHeroes, this.edition);
+      this.c = newCampaign(cfg.opp, (this.page.querySelector('#cp-name') as HTMLInputElement).value, cfg.ai, cfg.diceCap, cfg.pickOne, cfg.heroSet, cfg.edition);
       this.c.chooser = human(this.c).id;
       this.save();
       this.setupFlow();
@@ -125,7 +112,8 @@ export class CampaignUI {
   }
 
   /** Configurações da partida da nova campanha (padrão: Limite de dados, Pegar 1 carta e Apenas Core Heroes). */
-  private cfg = { diceCap: true, pickOne: true, allHeroes: false };
+  private cfg: { edition: Edition; heroSet: HeroSet; ai: 'normal' | 'hard'; opp: number; diceCap: boolean; pickOne: boolean } =
+    { edition: 'classic', heroSet: 'core', ai: getSettings().ai === 'hard' ? 'hard' : 'normal', opp: 3, diceCap: true, pickOne: true };
 
   /** Janela "Configurações da partida" (igual à da sala online). */
   private matchSettings(done: () => void) {
@@ -135,12 +123,23 @@ export class CampaignUI {
     const cfg = this.cfg;
     el.innerHTML = `<div class="mc-cfg">
         <div class="gd-title">⚙️ Configurações da partida</div>
-        <label class="mcf-row">Heróis <select id="mc-heroes"><option value="core">⭐ Apenas Core Heroes</option><option value="all" ${cfg.allHeroes ? 'selected' : ''}>🌟 Permitir Todos os Heróis</option></select></label>
+        <label class="mcf-row">Campanha <select id="mc-ed"><option value="classic">⚔️ CBT Clássico</option><option value="btg" ${cfg.edition === 'btg' ? 'selected' : ''}>💀 CBT Beyond the Grave</option></select></label>
+        <label class="mcf-row">Heróis <select id="mc-heroes">${HERO_SETS.map(([v, n]) => `<option value="${v}" ${cfg.heroSet === v ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+        <label class="mcf-row">Dificuldade da IA <select id="mc-ai"><option value="normal">Normal</option><option value="hard" ${cfg.ai === 'hard' ? 'selected' : ''}>Difícil</option></select></label>
+        <label class="mcf-row">Adversários (IA) <select id="mc-opp">${[1, 2, 3].map(n => `<option value="${n}" ${cfg.opp === n ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
         <label class="set-opt"><input type="checkbox" id="mc-cap" ${cfg.diceCap ? 'checked' : ''}/> <b>Limite de dados</b> — no máximo 8 dados de ataque e 6 de defesa por rolagem (contando críticos e rerrolagens), como os dados físicos da caixa. Sem marcar, ilimitado.</label>
         <label class="set-opt"><input type="checkbox" id="mc-one" ${cfg.pickOne ? 'checked' : ''}/> <b>Pegar 1 carta</b> — na Fase de Melhorias cada um pega <b>1 carta</b> e passa o resto (6 rodadas), em vez de 2 cartas (3 rodadas).</label>
         <div class="gd-btns"><button class="primary" id="mc-ok">✔ Pronto</button></div>
       </div>`;
-    (el.querySelector('#mc-heroes') as HTMLSelectElement).onchange = e => { cfg.allHeroes = (e.target as HTMLSelectElement).value === 'all'; };
+    const heroes = el.querySelector('#mc-heroes') as HTMLSelectElement;
+    heroes.onchange = () => { cfg.heroSet = heroes.value as HeroSet; };
+    // Beyond the Grave: Chaz e Darryn entram junto (dá para mudar em Heróis)
+    (el.querySelector('#mc-ed') as HTMLSelectElement).onchange = e => {
+      cfg.edition = (e.target as HTMLSelectElement).value as Edition;
+      if (cfg.heroSet !== 'all') heroes.value = cfg.heroSet = cfg.edition === 'btg' ? 'btg' : 'core';
+    };
+    (el.querySelector('#mc-ai') as HTMLSelectElement).onchange = e => { cfg.ai = (e.target as HTMLSelectElement).value as 'normal' | 'hard'; };
+    (el.querySelector('#mc-opp') as HTMLSelectElement).onchange = e => { cfg.opp = Number((e.target as HTMLSelectElement).value); };
     (el.querySelector('#mc-cap') as HTMLInputElement).onchange = e => { cfg.diceCap = (e.target as HTMLInputElement).checked; };
     (el.querySelector('#mc-one') as HTMLInputElement).onchange = e => { cfg.pickOne = (e.target as HTMLInputElement).checked; };
     const close = () => { el.remove(); done(); };
@@ -208,15 +207,19 @@ export class CampaignUI {
     // equipamento inicial: os espaços de cada Herói; clique num espaço ou numa carta para escolher
     if (!this.equipItems) {
       const order = me.heroes.slice();
-      this.equipItems = STARTER_CARDS.map((cid, i) => ({ id: cid, to: order[i % order.length] }));
+      // Beyond the Grave: a Foice chega sem Herói; equipe 5 das 6 cartas e descarte 1
+      this.equipItems = starterCards(c.edition).map((cid, i) => ({ id: cid, to: cid === 'foice' ? 'pool' : order[i % order.length] }));
     }
     const items = this.equipItems;
     const inv = Object.fromEntries(me.heroes.map(h => [h, items.filter(x => x.to === h).map(x => x.id)]));
     const errs = [...validateInventory(c, me, inv), ...poolErrors(items, false)];
-    const opts: InvOptions = { heroes: me.heroes, color: GUILDS[me.id].color, discard: false, slots: (h, cards) => heroSlots(c, me, h, cards), curse: h => curseLabel(me.curses[h]) };
+    const btg = c.edition === 'btg';
+    if (btg && items.filter(x => x.to === 'descartar').length !== 1 && !errs.length) errs.push('Descarte 1 das 6 cartas iniciais.');
+    const opts: InvOptions = { heroes: me.heroes, color: GUILDS[me.id].color, discard: btg, slots: (h, cards) => heroSlots(c, me, h, cards), curse: h => curseLabel(me.curses[h]) };
     this.show('Campanha · Equipamento inicial', `
       <div class="cp-step"><h3>Equipe seus Heróis</h3>
       <p>Clique num <b>espaço vazio</b> ou numa <b>carta</b> para escolher qual carta vai nele (trocar entre Heróis também). Mapa: <b>${MAPS[st.map!].name}</b>.</p>
+      ${btg ? '<p class="lb-note">💀 <b>Beyond the Grave:</b> além das 5 cartas iniciais você recebe a <b>Foice</b>, mas a Guilda fica só com 5 — equipe 5 e <b>descarte 1</b>.</p>' : ''}
       ${invEditorHtml(items, opts)}
       ${errs.length ? `<div class="lb-warn">${errs.join('<br/>')}</div>` : ''}
       <button class="primary cp-big" id="cp-ok" ${errs.length ? 'disabled' : ''}>Equipar e ir para o mapa ▶</button></div>`);
@@ -307,7 +310,7 @@ export class CampaignUI {
     (this.page.querySelector('#cp-org') as HTMLElement).onclick = () => this.organize();
     (this.page.querySelector('#cp-reset') as HTMLElement).onclick = async () => {
       if (!await gameConfirm({ icon: '🏳️', title: 'Abandonar a campanha?', body: 'Todo o progresso da campanha atual (Heróis, cartas, moedas e cenários jogados) será perdido.', yes: 'Abandonar', no: 'Voltar', danger: true })) return;
-      this.c = null; this.save(); this.editions();
+      this.c = null; this.save(); this.setup();
     };
     attachMapPeek(this.page);
   }
@@ -500,7 +503,7 @@ export class CampaignUI {
         <p>Medalhas: ${c.guilds.map(g => `${guildName(g.id)} ${count(g.id)}`).join(' · ')}</p>
         <button class="primary cp-big" id="cp-new">Nova campanha</button>
       </div>`);
-    (this.page.querySelector('#cp-new') as HTMLElement).onclick = () => { this.c = null; this.save(); this.editions(); };
+    (this.page.querySelector('#cp-new') as HTMLElement).onclick = () => { this.c = null; this.save(); this.setup(); };
   }
 
   /** Chamado ao terminar um cenário da campanha. */

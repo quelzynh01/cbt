@@ -5,6 +5,8 @@ import './cards.css';
 import './polish.css';
 import './mobile.css';
 import { Controller } from './ui/controller';
+import { installCardZoom } from './ui/cardview';
+installCardZoom();
 import { DEFAULT_CURSOR, POINTER_CURSOR } from './render/cursors';
 
 // cursores do jogo em toda a interface

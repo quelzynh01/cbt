@@ -140,11 +140,15 @@ for (const x of EXTRA_HEROES) {
   };
 }
 export const EXTRA_HERO_IDS = EXTRA_HEROES.map(x => `x_${x.id}`);
-/** Heróis que podem ser recrutados (Configurações da partida: só os Core ou todos).
- *  Na campanha Beyond the Grave, Chaz e Darryn entram junto com os Core. */
-export function heroPool(allHeroes = false, edition: string = 'classic'): string[] {
-  const core = edition === 'btg' ? [...ALL_HEROES, ...BTG_HEROES] : ALL_HEROES.slice();
-  return allHeroes ? [...ALL_HEROES, ...BTG_HEROES, ...EXTRA_HERO_IDS] : core;
+/** Heróis do recrutamento (Configurações da partida): Apenas Core, Core + Beyond the Grave ou Todos. */
+export type HeroSet = 'core' | 'btg' | 'all';
+export const HERO_SETS: [HeroSet, string][] = [['core', '⭐ Apenas Core Heroes'], ['btg', '💀 Core + Beyond the Grave'], ['all', '🌟 Permitir Todos os Heróis']];
+export const heroSetName = (s: HeroSet) => ({ core: 'Apenas Core Heroes', btg: 'Core + Beyond the Grave', all: 'Todos os Heróis' })[s];
+/** Conjunto salvo (aceita o antigo "Permitir Todos os Heróis"). */
+export const heroSetOf = (o: { heroSet?: HeroSet; allHeroes?: boolean }): HeroSet => o.heroSet ?? (o.allHeroes ? 'all' : 'core');
+export function heroPool(set: HeroSet | boolean = 'core'): string[] {
+  const s = set === true ? 'all' : set === false ? 'core' : set;
+  return s === 'all' ? [...ALL_HEROES, ...BTG_HEROES, ...EXTRA_HERO_IDS] : s === 'btg' ? [...ALL_HEROES, ...BTG_HEROES] : ALL_HEROES.slice();
 }
 // rating de cada Herói (ref/wiki/rating-heroes.csv)
 for (const [id, r] of Object.entries(HERO_RATING)) if (HEROES[id]) HEROES[id].rating = r;
@@ -172,8 +176,27 @@ export const STARTING_GEAR: Record<string, string[]> = {
 };
 
 /** Distribui as 5 cartas do baralho Inicial entre os 3 Heróis da Guilda (cada carta uma única vez). */
-export function distributeStartingGear(heroes: string[]): Record<string, string[]> {
-  const deck = ['espada_enferrujada', 'adaga_aparadora', 'estilingue', 'drenar_vida', 'raio_nova'];
+/** Cartas iniciais: as 5 da caixa; em Beyond the Grave também a Foice (a Guilda fica com 5 e descarta 1). */
+export const STARTER_DECK = ['espada_enferrujada', 'adaga_aparadora', 'estilingue', 'drenar_vida', 'raio_nova'];
+export function starterCards(edition?: string): string[] { return edition === 'btg' ? [...STARTER_DECK, 'foice'] : STARTER_DECK.slice(); }
+/** Erro da escolha das cartas iniciais (todas as 5; em Beyond the Grave, 5 das 6), ou null. */
+export function starterError(cards: string[], edition?: string): string | null {
+  const pool = starterCards(edition);
+  const left = pool.slice();
+  for (const c of cards) { const i = left.indexOf(c); if (i < 0) return 'Carta inicial inválida.'; left.splice(i, 1); }
+  if (cards.length !== 5) return edition === 'btg' ? 'Equipe 5 das 6 cartas iniciais e descarte 1.' : 'Distribua as 5 cartas iniciais.';
+  return null;
+}
+/** Beyond the Grave (IA): a carta inicial descartada — a que nenhum Herói prefere (a Espada Enferrujada, se der). */
+function starterDiscard(heroes: string[]): string {
+  const wanted = new Set(heroes.flatMap(h => STARTING_GEAR[h] ?? []));
+  return ['espada_enferrujada', 'adaga_aparadora', 'estilingue', 'raio_nova', 'drenar_vida'].find(c => !wanted.has(c)) ?? 'espada_enferrujada';
+}
+
+export function distributeStartingGear(heroes: string[], edition?: string): Record<string, string[]> {
+  const all = starterCards(edition);
+  if (edition === 'btg') all.splice(all.indexOf(starterDiscard(heroes)), 1);
+  const deck = all;
   const out: Record<string, string[]> = Object.fromEntries(heroes.map(h => [h, []]));
   const left: string[] = [];
   for (const card of deck) {
@@ -245,7 +268,7 @@ Object.assign(MON_BASE, {
     abilityText: 'Marcador de Missão: ataque-o como um personagem; se o ataque rolar algum ✷, ele é destruído. Não reage nem ocupa o Espaço.',
     levels: { '': [99, 0, 0, 0, 0, 0, 0], '2': [99, 0, 0, 0, 0, 0, 0], '4': [99, 0, 0, 0, 0, 0, 0], '6': [99, 0, 0, 0, 0, 0, 0] } },
   rei_pavoroso: { name: 'Rei Pavoroso', abbr: 'RP', category: 'Vilão Maior', attackType: 'melee', attackName: 'Lâmina do Além', abilities: ['huge', 'shove', 'banish'],
-    abilityText: 'Enorme: ocupa o Espaço inteiro (bloqueia Inimigos e a Linha de Visão). Empurrão: entra em Espaços ocupados e põe quem está lá num Espaço Perto. Banimento: se causar Ferimento, o alvo vai para o Tabuleiro de Entrada.',
+    abilityText: 'Enorme: ocupa o Espaço inteiro (bloqueia Inimigos e Linha de Visão). Empurrão: entra em Espaços ocupados e empurra quem está lá. Banimento: quem ele ferir vai para o Tabuleiro de Entrada.',
     levels: { '': [7, 8, 2, 4, 2, 0, 5], '2': [9, 9, 2, 4, 2, 0, 5], '4': [11, 0, 3, 4, 2, 0, 6], '6': [14, 0, 3, 4, 2, 0, 6] } },
 } satisfies Record<string, MonBase>);
 const LEVEL_LABEL: Record<string, string> = { '': '1', '2': '2-3', '4': '4-5', '6': '6' };

@@ -16,7 +16,23 @@ export const QUARTEL_ASSOMBRADO: MapDef = {
   cols: 9, rows: 6,
   boards: [{ code: '2A', c: 0, r: 0 }, { code: '3A', c: 3, r: 0 }, { code: '10B', c: 6, r: 0 }, { code: '6A', c: 0, r: 3 }, { code: '1A', c: 3, r: 3 }, { code: '12A', c: 6, r: 3 }],
   pillars: [], rooms: [],
-  walls: [[C(3, 1), C(3, 2)], [C(3, 3), C(3, 4)], [C(5, 1), C(5, 2)], [C(5, 3), C(5, 4)]],
+  // paredes revisadas pelas bordas de pedra do mapa do livro: salas das Áreas Iniciais fechadas dos lados,
+  // salas dos cantos (marcador de Missão) só pelo portal, salas desbotadas fechadas
+  walls: [
+    // em cima
+    ...[1, 2, 3, 4, 5, 6, 7, 8].map(c => [C(c, 0), C(c, 1)] as [Cell, Cell]),
+    [C(2, 0), C(3, 0)], [C(5, 0), C(6, 0)], [C(7, 0), C(8, 0)],
+    [C(0, 1), C(1, 1)], [C(0, 2), C(1, 2)], [C(0, 2), C(0, 3)],
+    [C(7, 1), C(8, 1)], [C(8, 1), C(8, 2)],
+    // embaixo (espelhado)
+    ...[1, 2, 3, 4, 5, 6, 7, 8].map(c => [C(c, 4), C(c, 5)] as [Cell, Cell]),
+    [C(2, 5), C(3, 5)], [C(5, 5), C(6, 5)], [C(7, 5), C(8, 5)],
+    [C(0, 3), C(0, 4)], [C(0, 4), C(1, 4)], [C(0, 5), C(1, 5)],
+    [C(7, 4), C(8, 4)], [C(8, 3), C(8, 4)],
+    // salas das Áreas Iniciais (portas em cima e embaixo)
+    [C(1, 2), C(2, 2)], [C(1, 3), C(2, 3)], [C(3, 2), C(4, 2)], [C(3, 3), C(4, 3)], [C(3, 1), C(3, 2)], [C(3, 3), C(3, 4)],
+    [C(4, 2), C(5, 2)], [C(4, 3), C(5, 3)], [C(5, 1), C(5, 2)], [C(5, 3), C(5, 4)],
+  ],
   doors: [
     { a: C(2, 1), b: C(2, 2), open: false }, { a: C(6, 1), b: C(6, 2), open: false },
     { a: C(2, 3), b: C(2, 4), open: false }, { a: C(6, 3), b: C(6, 4), open: false },
@@ -49,11 +65,21 @@ export const ABATEDOURO: MapDef = {
   cols: 6, rows: 12,
   boards: [{ code: '12B', c: 0, r: 0 }, { code: '6A', c: 0, r: 3 }, { code: '9B', c: 3, r: 3 }, { code: '8A', c: 0, r: 6 }, { code: '2B', c: 3, r: 6 }, { code: '11B', c: 0, r: 9 }],
   pillars: [], rooms: [C(3, 6), C(4, 6), C(5, 6)],
-  walls: [[C(1, 2), C(2, 2)], [C(1, 9), C(2, 9)], [C(3, 3), C(3, 4)], [C(5, 3), C(5, 4)], [C(3, 7), C(3, 8)], [C(5, 7), C(5, 8)], [C(3, 5), C(3, 6)], [C(5, 5), C(5, 6)]],
+  // paredes revisadas pelas bordas de pedra do mapa do livro (metade de baixo = espelho da de cima)
+  walls: [
+    [C(0, 1), C(0, 2)], [C(0, 2), C(1, 2)], [C(0, 2), C(0, 3)], [C(2, 0), C(2, 1)], [C(2, 2), C(2, 3)], [C(1, 2), C(2, 2)], [C(1, 2), C(1, 3)],
+    [C(0, 3), C(0, 4)], [C(0, 4), C(1, 4)], [C(1, 4), C(2, 4)], [C(2, 4), C(2, 5)],
+    [C(2, 3), C(3, 3)], [C(4, 3), C(5, 3)], [C(3, 3), C(3, 4)], [C(5, 3), C(5, 4)], [C(3, 4), C(3, 5)], [C(4, 4), C(4, 5)], [C(5, 4), C(5, 5)], [C(2, 5), C(3, 5)],
+    // sala do Ivan: só pela porta de cima
+    [C(3, 5), C(3, 6)], [C(5, 5), C(5, 6)], [C(2, 6), C(3, 6)], [C(3, 6), C(3, 7)], [C(4, 6), C(4, 7)], [C(5, 6), C(5, 7)],
+    [C(0, 8), C(0, 9)], [C(0, 9), C(1, 9)], [C(0, 9), C(0, 10)], [C(2, 10), C(2, 11)], [C(2, 8), C(2, 9)], [C(1, 9), C(2, 9)], [C(1, 8), C(1, 9)],
+    [C(0, 7), C(0, 8)], [C(0, 7), C(1, 7)], [C(1, 7), C(2, 7)], [C(2, 6), C(2, 7)],
+    [C(2, 8), C(3, 8)], [C(3, 7), C(3, 8)], [C(5, 7), C(5, 8)],
+  ],
   doors: [
     { a: C(1, 1), b: C(2, 1), open: false }, { a: C(1, 10), b: C(2, 10), open: false }, { a: C(1, 4), b: C(1, 5), open: false },
-    { a: C(1, 6), b: C(1, 7), open: false }, { a: C(2, 6), b: C(2, 7), open: false }, { a: C(4, 5), b: C(4, 6), open: false },
-    { a: C(4, 7), b: C(4, 8), open: false }, { a: C(4, 3), b: C(4, 4), open: false }, { a: C(2, 7), b: C(2, 8), open: false },
+    { a: C(1, 6), b: C(1, 7), open: false }, { a: C(4, 5), b: C(4, 6), open: false },
+    { a: C(4, 7), b: C(4, 8), open: false }, { a: C(4, 3), b: C(4, 4), open: false }, { a: C(2, 7), b: C(2, 8), open: false }, { a: C(2, 3), b: C(2, 4), open: false },
     { a: C(1, 3), b: C(2, 3), open: false, small: true }, { a: C(1, 8), b: C(2, 8), open: false, small: true },
     { a: C(0, 5), b: C(0, 6), open: true }, { a: C(1, 5), b: C(1, 6), open: true },
   ],
@@ -85,11 +111,22 @@ export const CRIPTAS: MapDef = {
   cols: 9, rows: 9,
   boards: [{ code: '12B', c: 0, r: 0 }, { code: '7B', c: 3, r: 0 }, { code: '11B', c: 6, r: 0 }, { code: '2B', c: 0, r: 3 }, { code: '10A', c: 3, r: 3 }, { code: '9B', c: 6, r: 3 }, { code: '4B', c: 0, r: 6 }, { code: '5B', c: 6, r: 6 }],
   pillars: [], rooms: [C(2, 3), C(2, 5), C(6, 3), C(6, 5)],
+  // paredes revisadas pelas bordas de pedra do mapa do livro
   walls: [
     [C(1, 0), C(1, 1)], [C(2, 0), C(2, 1)], [C(2, 0), C(3, 0)], [C(6, 0), C(6, 1)], [C(7, 0), C(7, 1)], [C(5, 0), C(6, 0)],
     [C(0, 4), C(1, 4)], [C(0, 5), C(1, 5)], [C(0, 5), C(0, 6)], [C(0, 2), C(0, 3)],
-    [C(7, 4), C(8, 4)], [C(7, 5), C(8, 5)], [C(8, 5), C(8, 6)], [C(8, 2), C(8, 3)],
-    [C(3, 2), C(4, 2)], [C(4, 2), C(5, 2)],
+    [C(7, 4), C(8, 4)], [C(8, 4), C(8, 5)], [C(8, 5), C(8, 6)], [C(8, 2), C(8, 3)],
+    // cripta dos Fantasmas (4,1)-(4,2): fechada
+    [C(3, 2), C(4, 2)], [C(4, 2), C(5, 2)], [C(3, 1), C(4, 1)], [C(4, 1), C(5, 1)], [C(4, 0), C(4, 1)],
+    // salas "!" e vizinhas (esquerda)
+    [C(1, 2), C(2, 2)], [C(1, 3), C(2, 3)], [C(2, 3), C(3, 3)], [C(2, 2), C(2, 3)], [C(1, 4), C(2, 4)], [C(1, 3), C(1, 4)], [C(1, 4), C(1, 5)],
+    [C(1, 5), C(2, 5)], [C(2, 5), C(3, 5)], [C(2, 5), C(2, 6)],
+    // (direita)
+    [C(6, 2), C(7, 2)], [C(5, 3), C(6, 3)], [C(6, 3), C(7, 3)], [C(6, 2), C(6, 3)], [C(6, 4), C(7, 4)],
+    [C(5, 5), C(6, 5)], [C(6, 5), C(7, 5)], [C(6, 5), C(6, 6)],
+    // embaixo: Necromantes só pelos portais magenta; cantos desbotados fechados
+    [C(1, 5), C(1, 6)], [C(1, 6), C(2, 6)], [C(1, 6), C(1, 7)], [C(0, 6), C(1, 6)], [C(2, 6), C(2, 7)], [C(0, 7), C(0, 8)], [C(0, 8), C(1, 8)], [C(2, 7), C(2, 8)], [C(1, 8), C(2, 8)],
+    [C(6, 6), C(7, 6)], [C(6, 6), C(6, 7)], [C(7, 5), C(7, 6)], [C(7, 6), C(7, 7)], [C(7, 6), C(8, 6)], [C(8, 6), C(8, 7)], [C(6, 7), C(7, 7)], [C(7, 8), C(8, 8)], [C(6, 8), C(7, 8)],
   ],
   doors: [
     { a: C(0, 0), b: C(1, 0), open: false }, { a: C(7, 0), b: C(8, 0), open: false }, { a: C(0, 3), b: C(1, 3), open: false },
@@ -99,7 +136,7 @@ export const CRIPTAS: MapDef = {
     { a: C(2, 2), b: C(3, 2), open: true }, { a: C(5, 2), b: C(6, 2), open: true },
   ],
   portals: [...[C(0, 2), C(8, 2)].map(cell => ({ cell, color: 'turquesa' })), ...[C(4, 5), C(2, 6), C(6, 6)].map(cell => ({ cell, color: 'magenta' }))],
-  startAreas: [[C(8, 3), C(8, 4), C(8, 5)], [C(1, 0), C(2, 0)], [C(6, 0), C(7, 0)], [C(0, 3), C(0, 4), C(0, 5)]],
+  startAreas: [[C(8, 3), C(8, 4)], [C(1, 0), C(2, 0)], [C(6, 0), C(7, 0)], [C(0, 3), C(0, 4), C(0, 5)]],
   entryMarkers: [C(2, 3), C(2, 5), C(4, 4), C(6, 3), C(6, 5)],
   exploration: [C(3, 0), C(5, 0), C(4, 1), C(0, 2), C(8, 2), C(4, 3), C(3, 5), C(5, 5)],
   missionMarkers: [],
@@ -131,12 +168,21 @@ export const PONTE_DOS_CONDENADOS: MapDef = {
     [C(2, 1), C(2, 2)], [C(0, 2), C(1, 2)], [C(2, 2), C(3, 2)], [C(6, 1), C(6, 2)], [C(7, 2), C(8, 2)], [C(5, 2), C(6, 2)],
     [C(0, 6), C(0, 7)], [C(2, 6), C(2, 7)], [C(2, 6), C(3, 6)], [C(6, 6), C(6, 7)], [C(8, 6), C(8, 7)], [C(5, 6), C(6, 6)],
     [C(4, 0), C(4, 1)], [C(4, 7), C(4, 8)], [C(4, 3), C(4, 4)], [C(4, 4), C(4, 5)], [C(4, 4), C(5, 4)],
+    // revisadas pelas bordas de pedra do livro: das Áreas Iniciais só se chega ao centro pelos portais;
+    // salas dos Fantasmas ligadas só à sala da Noiva; salas desbotadas fechadas
+    [C(0, 0), C(0, 1)], [C(0, 1), C(1, 1)], [C(0, 1), C(0, 2)], [C(1, 0), C(2, 0)], [C(2, 0), C(2, 1)],
+    [C(3, 1), C(3, 2)], [C(3, 2), C(4, 2)], [C(3, 2), C(3, 3)],
+    [C(3, 5), C(3, 6)], [C(3, 6), C(4, 6)], [C(3, 6), C(3, 7)], [C(2, 7), C(2, 8)], [C(1, 8), C(2, 8)],
+    [C(6, 0), C(6, 1)], [C(6, 0), C(7, 0)], [C(7, 1), C(8, 1)], [C(8, 0), C(8, 1)], [C(8, 1), C(8, 2)],
+    [C(5, 1), C(5, 2)], [C(4, 2), C(5, 2)], [C(5, 2), C(5, 3)],
+    [C(4, 3), C(5, 3)], [C(4, 5), C(5, 5)], [C(5, 5), C(5, 6)], [C(4, 6), C(5, 6)], [C(5, 6), C(5, 7)],
+    [C(6, 7), C(6, 8)], [C(6, 8), C(7, 8)],
   ],
   doors: [
     { a: C(1, 1), b: C(1, 2), open: false }, { a: C(7, 1), b: C(7, 2), open: false }, { a: C(1, 6), b: C(1, 7), open: false },
     { a: C(7, 6), b: C(7, 7), open: false }, { a: C(3, 4), b: C(4, 4), open: false },
     { a: C(2, 0), b: C(3, 0), open: true }, { a: C(3, 0), b: C(3, 1), open: true }, { a: C(5, 0), b: C(6, 0), open: true }, { a: C(5, 0), b: C(5, 1), open: true },
-    { a: C(2, 8), b: C(3, 8), open: true }, { a: C(3, 7), b: C(3, 8), open: true }, { a: C(5, 7), b: C(5, 8), open: true },
+    { a: C(2, 8), b: C(3, 8), open: true }, { a: C(3, 7), b: C(3, 8), open: true }, { a: C(5, 7), b: C(5, 8), open: true }, { a: C(5, 8), b: C(6, 8), open: true },
     { a: C(3, 0), b: C(4, 0), open: true, small: true }, { a: C(4, 0), b: C(5, 0), open: true, small: true },
     { a: C(3, 8), b: C(4, 8), open: true, small: true }, { a: C(4, 8), b: C(5, 8), open: true, small: true },
   ],
@@ -169,9 +215,16 @@ export const O_CEMITERIO: MapDef = {
   cols: 9, rows: 9,
   boards: [{ code: '2A', c: 0, r: 0 }, { code: '9A', c: 3, r: 0 }, { code: '7A', c: 0, r: 3 }, { code: '10A', c: 3, r: 3 }, { code: '11B', c: 6, r: 3 }, { code: '12B', c: 3, r: 6 }, { code: '5B', c: 6, r: 6 }],
   pillars: [], rooms: [C(4, 4)],
+  // paredes revisadas pelas bordas de pedra do livro (o mapa é simétrico girando 180°)
   walls: [
-    [C(3, 0), C(3, 1)], [C(5, 0), C(5, 1)], [C(0, 3), C(1, 3)], [C(0, 5), C(1, 5)], [C(7, 3), C(8, 3)], [C(7, 5), C(8, 5)],
-    [C(3, 7), C(3, 8)], [C(5, 7), C(5, 8)],
+    [C(3, 0), C(3, 1)], [C(5, 0), C(5, 1)], [C(0, 3), C(1, 3)], [C(0, 5), C(1, 5)], [C(7, 3), C(8, 3)], [C(8, 4), C(8, 5)],
+    [C(3, 7), C(3, 8)], [C(4, 8), C(5, 8)],
+    // sala rosa (saída pelas portas verdes) e o canto desbotado
+    [C(0, 2), C(0, 3)], [C(2, 0), C(2, 1)], [C(2, 0), C(3, 0)], [C(0, 2), C(1, 2)], [C(2, 1), C(2, 2)], [C(1, 2), C(2, 2)], [C(2, 2), C(3, 2)], [C(2, 2), C(2, 3)],
+    [C(8, 6), C(8, 5)], [C(6, 8), C(6, 7)], [C(5, 8), C(6, 8)], [C(7, 6), C(8, 6)], [C(6, 6), C(6, 7)], [C(6, 6), C(7, 6)], [C(5, 6), C(6, 6)], [C(6, 5), C(6, 6)],
+    // salas dos marcadores de Morte (só pela porta)
+    [C(1, 5), C(2, 5)], [C(2, 4), C(2, 5)], [C(3, 6), C(4, 6)], [C(3, 6), C(3, 7)],
+    [C(4, 2), C(5, 2)], [C(5, 1), C(5, 2)], [C(6, 3), C(7, 3)], [C(6, 3), C(6, 4)],
   ],
   doors: [
     { a: C(4, 0), b: C(4, 1), open: false }, { a: C(0, 4), b: C(1, 4), open: false }, { a: C(7, 4), b: C(8, 4), open: false },
@@ -181,7 +234,7 @@ export const O_CEMITERIO: MapDef = {
     { a: C(0, 1), b: C(1, 1), open: true, small: true }, { a: C(7, 7), b: C(8, 7), open: true, small: true },
   ],
   portals: [C(1, 1), C(5, 1), C(7, 3), C(1, 5), C(3, 7), C(7, 7)].map(cell => ({ cell, color: 'turquesa' })),
-  startAreas: [[C(8, 3), C(8, 4), C(8, 5)], [C(0, 3), C(0, 4), C(0, 5)], [C(3, 8), C(4, 8), C(5, 8)], [C(3, 0), C(4, 0), C(5, 0)]],
+  startAreas: [[C(8, 3), C(8, 4)], [C(0, 3), C(0, 4), C(0, 5)], [C(3, 8), C(4, 8)], [C(3, 0), C(4, 0), C(5, 0)]],
   entryMarkers: [C(4, 3), C(3, 4), C(5, 4), C(4, 4), C(4, 5)],
   exploration: [C(2, 1), C(5, 1), C(5, 3), C(7, 3), C(1, 5), C(3, 5), C(3, 7), C(7, 7)],
   // marcadores de Missão virados (Vermelho = Dr. Spider; os outros = Fantasma) e os 4 marcadores de Morte
@@ -222,6 +275,16 @@ export const SANTUARIO_NEGRO: MapDef = {
     [C(3, 1), C(3, 2)], [C(5, 1), C(5, 2)],
     [C(0, 3), C(1, 3)], [C(0, 5), C(1, 5)], [C(0, 2), C(0, 3)], [C(0, 5), C(0, 6)],
     [C(7, 3), C(8, 3)], [C(7, 5), C(8, 5)], [C(8, 2), C(8, 3)], [C(8, 5), C(8, 6)],
+    // revisadas pelas bordas de pedra do livro: espaços desbotados fechados, poço do centro fechado
+    [C(1, 0), C(2, 0)], [C(0, 1), C(1, 1)], [C(0, 2), C(1, 2)], [C(2, 0), C(3, 0)], [C(3, 0), C(3, 1)], [C(3, 0), C(4, 0)], [C(3, 2), C(4, 2)],
+    [C(1, 3), C(2, 3)], [C(2, 3), C(3, 3)], [C(2, 3), C(2, 4)],
+    [C(3, 4), C(4, 4)], [C(4, 3), C(4, 4)], [C(4, 4), C(4, 5)], [C(4, 4), C(5, 4)],
+    [C(2, 5), C(2, 6)], [C(1, 6), C(2, 6)], [C(2, 6), C(2, 7)], [C(3, 5), C(3, 6)], [C(3, 6), C(3, 7)], [C(3, 6), C(4, 6)],
+    [C(1, 7), C(1, 8)], [C(2, 7), C(2, 8)], [C(3, 7), C(3, 8)], [C(4, 7), C(4, 8)], [C(5, 7), C(5, 8)],
+    [C(4, 0), C(5, 0)], [C(5, 0), C(6, 0)], [C(5, 0), C(5, 1)], [C(6, 0), C(7, 0)], [C(7, 0), C(7, 1)], [C(8, 0), C(8, 1)], [C(4, 2), C(5, 2)],
+    [C(5, 3), C(6, 3)], [C(6, 3), C(7, 3)], [C(6, 3), C(6, 4)],
+    [C(4, 6), C(5, 6)], [C(5, 5), C(5, 6)], [C(5, 6), C(5, 7)], [C(6, 5), C(6, 6)], [C(6, 6), C(7, 6)], [C(6, 6), C(6, 7)],
+    [C(7, 6), C(8, 6)], [C(7, 7), C(8, 7)], [C(8, 7), C(8, 8)], [C(7, 8), C(8, 8)],
   ],
   doors: [
     { a: C(1, 0), b: C(1, 1), open: false }, { a: C(7, 1), b: C(8, 1), open: false }, { a: C(2, 2), b: C(3, 2), open: false },
@@ -262,6 +325,15 @@ export const MOINHO_DAS_ALMAS: MapDef = {
   walls: [
     [C(3, 0), C(4, 0)], [C(3, 2), C(4, 2)], [C(3, 2), C(3, 3)], [C(9, 3), C(9, 4)], [C(2, 7), C(2, 8)], [C(7, 9), C(8, 9)], [C(7, 11), C(8, 11)],
     [C(4, 2), C(5, 2)], [C(5, 2), C(5, 3)], [C(9, 4), C(9, 5)], [C(8, 5), C(9, 5)], [C(2, 6), C(3, 6)], [C(2, 6), C(2, 7)], [C(6, 8), C(6, 9)], [C(6, 9), C(7, 9)],
+    // revisadas pelas bordas de pedra do livro: espaços desbotados fechados; as 4 Noivas do Moinho em salas separadas
+    // (cada uma pela sua porta aberta); a sala do Rei Pavoroso (3,8)-(5,8) só pelos portais magenta
+    [C(3, 3), C(4, 3)], [C(3, 3), C(3, 4)], [C(4, 3), C(5, 3)], [C(5, 3), C(5, 4)], [C(5, 3), C(6, 3)], [C(3, 4), C(3, 5)], [C(3, 5), C(4, 5)], [C(3, 5), C(3, 6)], [C(5, 4), C(6, 4)],
+    [C(8, 8), C(8, 9)], [C(6, 8), C(7, 8)], [C(6, 7), C(6, 8)], [C(5, 8), C(6, 8)], [C(6, 7), C(7, 7)], [C(7, 6), C(7, 7)], [C(7, 7), C(8, 7)], [C(7, 7), C(7, 8)], [C(6, 6), C(7, 6)],
+    [C(6, 11), C(7, 11)], [C(7, 10), C(7, 11)],
+    [C(8, 3), C(9, 3)], [C(10, 3), C(11, 3)], [C(6, 3), C(7, 3)], [C(7, 3), C(7, 4)], [C(8, 3), C(8, 4)], [C(7, 5), C(8, 5)], [C(8, 4), C(8, 5)], [C(8, 5), C(8, 6)],
+    [C(5, 5), C(6, 5)], [C(5, 5), C(5, 6)], [C(6, 5), C(6, 6)], [C(5, 6), C(6, 6)], [C(4, 5), C(5, 5)], [C(6, 4), C(6, 5)], [C(5, 6), C(5, 7)],
+    [C(0, 8), C(1, 8)], [C(2, 8), C(3, 8)], [C(0, 6), C(0, 7)], [C(0, 7), C(1, 7)], [C(0, 7), C(0, 8)], [C(3, 6), C(4, 6)], [C(3, 6), C(3, 7)],
+    [C(3, 7), C(3, 8)], [C(4, 7), C(4, 8)], [C(5, 7), C(5, 8)],
   ],
   doors: [
     { a: C(5, 1), b: C(5, 2), open: false }, { a: C(9, 5), b: C(10, 5), open: false }, { a: C(1, 6), b: C(2, 6), open: false }, { a: C(6, 9), b: C(6, 10), open: false },
@@ -303,6 +375,18 @@ export const LABORATORIO_SECRETO: MapDef = {
     [C(3, 2), C(3, 3)], [C(5, 2), C(5, 3)], [C(2, 3), C(3, 3)], [C(5, 3), C(6, 3)], [C(2, 5), C(3, 5)], [C(5, 5), C(6, 5)], [C(4, 5), C(4, 6)],
     [C(0, 1), C(0, 2)], [C(2, 1), C(2, 2)], [C(2, 2), C(3, 2)], [C(6, 1), C(6, 2)], [C(5, 2), C(6, 2)], [C(7, 2), C(8, 2)],
     [C(0, 6), C(0, 7)], [C(2, 6), C(2, 7)], [C(2, 6), C(3, 6)], [C(6, 6), C(6, 7)], [C(5, 6), C(6, 6)], [C(7, 6), C(8, 6)],
+    // revisadas pelas bordas de pedra do livro: Áreas Iniciais e salas dos marcadores fechadas (só pelas portas),
+    // salas "!" só pelas portas verdes, espaços desbotados fechados
+    [C(0, 2), C(0, 3)], [C(1, 2), C(1, 3)], [C(2, 2), C(2, 3)], [C(6, 2), C(6, 3)], [C(7, 2), C(7, 3)],
+    [C(0, 5), C(0, 6)], [C(1, 5), C(1, 6)], [C(2, 5), C(2, 6)], [C(6, 5), C(6, 6)], [C(7, 5), C(7, 6)],
+    [C(0, 3), C(0, 4)], [C(2, 4), C(2, 5)], [C(6, 3), C(6, 4)], [C(8, 4), C(8, 5)], [C(8, 5), C(8, 6)],
+    [C(0, 0), C(0, 1)], [C(0, 1), C(1, 1)], [C(1, 0), C(2, 0)], [C(2, 0), C(2, 1)], [C(3, 0), C(3, 1)], [C(4, 0), C(4, 1)], [C(5, 0), C(5, 1)], [C(6, 0), C(6, 1)], [C(6, 0), C(7, 0)],
+    [C(3, 1), C(4, 1)], [C(4, 1), C(5, 1)], [C(8, 0), C(8, 1)], [C(7, 1), C(8, 1)], [C(8, 1), C(8, 2)],
+    [C(1, 3), C(2, 3)], [C(2, 3), C(2, 4)], [C(0, 4), C(0, 5)], [C(0, 5), C(1, 5)],
+    [C(7, 3), C(8, 3)], [C(7, 4), C(8, 4)], [C(8, 2), C(8, 3)], [C(6, 4), C(6, 5)], [C(6, 5), C(7, 5)],
+    [C(3, 6), C(4, 6)], [C(3, 6), C(3, 7)], [C(4, 6), C(5, 6)], [C(4, 6), C(4, 7)], [C(5, 6), C(5, 7)],
+    [C(0, 7), C(1, 7)], [C(0, 7), C(0, 8)], [C(8, 6), C(8, 7)], [C(7, 7), C(8, 7)], [C(8, 7), C(8, 8)],
+    [C(2, 7), C(2, 8)], [C(1, 8), C(2, 8)], [C(3, 8), C(4, 8)], [C(4, 7), C(4, 8)], [C(5, 7), C(5, 8)], [C(6, 7), C(6, 8)], [C(6, 8), C(7, 8)],
   ],
   doors: [
     { a: C(1, 1), b: C(1, 2), open: false }, { a: C(7, 1), b: C(7, 2), open: false }, { a: C(1, 6), b: C(1, 7), open: false }, { a: C(7, 6), b: C(7, 7), open: false },
@@ -346,6 +430,16 @@ export const MAUSOLEU_PROFANO: MapDef = {
     [C(3, 8), C(3, 9)], [C(5, 8), C(5, 9)], [C(2, 9), C(3, 9)], [C(2, 10), C(3, 10)], [C(2, 11), C(3, 11)], [C(5, 9), C(6, 9)], [C(5, 10), C(6, 10)], [C(5, 11), C(6, 11)],
     [C(0, 1), C(0, 2)], [C(0, 3), C(0, 4)], [C(0, 2), C(1, 2)], [C(8, 2), C(8, 3)], [C(8, 4), C(8, 5)], [C(7, 4), C(8, 4)],
     [C(2, 8), C(2, 9)], [C(1, 9), C(2, 9)], [C(1, 10), C(2, 10)], [C(6, 8), C(6, 9)], [C(6, 9), C(7, 9)], [C(6, 10), C(7, 10)],
+    // revisadas pelas bordas de pedra do livro: corredores dos lados do templo, salas desbotadas fechadas
+    [C(1, 3), C(2, 3)], [C(1, 4), C(2, 4)], [C(1, 5), C(2, 5)], [C(6, 3), C(7, 3)], [C(6, 4), C(7, 4)], [C(6, 5), C(7, 5)],
+    [C(2, 2), C(3, 2)], [C(3, 1), C(3, 2)], [C(3, 2), C(4, 2)], [C(4, 2), C(5, 2)], [C(5, 1), C(5, 2)], [C(5, 2), C(6, 2)],
+    [C(0, 0), C(1, 0)], [C(0, 1), C(1, 1)], [C(1, 1), C(1, 2)], [C(1, 1), C(2, 1)], [C(2, 0), C(2, 1)], [C(2, 0), C(3, 0)],
+    [C(5, 0), C(6, 0)], [C(7, 0), C(8, 0)], [C(6, 0), C(6, 1)], [C(7, 0), C(7, 1)], [C(6, 1), C(7, 1)], [C(7, 2), C(8, 2)], [C(8, 1), C(8, 2)],
+    [C(0, 4), C(0, 5)], [C(0, 5), C(1, 5)], [C(0, 5), C(0, 6)],
+    [C(0, 6), C(0, 7)], [C(0, 7), C(1, 7)], [C(0, 8), C(1, 8)], [C(0, 9), C(1, 9)], [C(0, 10), C(1, 10)], [C(0, 11), C(1, 11)],
+    [C(1, 8), C(2, 8)], [C(2, 7), C(2, 8)], [C(2, 8), C(3, 8)],
+    [C(5, 8), C(6, 8)], [C(6, 7), C(6, 8)], [C(6, 8), C(7, 8)],
+    [C(7, 7), C(8, 7)], [C(7, 8), C(8, 8)], [C(8, 6), C(8, 7)], [C(8, 8), C(8, 9)], [C(7, 11), C(8, 11)], [C(8, 10), C(8, 11)],
   ],
   doors: [
     { a: C(2, 1), b: C(3, 1), open: false }, { a: C(5, 1), b: C(6, 1), open: false }, { a: C(2, 6), b: C(3, 6), open: false }, { a: C(5, 6), b: C(6, 6), open: false },

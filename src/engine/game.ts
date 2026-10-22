@@ -709,7 +709,7 @@ export class Game {
   // =========================================================================
   // Ações do jogador
   // =========================================================================
-  canAct(): boolean { return !this.s.winner && !this.s.pending && !this.s.deploying?.length; }
+  canAct(): boolean { return !this.s.winner && !this.s.pending && !this.s.puppet && !this.s.deploying?.length; }
 
   // =========================================================================
   // Posicionamento inicial (p.12): cada Guilda coloca seus Heróis na própria Área Inicial
@@ -2301,7 +2301,17 @@ export class Game {
       }
       case 'ativar_menor': case 'ativar_maior': case 'ativar_vilao': {
         const cat = effect === 'ativar_menor' ? 'Lacaio Menor' : effect === 'ativar_maior' ? 'Lacaio Maior' : 'Vilão Menor';
-        const mons = this.monstersOnBoard().filter(m => MONSTERS[m.defId].category === cat);
+        const mons = this.puppetCandidates(cat);
+        if (!mons.length) {
+          this.log(`${source}: não há ${cat} no tabuleiro para ativar.`);
+          this.emit({ t: 'notice', text: `🪦 ${source}: nenhum ${cat} para ativar`, color: '#b892ff' });
+          break;
+        }
+        // jogador humano: ativa o Monstro como um Herói (escolhe, move e ataca pelo mapa)
+        if (h.guild && this.guild(h.guild).controller === 'human') {
+          this.s.puppet = { by: h.id, guild: h.guild, cat, source, monsterId: mons.length === 1 ? mons[0].id : null };
+          break;
+        }
         // o Monstro pode atacar qualquer Herói (até da própria Guilda): a IA escolhe um Inimigo que ele alcance
         const reach = (m: Unit) => this.heroesInReach(m).filter(x => this.isEnemy(h, x));
         const m = pickUnit(mons, `${source}: qual ${cat} você ativa?`, u => reach(u).length ? 10 - this.killScore(reach(u)[0]) : -99);
@@ -2314,6 +2324,60 @@ export class Game {
         break;
       }
     }
+  }
+
+  /** Monstros desta categoria que a Lápide pode ativar. */
+  puppetCandidates(cat: string): Unit[] {
+    return this.monstersOnBoard().filter(m => MONSTERS[m.defId].category === cat && !MONSTERS[m.defId].abilities?.includes('object'));
+  }
+
+  /** Lápide: o jogador escolhe qual Monstro ativar. */
+  puppetPick(monsterId: string): boolean {
+    const p = this.s.puppet;
+    if (!p || !this.puppetCandidates(p.cat).some(m => m.id === monsterId)) return false;
+    p.monsterId = monsterId;
+    return true;
+  }
+
+  /** Para onde o Monstro ativado pela Lápide pode ir e quem ele ataca de cada Espaço (qualquer Herói). */
+  puppetOptions(): { reach: Map<string, PathNode>; targets: Map<string, string[]> } | null {
+    const p = this.s.puppet;
+    if (!p?.monsterId) return null;
+    const m = this.unit(p.monsterId);
+    if (!m.alive || !m.cell) return null;
+    const reach = this.reachable(m, this.monMove(m));
+    const heroes = this.onBoard().filter(u => u.kind === 'hero');
+    const targets = new Map<string, string[]>();
+    targets.set(key(m.cell), heroes.filter(u => this.monsterCanAttack(m, u)).map(u => u.id));
+    for (const [k, n] of reach) if (n.canEnd) targets.set(k, heroes.filter(u => this.monsterCanAttack(m, u, n.cell)).map(u => u.id));
+    return { reach, targets };
+  }
+
+  /** Lápide: o Monstro escolhido se move (opcional) e ataca um Herói (opcional). As mortes são crédito do jogo. */
+  puppetAct(dest: Cell | null, targetId: string | null): boolean {
+    const p = this.s.puppet;
+    const o = this.puppetOptions();
+    if (!p || !o) return false;
+    const m = this.unit(p.monsterId!);
+    const at = dest && !sameCell(dest, m.cell) ? dest : m.cell!;
+    if (dest && !sameCell(dest, m.cell) && !o.reach.get(key(dest))?.canEnd) return false;
+    if (targetId && !(o.targets.get(key(at)) ?? []).includes(targetId)) return false;
+    this.s.puppet = null;
+    if (!sameCell(at, m.cell)) this.walkMonster(m, o.reach, at);
+    const t = targetId ? this.unit(targetId) : null;
+    if (t && m.alive && t.alive && this.monsterCanAttack(m, t)) this.monsterAttack(m, t, 'lapide');
+    else this.log(`${this.name(m)} ${sameCell(at, dest ?? at) && dest ? 'se moveu e ' : ''}não atacou.`);
+    this.checkActiveDeath();
+    this.applyFree();
+    return true;
+  }
+
+  /** Lápide: o jogador desiste de ativar o Monstro. */
+  puppetSkip(): boolean {
+    if (!this.s.puppet) return false;
+    this.log(`${this.s.puppet.source}: nenhum Monstro foi ativado.`);
+    this.s.puppet = null;
+    return true;
   }
 
   /** Heróis que o Monstro consegue atacar depois de se mover. */

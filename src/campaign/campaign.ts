@@ -1,5 +1,5 @@
 import { CARDS, CURSES, curseDeck, upgradeDeck } from '../engine/cards';
-import { HEROES, distributeStartingGear, heroPool, levelForScenario, setGuildNames, teamName } from '../engine/data';
+import { HEROES, distributeStartingGear, heroPool, levelForScenario, setGuildNames, starterError, teamName, type HeroSet } from '../engine/data';
 import type { Game } from '../engine/game';
 import { MAPS, campaignList, type Edition } from '../engine/maps';
 import type { GuildId } from '../engine/types';
@@ -91,8 +91,10 @@ export interface CampaignState {
   aiLevel?: AILevel;
   /** Limite de dados (Configurações da partida): no máximo 8 dados de ataque e 6 de defesa por rolagem. Sem isso, ilimitado. */
   diceCap?: boolean;
-  /** Configurações da partida: "Permitir Todos os Heróis" (os extras entram no recrutamento). Sem isso, só os Core Heroes. */
+  /** Configurações da partida (antigo): "Permitir Todos os Heróis". */
   allHeroes?: boolean;
+  /** Configurações da partida: Heróis do recrutamento (Apenas Core, Core + Beyond the Grave ou Todos). */
+  heroSet?: HeroSet;
   /** Edição da campanha: CBT Clássico ou Beyond the Grave. */
   edition?: Edition;
 }
@@ -119,14 +121,15 @@ function shuffled<T>(c: CampaignState, a: T[]): T[] {
 }
 
 // ------------------------------------------------------------------ criação
-export function newCampaign(opponents: number, name?: string, aiLevel: AILevel = 'normal', diceCap = true, pickOne = true, allHeroes = false, edition: Edition = 'classic'): CampaignState {
+export function newCampaign(opponents: number, name?: string, aiLevel: AILevel = 'normal', diceCap = true, pickOne = true, heroSet: HeroSet | boolean = 'core', edition: Edition = 'classic'): CampaignState {
+  const hs: HeroSet = heroSet === true ? 'all' : heroSet === false ? 'core' : heroSet;
   const ids: GuildId[] = ['azul', 'vermelho', 'verde', 'laranja'];
-  const c: CampaignState = { version: 1, guilds: [], played: [], chooser: 'azul', phase: 'setup', seed: (Date.now() ^ (Math.random() * 1e9)) | 0, elapsed: 0, aiLevel, diceCap, ...(pickOne ? { pickOne } : {}), ...(allHeroes ? { allHeroes } : {}), ...(edition !== 'classic' ? { edition } : {}) };
+  const c: CampaignState = { version: 1, guilds: [], played: [], chooser: 'azul', phase: 'setup', seed: (Date.now() ^ (Math.random() * 1e9)) | 0, elapsed: 0, aiLevel, diceCap, ...(pickOne ? { pickOne } : {}), ...(hs !== 'core' ? { heroSet: hs } : {}), ...(edition !== 'classic' ? { edition } : {}) };
   for (let i = 0; i <= opponents; i++) c.guilds.push({ id: ids[i], controller: i === 0 ? 'human' : 'ai', heroes: [], inventory: {}, saved: 0, titles: [], curses: {}, ...(i === 0 && name?.trim() ? { name: name.trim().slice(0, 20) } : {}) });
   useCampaignNames(c);
   // Recrutamento de Heróis (p.7): cada jogador recebe uma mão, escolhe 1 e passa o resto para a esquerda.
   const size = c.guilds.length <= 3 ? 4 : 3;
-  const pool = shuffled(c, heroPool(allHeroes, edition));
+  const pool = shuffled(c, heroPool(hs));
   c.setup = { step: 'draft', round: 0, hands: Object.fromEntries(c.guilds.map(g => [g.id, pool.splice(0, size)])) };
   return c;
 }
@@ -176,10 +179,11 @@ export function finishEquip(c: CampaignState, inv: Record<string, string[]>): st
   const me = human(c);
   const errs = validateInventory(c, me, inv);
   const all = Object.values(inv).flat().sort();
-  if (JSON.stringify(all) !== JSON.stringify(STARTER_CARDS.slice().sort())) errs.push('Distribua as 5 cartas iniciais.');
+  const se = starterError(all, c.edition);
+  if (se) errs.push(se);
   if (errs.length) return errs;
   me.inventory = inv;
-  for (const g of c.guilds) if (g.controller === 'ai') g.inventory = distributeStartingGear(g.heroes);
+  for (const g of c.guilds) if (g.controller === 'ai') g.inventory = distributeStartingGear(g.heroes, c.edition);
   c.voted = c.setup!.map;
   c.setup = undefined;
   c.phase = 'choose';
@@ -281,7 +285,7 @@ function startUpgrade(c: CampaignState, res: ScenarioResult) {
   for (const rg of res.guilds) up.coins[rg.id] = rg.coins;
   for (const g of c.guilds) g.saved = 0;
   // 6 cartas para cada jogador
-  const ud = shuffled(c, upgradeDeck(level));
+  const ud = shuffled(c, upgradeDeck(level, c.edition));
   for (const g of c.guilds) { up.hands[g.id] = ud.splice(0, 6); up.picked[g.id] = []; up.bought[g.id] = []; }
   c.upgrade = up;
   c.phase = 'upgrade';

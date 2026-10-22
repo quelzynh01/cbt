@@ -8,7 +8,7 @@ import { drawFace, ensureArt } from '../render/chibi';
 import { MAX_SLOTS, TEST_GUILDS, slotsFor, type TestConfig, loadTestConfig, normalizeTestConfig, saveTestConfig } from './testConfig';
 import { GUILDS } from '../engine/data';
 import { ITEM_LEVEL, MONSTER_LEVEL, curseCard, extraHeroCard, heroCard, itemCard, monsterCard, paintCardArt } from './cardview';
-import { CARDS as ALL_CARDS, CURSES } from '../engine/cards';
+import { BTG_REMOVED, CARDS as ALL_CARDS, CURSES } from '../engine/cards';
 import { TITLES, TITLE_TEXT } from '../engine/titles';
 import { getSettings, saveSettings } from './settings';
 import { play } from '../audio/sfx';
@@ -127,7 +127,7 @@ export class MenuPages {
   /** Aba dos Heróis na Biblioteca: os do jogo ou os extras (só para ver). */
   private heroSet: 'core' | 'extra' = 'core';
   /** Aba de Heróis no Modo Teste. */
-  private tsSet: 'core' | 'extra' = 'core';
+  private tsSet: 'core' | 'btg' | 'extra' = 'core';
   /** Espaço de Herói escolhido no Modo Teste (o próximo Herói tocado vai nele). */
   private tsSlot = 0;
   showHeroes(onBack?: () => void) {
@@ -207,8 +207,8 @@ export class MenuPages {
           <span class="ts-sn">${i + 1}</span><canvas width="96" height="96" data-face="${h}"></canvas>
           <span class="ts-si"><b>${d.name}</b><small>${d.title}</small><em>⚡ ${d.abilityName}</em></span>${i === this.tsSlot ? '<span class="ts-swap">trocar ▾</span>' : ''}</button>`; }).join('')}</div>
         <p class="ts-help">👆 Toque num <b>espaço</b> acima (fica dourado) e depois no <b>Herói</b> que vai nele. As cartas do espaço continuam com o novo Herói.</p>
-        <div class="lib-filter ts-tabs"><button class="${this.tsSet === 'core' ? 'primary' : ''}" data-tset="core">⭐ Core Heroes <small>(${ALL_HEROES.length})</small></button><button class="${this.tsSet === 'extra' ? 'primary' : ''}" data-tset="extra">✨ Extra Heroes <small>(${EXTRA_HERO_IDS.length})</small></button></div>
-        <div class="ts-heroes">${(this.tsSet === 'extra' ? EXTRA_HERO_IDS : ALL_HEROES).map(h => { const i = c.heroes.indexOf(h); return `<button class="ts-hero ${i >= 0 ? 'on' : ''}" data-th="${h}">${i >= 0 ? `<span class="pick-badge">${i + 1}</span>` : ''}<canvas width="72" height="72" data-face="${h}"></canvas><b>${HEROES[h].name}</b><small>${HEROES[h].title}</small></button>`; }).join('')}</div></section>
+        <div class="lib-filter ts-tabs"><button class="${this.tsSet === 'core' ? 'primary' : ''}" data-tset="core">⭐ Core Heroes <small>(${ALL_HEROES.length})</small></button><button class="${this.tsSet === 'btg' ? 'primary' : ''}" data-tset="btg">💀 Beyond the Grave <small>(${BTG_HEROES.length})</small></button><button class="${this.tsSet === 'extra' ? 'primary' : ''}" data-tset="extra">✨ Extra Heroes <small>(${EXTRA_HERO_IDS.length})</small></button></div>
+        <div class="ts-heroes">${(this.tsSet === 'extra' ? EXTRA_HERO_IDS : this.tsSet === 'btg' ? BTG_HEROES : ALL_HEROES).map(h => { const i = c.heroes.indexOf(h); return `<button class="ts-hero ${i >= 0 ? 'on' : ''}" data-th="${h}">${i >= 0 ? `<span class="pick-badge">${i + 1}</span>` : ''}<canvas width="72" height="72" data-face="${h}"></canvas><b>${HEROES[h].name}</b><small>${HEROES[h].title}</small></button>`; }).join('')}</div></section>
       <section class="ts-sec ts-wide"><h3>4. Itens <small>(até ${MAX_SLOTS} cartas por Herói)</small></h3>
         <p class="muted">Clique num <b>espaço vazio</b> ou numa <b>carta</b> para escolher qual carta vai nele (qualquer carta do jogo, ou trocar entre Heróis).</p>
         <div class="ts-btnrow"><button id="ts-gear">Equipamento inicial padrão</button><button id="ts-clear">Remover todas as cartas</button></div>
@@ -223,10 +223,12 @@ export class MenuPages {
     attachMapPeek(this.page);
     this.page.querySelectorAll<HTMLCanvasElement>('canvas[data-face]').forEach(cv => drawFace(cv, cv.dataset.face!, '#3a5a8a'));
     // retratos dos Heróis extras: desenha de novo quando a arte terminar de carregar
-    if (this.tsSet === 'extra' || c.heroes.some(h => HEROES[h].extra)) void ensureArt(EXTRA_HERO_IDS).then(() => this.page.querySelectorAll<HTMLCanvasElement>('canvas[data-face]').forEach(cv => drawFace(cv, cv.dataset.face!, '#3a5a8a')));
+    // retratos que carregam sob demanda (Heróis extras e de Beyond the Grave)
+    const lazy = [...(this.tsSet === 'extra' || c.heroes.some(h => HEROES[h].extra) ? EXTRA_HERO_IDS : []), ...(this.tsSet === 'btg' || c.heroes.some(h => BTG_HEROES.includes(h)) ? BTG_HEROES : [])];
+    if (lazy.length) void ensureArt(lazy).then(() => this.page.querySelectorAll<HTMLCanvasElement>('canvas[data-face]').forEach(cv => drawFace(cv, cv.dataset.face!, '#3a5a8a')));
     const save = () => { this.test = normalizeTestConfig(c); saveTestConfig(this.test); saveMapId(this.test.mapId); this.onMapChange(); this.showTestSetup(onStart); };
     (this.page.querySelector('#ts-cap') as HTMLInputElement).onchange = e => { c.diceCap = (e.target as HTMLInputElement).checked; save(); };
-    this.page.querySelectorAll<HTMLElement>('[data-tset]').forEach(b => { b.onclick = () => { this.tsSet = b.dataset.tset as 'core' | 'extra'; this.showTestSetup(onStart); }; });
+    this.page.querySelectorAll<HTMLElement>('[data-tset]').forEach(b => { b.onclick = () => { this.tsSet = b.dataset.tset as 'core' | 'btg' | 'extra'; this.showTestSetup(onStart); }; });
     (this.page.querySelector('#ts-ai') as HTMLSelectElement).onchange = e => saveSettings({ ...getSettings(), ai: (e.target as HTMLSelectElement).value as 'normal' | 'hard' });
     (this.page.querySelector('#ts-map') as HTMLSelectElement).onchange = e => { c.mapId = (e.target as HTMLSelectElement).value; save(); };
     this.page.querySelectorAll<HTMLElement>('[data-n]').forEach(b => { b.onclick = () => {
@@ -297,17 +299,21 @@ export class MenuPages {
     const btg = this.libEd === 'btg';
     // Beyond the Grave só traz cartas de Recompensa (dos seus cenários) e Títulos novos
     const btgScen = new Set(CAMPAIGN_BTG.map(c => c.name));
-    const lv = btg && !['R', 'M'].includes(this.itemLevel) ? 'R' : this.itemLevel;
-    const list = Object.values(ALL_CARDS).filter(c => c.level === lv && (lv !== 'R' || btg === btgScen.has(c.scenario ?? '')));
+    const lv = btg && !['I', 'R', 'M'].includes(this.itemLevel) ? 'R' : this.itemLevel;
+    // Iniciais: no Clássico as 5 da caixa; em Beyond the Grave só a Foice (a 6ª carta inicial)
+    const list = Object.values(ALL_CARDS).filter(c => c.level === lv && (lv === 'I' ? btg === !!c.btg : lv !== 'R' || btg === btgScen.has(c.scenario ?? '')));
     const titles = Object.keys(TITLES).filter(t => btg === BTG_TITLES.includes(t));
     const body = lv === 'M'
       ? `${btg ? '' : `<div class="cp-cards">${Object.keys(CURSES).map(id => curseCard(id)).join('')}</div>`}
          <h3 class="mp-sub">Títulos</h3><div class="mapinfo">${titles.map(t => `<div><b>🏅 ${TITLES[t]}</b> — ${TITLE_TEXT[t]}</div>`).join('')}</div>`
       : `<div class="cp-cards">${list.map(c => itemCard(c.id, '', '', true)).join('')}</div>`;
     const b = (v: string, n: string) => `<button class="${lv === v ? 'primary' : ''}" data-il="${v}">${ITEM_LEVEL[v] ? `<span class="lvdot" style="background:${ITEM_LEVEL[v].color}"></span>` : ''}${n}</button>`;
-    const levels = btg ? b('R', 'Recompensas') + b('M', 'Títulos')
+    const levels = btg ? b('I', 'Inicial') + b('R', 'Recompensas') + b('M', 'Títulos')
       : `${b('I', 'Iniciais')}${b('1', 'Nível 1')}${b('2', 'Nível 2')}${b('3', 'Nível 3')}${b('4', 'Nível 4')}${b('5', 'Nível 5')}${b('R', 'Recompensas')}${b('M', 'Maldições e Títulos')}`;
-    const note = btg ? '<p class="muted">Beyond the Grave usa as mesmas cartas de Melhoria do CBT Clássico; as cartas novas são as Recompensas dos seus cenários.</p>' : '';
+    const removed = Object.entries(BTG_REMOVED).map(([n, ids]) => `<div><b>Nível ${n}:</b> ${ids.map(id => ALL_CARDS[id]?.name ?? id).join(', ')}</div>`).join('');
+    const note = !btg ? '' : lv === 'I'
+      ? '<p class="muted">Na campanha Beyond the Grave cada jogador recebe as 5 cartas iniciais <b>e a Foice</b>, mas a Guilda fica só com 5: escolha 1 para descartar no Equipamento inicial.</p>'
+      : `<p class="muted">Beyond the Grave usa as cartas de Melhoria do CBT Clássico, tirando 1 cópia de cada uma destas (p.6 do livro):</p><div class="mapinfo">${removed}</div>`;
     this.open('Biblioteca', `<div class="lib-filter">${levels}</div>${body}${note}`);
     this.page.querySelectorAll<HTMLElement>('[data-il]').forEach(x => { x.onclick = () => { this.itemLevel = x.dataset.il!; this.showItems(); }; });
   }

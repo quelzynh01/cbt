@@ -1,5 +1,5 @@
 import { play } from '../audio/sfx';
-import { GUILDS, HEROES } from '../engine/data';
+import { GUILDS, HEROES, HERO_SETS, heroSetName, starterCards, type HeroSet } from '../engine/data';
 import { buyHint, buySummaryHtml, curseRevealHtml, curseSummaryHtml } from './upgradeViews';
 import { draftRounds, picksPerRound } from '../campaign/campaign';
 import { gameConfirm } from './dialog';
@@ -37,7 +37,7 @@ export class OnlineLobby {
   /** Configurações da partida (padrão: Limite de dados, Pegar 1 carta e Apenas Core Heroes). */
   private diceCap = true;
   private pickOne = true;
-  private allHeroes = false;
+  private heroSet: HeroSet = 'core';
   /** Campanha online: CBT Clássico ou Beyond the Grave. */
   private edition: Edition = 'classic';
   private lastTick = -1;
@@ -170,7 +170,7 @@ export class OnlineLobby {
           <button id="lb-copy">📋 Copiar link</button><small>${esc(link)}</small></div>
         <div class="lb-seats">${slots}</div>
         <div class="lb-actions">
-          ${host ? `<span class="lb-sum">${this.mode === 'campaign' ? `🏰 Campanha ${this.edition === 'btg' ? 'Beyond the Grave' : 'CBT Clássico'} (6 cenários)` : '⚔ Partida única'} · IA ${getSettings().ai === 'hard' ? 'Difícil' : 'Normal'}${this.diceCap ? ' · Limite de dados' : ''}${this.mode === 'campaign' && this.pickOne ? ' · Pegar 1 carta' : ''} · ${this.allHeroes ? 'Todos os Heróis' : 'Apenas Core Heroes'}</span>
+          ${host ? `<span class="lb-sum">${this.mode === 'campaign' ? `🏰 Campanha ${this.edition === 'btg' ? 'Beyond the Grave' : 'CBT Clássico'} (6 cenários)` : '⚔ Partida única'} · IA ${getSettings().ai === 'hard' ? 'Difícil' : 'Normal'}${this.diceCap ? ' · Limite de dados' : ''}${this.mode === 'campaign' && this.pickOne ? ' · Pegar 1 carta' : ''} · ${heroSetName(this.heroSet)}</span>
             <button id="lb-cfg">⚙️ Configurações da partida</button>
             <button class="primary" id="lb-start" ${canStart ? '' : 'disabled'}>▶ Ir para a mesa</button>` : '<span class="lb-wait">Aguardando o anfitrião levar todos para a mesa…</span>'}
         </div>
@@ -200,19 +200,20 @@ export class OnlineLobby {
       el.innerHTML = `<div class="mc-cfg">
         <div class="gd-title">⚙️ Configurações da partida</div>
         <label class="mcf-row">Modo <select id="mc-mode"><option value="campaign" ${this.mode === 'campaign' ? 'selected' : ''}>🏰 Campanha (6 cenários)</option><option value="single" ${this.mode === 'single' ? 'selected' : ''}>⚔ Partida única</option></select></label>
+        ${this.mode === 'campaign' ? `<label class="mcf-row">Campanha <select id="mc-ed">${EDITIONS.map(e => `<option value="${e.id}" ${this.edition === e.id ? 'selected' : ''}>${e.id === 'btg' ? '💀 CBT Beyond the Grave' : '⚔️ CBT Clássico'}</option>`).join('')}</select></label>` : ''}
+        <label class="mcf-row">Heróis <select id="mc-heroes">${HERO_SETS.map(([v, n]) => `<option value="${v}" ${this.heroSet === v ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
         <label class="mcf-row">Dificuldade da IA <select id="mc-ai"><option value="normal">Normal</option><option value="hard" ${getSettings().ai === 'hard' ? 'selected' : ''}>Difícil</option></select></label>
-        <label class="mcf-row">Heróis <select id="mc-heroes"><option value="core">⭐ Apenas Core Heroes</option><option value="all" ${this.allHeroes ? 'selected' : ''}>🌟 Permitir Todos os Heróis</option></select></label>
         <label class="set-opt"><input type="checkbox" id="mc-cap" ${this.diceCap ? 'checked' : ''}/> <b>Limite de dados</b> — no máximo 8 dados de ataque e 6 de defesa por rolagem. Sem marcar, ilimitado.</label>
-        ${this.mode === 'campaign' ? `<label class="mcf-row">Campanha <select id="mc-ed">${EDITIONS.map(e => `<option value="${e.id}" ${this.edition === e.id ? 'selected' : ''}>${e.id === 'btg' ? '💀' : '⚔️'} ${e.name}</option>`).join('')}</select></label>` : ''}
         ${this.mode === 'campaign' ? `<label class="set-opt"><input type="checkbox" id="mc-one" ${this.pickOne ? 'checked' : ''}/> <b>Pegar 1 carta</b> — na Fase de Melhorias cada um pega 1 carta por rodada e passa o resto (em vez de 2).</label>` : ''}
         <div class="gd-btns"><button class="primary" id="mc-ok">✔ Pronto</button></div>
       </div>`;
       (el.querySelector('#mc-mode') as HTMLSelectElement).onchange = e => { this.mode = (e.target as HTMLSelectElement).value as 'single' | 'campaign'; draw(); };
       (el.querySelector('#mc-ai') as HTMLSelectElement).onchange = e => saveSettings({ ...getSettings(), ai: (e.target as HTMLSelectElement).value as 'normal' | 'hard' });
       (el.querySelector('#mc-cap') as HTMLInputElement).onchange = e => { this.diceCap = (e.target as HTMLInputElement).checked; };
-      (el.querySelector('#mc-heroes') as HTMLSelectElement).onchange = e => { this.allHeroes = (e.target as HTMLSelectElement).value === 'all'; };
+      (el.querySelector('#mc-heroes') as HTMLSelectElement).onchange = e => { this.heroSet = (e.target as HTMLSelectElement).value as HeroSet; };
       const ed = el.querySelector('#mc-ed') as HTMLSelectElement | null;
-      if (ed) ed.onchange = () => { this.edition = ed.value as Edition; };
+      // Beyond the Grave: Chaz e Darryn entram junto (dá para mudar em Heróis)
+      if (ed) ed.onchange = () => { this.edition = ed.value as Edition; if (this.heroSet !== 'all') this.heroSet = this.edition === 'btg' ? 'btg' : 'core'; draw(); };
       const one = el.querySelector('#mc-one') as HTMLInputElement | null;
       if (one) one.onchange = () => { this.pickOne = one.checked; };
       (el.querySelector('#mc-ok') as HTMLElement).onclick = () => { el.remove(); this.renderRoom(); };
@@ -226,7 +227,7 @@ export class OnlineLobby {
   private startSetup() {
     const host = this.session as HostSession;
     const l = host.lobby;
-    l.setup = newSetup(l.seats.map(s => ({ guild: s.guild, ai: s.ai })), getSettings().ai, Math.random, this.mode, this.diceCap, this.mode === 'campaign' && this.pickOne, this.allHeroes, this.edition);
+    l.setup = newSetup(l.seats.map(s => ({ guild: s.guild, ai: s.ai })), getSettings().ai, Math.random, this.mode, this.diceCap, this.mode === 'campaign' && this.pickOne, this.heroSet, this.edition);
     this.hostAdvance();
   }
 
@@ -405,18 +406,21 @@ export class OnlineLobby {
         ${mine ? `<div class="tb-actions"><span class="tb-wait">✓ Seu voto: <b>${MAPS[mine].name}</b> (pode mudar). Aguardando: ${st.order.filter(g => !st.votes[g]).map(g => esc(name(g))).join(', ')}</span></div>` : ''}`;
     } else if (st.step === 'equip' && me) {
       const heroes = st.picks[me] ?? [];
-      if (!this.equipDraft) this.equipDraft = STARTER.map((cid, i) => ({ id: cid, to: heroes[i % heroes.length] }));
+      // Beyond the Grave: a Foice chega sem Herói; equipe 5 das 6 cartas e descarte 1
+      const btg = st.mode === 'campaign' && st.edition === 'btg';
+      if (!this.equipDraft) this.equipDraft = starterCards(btg ? 'btg' : undefined).map((cid, i) => ({ id: cid, to: cid === 'foice' ? 'pool' : heroes[i % heroes.length] }));
       const items = this.equipDraft;
       const inv = Object.fromEntries(heroes.map(h => [h, items.filter(x => x.to === h).map(x => x.id)]));
       const errs = [...equipErrors(st, me, inv), ...poolErrors(items, false)];
       const ready = !!st.equip[me];
       // mesmo depois de "Pronto" dá para reorganizar enquanto alguém ainda escolhe (cada mudança é enviada de novo)
-      const eqOpts: InvOptions = { heroes, color: GUILDS[me].color, discard: false, slots: (_h, cards) => ({ used: cards.length, max: 4, magicExtra: cards.reduce((s, id) => s + (CARDS[id]?.fx.magicSlots ?? 0), 0) }) };
+      const eqOpts: InvOptions = { heroes, color: GUILDS[me].color, discard: btg, slots: (_h, cards) => ({ used: cards.length, max: 4, magicExtra: cards.reduce((s, id) => s + (CARDS[id]?.fx.magicSlots ?? 0), 0) }) };
       this.invBind = { items, opts: eqOpts };
       center = `<h3>Equipamento inicial — ${MAPS[st.map!].name}</h3>
         ${st.tie ? `<p>Empate entre ${st.tie.map(id => MAPS[id].name).join(' e ')}: sorteado <b>${MAPS[st.map!].name}</b>.</p>` : ''}
         <table class="cp-vtable">${st.order.map(g => `<tr><td><span class="dot" style="background:${GUILDS[g].color}"></span> ${esc(name(g))}</td><td>${st.votes[g] ? MAPS[st.votes[g]!]?.name ?? '' : ''}</td></tr>`).join('')}</table>
         <p>Equipe seus Heróis: clique num <b>espaço vazio</b> ou numa <b>carta</b> para escolher qual carta vai nele.</p>
+        ${btg ? '<p class="lb-note">💀 <b>Beyond the Grave:</b> além das 5 cartas iniciais você recebe a <b>Foice</b>, mas a Guilda fica só com 5 — equipe 5 e <b>descarte 1</b>.</p>' : ''}
         ${invEditorHtml(items, eqOpts)}
         ${errs.length ? `<div class="lb-warn">${errs.join('<br/>')}</div>` : ''}
         <div class="tb-actions">${ready

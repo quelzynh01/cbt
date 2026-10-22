@@ -70,7 +70,7 @@ const DIE_ICON: Record<string, string> = { crit: '✷', melee: '⚔', ranged: '�
 
 const DUR: Partial<Record<GameEvent['t'], number>> = {
   move: 280, door: 220, attack: 1500, damage: 480, heal: 420, death: 520, stun: 200, pickup: 650, drop: 200,
-  spawn: 420, respawn: 420, spawnRoll: 0, tomb: 2600, mission: 1500, reaction: 520, turn: 950, rest: 700, card: 800, coins: 0, log: 0, gameover: 0,
+  spawn: 420, respawn: 420, spawnRoll: 0, tomb: 2600, notice: 1600, mission: 1500, reaction: 520, turn: 950, rest: 700, card: 800, coins: 0, log: 0, gameover: 0,
 };
 
 /** Espada (lâmina para +x, cabo na origem): Fender girando e Arremesso de Lâmina. */
@@ -288,7 +288,7 @@ export class Renderer {
     for (const u of this.units.values()) {
       if (!u.alive || !u.cell) continue;
       const p = g2s(u.pos.gx, u.pos.gy);
-      const s = charScale(u.defId);
+      const s = unitScale(u.defId);
       // a área de toque cobre o boneco desenhado inteiro (cabeça incluída), senão tocar na cabeça acerta o Espaço de trás
       if (w.x > p.x - 26 * s && w.x < p.x + 26 * s && w.y > p.y - 96 * s && w.y < p.y + 8) {
         // o mais próximo do centro do corpo vence (personagens no mesmo Espaço se sobrepõem)
@@ -380,6 +380,8 @@ export class Renderer {
       list.forEach((u, i) => {
         const cx = u.cell!.c + 0.5, cy = u.cell!.r + 0.5;
         // marcador de Missão ocupa um lugar: o personagem sozinho fica no outro
+        // Monstro Enorme (Rei Pavoroso): ocupa o Espaço inteiro, fica no meio
+        if (list.length === 1 && MONSTERS[u.defId]?.abilities?.includes('huge')) { out.set(u.id, { gx: cx + 0.05, gy: cy + 0.05 }); return; }
         if (hasMission && list.length === 1) { out.set(u.id, { gx: cx + 0.17 + 0.1, gy: cy - 0.17 + 0.1 }); return; }
         // personagens na metade da frente do Espaço; o fundo fica para itens/marcadores
         if (list.length === 1) out.set(u.id, { gx: cx + 0.08, gy: cy + 0.08 });
@@ -401,10 +403,11 @@ export class Renderer {
     const entry = this.game.s.entryMarkers.some(m => same(m.cell));
     const mission = (this.floor[key(c)] ?? []).some(t => t.type === 'missao');
     return {
-      portal: [0.78, 0.3],
-      manhole: portal ? [0.26, 0.26] : [0.62, 0.3],
-      plaque: mission ? [0.76, 0.66] : [0.3, 0.62],
-      tomb: portal && entry ? [0.82, 0.78] : portal || entry ? [0.24, 0.24] : [0.78, 0.28],
+      // o portal fica sempre no meio do Espaço; o resto vai para os cantos
+      portal: [0.5, 0.5],
+      manhole: portal ? [0.2, 0.2] : [0.62, 0.3],
+      plaque: mission ? [0.78, 0.7] : portal ? [0.24, 0.76] : [0.3, 0.62],
+      tomb: portal && entry ? [0.8, 0.22] : portal || entry ? [0.22, 0.22] : [0.78, 0.28],
     };
   }
 
@@ -846,34 +849,58 @@ export class Renderer {
     }
   }
 
-  private drawGroundOverlays() {
+  /** Monstros que a Lápide pode ativar agora (piscam e ficam marcados no chão). */
+  private puppetIds(): Set<string> {
+    const p = this.game?.s.puppet;
+    if (!p) return new Set();
+    return new Set(p.monsterId ? [p.monsterId] : this.game.puppetCandidates(p.cat).map(m => m.id));
+  }
+
+  /** Lápide (Beyond the Grave) em pé no Espaço: desenhada junto com os personagens, na ordem de profundidade
+   *  (assim fica na frente da parede de trás do Espaço, e atrás das paredes da frente). */
+  private drawTomb(tb: { cell: Cell }) {
     const ctx = this.ctx;
     const tt = this.t / 1000;
-    // Lápides (Beyond the Grave): lápide de pedra em pé no canto do Espaço
-    for (const tb of this.game.s.tombs ?? []) {
-      const [tx, ty] = this.spots(tb.cell).tomb;
-      const p = g2s(tb.cell.c + tx, tb.cell.r + ty);
-      ctx.save();
-      ctx.translate(p.x, p.y);
-      ctx.fillStyle = 'rgba(0,0,0,0.28)';
-      ctx.beginPath(); ctx.ellipse(0, 4, 30, 10, 0, 0, Math.PI * 2); ctx.fill();
+    const [tx, ty] = this.spots(tb.cell).tomb;
+    const p = g2s(tb.cell.c + tx, tb.cell.r + ty);
+    const a = this.game.s.activation;
+    const h = a ? this.game.unit(a.heroId) : null;
+    const glow = !!h?.cell && h.cell.c === tb.cell.c && h.cell.r === tb.cell.r && this.game.canRevealTomb();
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath(); ctx.ellipse(0, 2, 38, 12, 0, 0, Math.PI * 2); ctx.fill();
+    const img = tokenImage('lapide');
+    if (img) {
+      // imagem da Lápide (public/tokens/lapide.webp), em pé com a base no chão
+      const H = 84;
+      if (glow) { ctx.shadowColor = `rgba(184,146,255,${0.6 + 0.4 * Math.sin(tt * 5)})`; ctx.shadowBlur = 22; }
+      ctx.drawImage(img, -H / 2, -H + 6, H, H);
+    } else {
       const grd = ctx.createLinearGradient(-22, -60, 22, 0);
       grd.addColorStop(0, '#c9d1d6'); grd.addColorStop(1, '#7d878e');
       ctx.fillStyle = grd;
       ctx.strokeStyle = '#3c454c'; ctx.lineWidth = 3;
       ctx.beginPath(); ctx.moveTo(-22, 2); ctx.lineTo(-22, -40); ctx.arc(0, -40, 22, Math.PI, 0); ctx.lineTo(22, 2); ctx.closePath(); ctx.fill(); ctx.stroke();
-      ctx.strokeStyle = '#4b555c'; ctx.lineWidth = 4;
-      ctx.beginPath(); ctx.moveTo(0, -50); ctx.lineTo(0, -26); ctx.moveTo(-9, -42); ctx.lineTo(9, -42); ctx.stroke();
-      ctx.fillStyle = '#4b555c'; ctx.font = '900 11px "Baloo 2", sans-serif'; ctx.textAlign = 'center';
-      ctx.fillText('RIP', 0, -10);
-      // brilho quando o Herói ativo pode revelar
-      const a = this.game.s.activation;
-      const h = a ? this.game.unit(a.heroId) : null;
-      if (h?.cell && h.cell.c === tb.cell.c && h.cell.r === tb.cell.r && this.game.canRevealTomb()) {
+      if (glow) {
         ctx.strokeStyle = `rgba(184,146,255,${0.55 + 0.45 * Math.sin(tt * 5)})`; ctx.lineWidth = 4;
         ctx.beginPath(); ctx.moveTo(-26, 4); ctx.lineTo(-26, -42); ctx.arc(0, -42, 26, Math.PI, 0); ctx.lineTo(26, 4); ctx.stroke();
       }
-      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  private drawGroundOverlays() {
+    const ctx = this.ctx;
+    const tt = this.t / 1000;
+    // Lápide ativando um Monstro: marca roxa pulsando no chão dos que podem ser escolhidos
+    for (const id of this.puppetIds()) {
+      const u = this.units.get(id);
+      if (!u?.cell) continue;
+      const pulse = 0.5 + 0.5 * Math.sin(tt * 6);
+      diamondPath(ctx, u.cell.c + 0.06, u.cell.r + 0.06, 0.88, 0.88);
+      ctx.fillStyle = `rgba(184,146,255,${0.18 + pulse * 0.22})`; ctx.fill();
+      ctx.strokeStyle = `rgba(214,190,255,${0.6 + pulse * 0.4})`; ctx.lineWidth = 5; ctx.setLineDash([14, 8]); ctx.stroke(); ctx.setLineDash([]);
     }
     // Entradas de Monstro: placa no chão com os 2 símbolos de dado que fazem o Monstro surgir ali
     for (const em of this.game.s.entryMarkers) {
@@ -928,7 +955,7 @@ export class Renderer {
         const txt = fl!.ok ? 'Monstro surgiu aqui!' : 'Entrada ocupada';
         ctx.strokeText(txt, q.x, q.y - 70); ctx.fillStyle = fl!.ok ? '#ff9b7a' : '#d7b8ff'; ctx.fillText(txt, q.x, q.y - 70);
       }
-    }
+      }
     // Marcadores de Missão: Espaço destacado no chão (visível mesmo com Monstro em cima)
     for (const [k, toks] of Object.entries(this.floor)) {
       const mt = toks.find(t => t.type === 'missao');
@@ -948,7 +975,7 @@ export class Renderer {
       ctx.setLineDash([10, 7]);
       ctx.stroke();
       ctx.setLineDash([]);
-    }
+      }
     // portais
     for (const p of this.game.map.portals) {
       const [sx, sy] = this.spots(p.cell).portal;
@@ -957,7 +984,7 @@ export class Renderer {
       if (p.color === 'magenta' || p.color === 'rosa') ctx.filter = 'hue-rotate(150deg) saturate(1.4)';
       drawPortal(ctx, 0, 0, tt);
       ctx.restore();
-    }
+      }
     // minas das Bombas
     for (const mn of this.game.s.mines ?? []) {
       const q = g2s(mn.cell.c + 0.7, mn.cell.r + 0.72);
@@ -970,7 +997,7 @@ export class Renderer {
       const fl = 0.5 + 0.5 * Math.sin(tt * 10 + mn.cell.c);
       ctx.fillStyle = `rgba(255,${160 + fl * 80},40,${0.7 + fl * 0.3})`; ctx.beginPath(); ctx.arc(16, -22, 3 + fl * 2, 0, 7); ctx.fill();
       ctx.restore();
-    }
+      }
     // destaques de movimento (azul Dofus)
     // objetivos de Missão piscando
     if (this.flash && this.t - this.flash.t0 < Renderer.FLASH_MS) {
@@ -992,7 +1019,7 @@ export class Renderer {
       };
       paint(this.flash.dest, '60,220,110', '170,255,190');
       paint(this.flash.cells, '255,170,0', '255,236,120');
-    }
+      }
     const purple = this.hl.moveColor === 'purple', green = this.hl.moveColor === 'green';
     // Configurações: sem a sinalização de ajuda, não pinta os Espaços azuis (andar) nem os vermelhos (atacar) da jogada normal
     const hints = getSettings().hints !== false;
@@ -1004,7 +1031,7 @@ export class Renderer {
       ctx.strokeStyle = green ? 'rgba(170,255,180,0.9)' : purple ? 'rgba(220,170,255,0.85)' : 'rgba(160,210,255,0.8)';
       ctx.lineWidth = 1.5;
       ctx.stroke();
-    }
+      }
     for (const k of hints || purple ? this.hl.attackCells ?? [] : []) {
       const [c, r] = k.split(',').map(Number);
       diamondPath(ctx, c + 0.12, r + 0.12, 0.76, 0.76);
@@ -1013,12 +1040,12 @@ export class Renderer {
       ctx.lineWidth = 4;
       ctx.stroke();
       ctx.setLineDash([]);
-    }
+      }
     for (const [i, c] of this.hl.path.entries()) {
       diamondPath(ctx, c.c + 0.12, c.r + 0.12, 0.76, 0.76);
       ctx.fillStyle = i === this.hl.path.length - 1 ? 'rgba(120,200,255,0.75)' : 'rgba(90,170,255,0.55)';
       ctx.fill();
-    }
+      }
     if (this.hl.path.length) {
       const last = this.hl.path[this.hl.path.length - 1];
       const cost = this.hl.move.get(key(last));
@@ -1029,7 +1056,7 @@ export class Renderer {
         ctx.lineWidth = 3; ctx.strokeStyle = '#0d2a52'; ctx.strokeText(`${cost} PM`, p.x, p.y + 5);
         ctx.fillStyle = '#ffffff'; ctx.fillText(`${cost} PM`, p.x, p.y + 5);
       }
-    }
+      }
     // alvos de ataque (vermelho)
     for (const id of hints || purple ? this.hl.attackUnits : []) {
       const u = this.units.get(id);
@@ -1040,14 +1067,14 @@ export class Renderer {
       ctx.strokeStyle = 'rgba(255,170,120,0.9)';
       ctx.lineWidth = 1.5;
       ctx.stroke();
-    }
+      }
     if (this.hl.hoverCell) {
       const c = this.hl.hoverCell;
       diamondPath(ctx, c.c, c.r, 1, 1);
       ctx.strokeStyle = 'rgba(255,255,255,0.85)';
       ctx.lineWidth = 2.5;
       ctx.stroke();
-    }
+      }
     if (this.hl.los) {
       const a = g2s(this.hl.los.from.c + 0.5, this.hl.los.from.r + 0.5), b = g2s(this.hl.los.to.c + 0.5, this.hl.los.to.r + 0.5);
       ctx.setLineDash([8, 6]);
@@ -1055,7 +1082,7 @@ export class Renderer {
       ctx.lineWidth = 3;
       ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
       ctx.setLineDash([]);
-    }
+      }
     if (this.showGrid) {
       ctx.font = '11px monospace';
       ctx.textAlign = 'center';
@@ -1070,7 +1097,7 @@ export class Renderer {
         ctx.fillStyle = '#ffe9a8';
         ctx.fillText(m.pair.map(faceShort).join('+'), p.x, p.y - 14);
       }
-    }
+      }
   }
 
   private drawSprites() {
@@ -1104,6 +1131,12 @@ export class Renderer {
           else drawMushroom(ctx, p.x, p.y, sc, d.kind === 'mush' ? '#d8452f' : '#e07b2a');
         },
       });
+    }
+
+    // Lápides: em pé, na camada dos itens do Espaço (na frente da parede de trás)
+    for (const tb of g.s.tombs ?? []) {
+      const [tx, ty] = this.spots(tb.cell).tomb;
+      list.push({ d: K(tb.cell.c + tb.cell.r, 1.4, (tx + ty) / 2), draw: () => this.drawTomb(tb) });
     }
 
     // Espaços bloqueados (plataformas com decoração)
@@ -1222,7 +1255,7 @@ export class Renderer {
   private drawUnit(u: UnitView, tt: number) {
     const ctx = this.ctx;
     const p = g2s(u.pos.gx, u.pos.gy);
-    const L = { scale: charScale(u.defId) };
+    const L = { scale: unitScale(u.defId) };
     const active = this.hl.activeUnit === u.id;
     const hover = this.hl.hoverUnit === u.id;
     const target = this.hl.attackUnits.has(u.id);
@@ -1300,7 +1333,11 @@ export class Renderer {
         if (!spinFront) { spinFx(); spinFx = null; }
       }
     }
+    // Lápide: os Monstros que dá para ativar piscam (claro/normal)
+    const blink = this.puppetIds().has(u.id);
+    if (blink) ctx.filter = `brightness(${1.25 + 0.45 * Math.sin(tt * 7)}) drop-shadow(0 0 8px rgba(184,146,255,0.95))`;
     drawCharacter(ctx, u.defId, { dir, flip, t: idleT, hurt, alpha: 1, stunned: u.stunned, lunge: 0, scale: L.scale * 0.66 });
+    if (blink) ctx.filter = 'none';
     if (spinFx && spinFront) spinFx();
     if (u.stunned) this.drawStun(ctx, -78 * L.scale - 6, tt);
 
@@ -1383,7 +1420,7 @@ export class Renderer {
     if (!d || !u) return;
     const ctx = this.ctx;
     const w = this.screenToWorld(d.x, d.y);
-    const sc = charScale(u.defId) * 0.66 * 1.12;
+    const sc = unitScale(u.defId) * 0.66 * 1.12;
     ctx.save();
     // sombra no chão debaixo do ponteiro
     ctx.fillStyle = 'rgba(0,0,0,0.3)';
@@ -1560,6 +1597,20 @@ export class Renderer {
       if (!g.board.exist(right)) cliffFace(ctx, c.c + 1, c.r, c.c + 1, c.r + 1, c.c * 3 + c.r * 5);
     }
 
+    // piso com a arte do tabuleiro do livro (Beyond the Grave): a imagem cobre a grade inteira
+    const art = g.map.floorArt ? floorImage(g.map.id, () => { if (this.game === g) this.buildGround(); }) : null;
+    if (art) {
+      ctx.save();
+      ctx.beginPath();
+      for (const c of cells) { const q = [g2s(c.c, c.r), g2s(c.c + 1, c.r), g2s(c.c + 1, c.r + 1), g2s(c.c, c.r + 1)]; ctx.moveTo(q[0].x, q[0].y); for (const x of q.slice(1)) ctx.lineTo(x.x, x.y); ctx.closePath(); }
+      ctx.clip();
+      const px = art.width / g.map.cols; // pixels da imagem por Espaço
+      ctx.transform(TW / 2 / px, TH / 2 / px, -TW / 2 / px, TH / 2 / px, 0, 0);
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(art, 0, 0);
+      ctx.restore();
+    }
+
     // piso dos Espaços: calçamento de pedras (ruas), assoalho (salas) e tapete (Áreas Iniciais)
     const startGuild = new Map<number, string>();
     for (const gs of g.guilds()) startGuild.set(gs.startArea, gs.color);
@@ -1568,6 +1619,7 @@ export class Renderer {
       const area = g.board.startArea(c);
       const room = g.board.isRoom(c);
       ctx.save();
+      if (art) ctx.globalAlpha = 0; // o piso já veio da arte: só o tapete, o contorno e o ponto central
       diamondPath(ctx, c.c, c.r, 1, 1);
       ctx.clip();
       if (room || area !== undefined) {
@@ -1708,6 +1760,24 @@ export class Renderer {
 }
 
 // -----------------------------------------------------------------------------
+/** Imagens de piso dos mapas (carregam na primeira vez; `ready` redesenha o chão quando chegar). */
+const floors = new Map<string, HTMLImageElement>();
+function floorImage(id: string, ready: () => void): HTMLImageElement | null {
+  let img = floors.get(id);
+  if (!img) {
+    img = new Image();
+    img.onload = ready;
+    img.src = `${import.meta.env.BASE_URL}floors/${id}.webp`;
+    floors.set(id, img);
+  }
+  return img.complete && img.naturalWidth ? img : null;
+}
+
+/** Tamanho do boneco: Monstros Enormes (ocupam o Espaço inteiro, como 2 personagens) são bem maiores. */
+function unitScale(defId: string): number {
+  return charScale(defId) * (MONSTERS[defId]?.abilities?.includes('huge') ? 1.6 : 1);
+}
+
 /** Direção isométrica de um passo na grade: +c ↘, +r ↙, -c ↖, -r ↗. */
 function dirFromStep(dc: number, dr: number): Dir {
   if (Math.abs(dc) >= Math.abs(dr)) return dc >= 0 ? 'se' : 'nw';

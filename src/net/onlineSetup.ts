@@ -1,4 +1,4 @@
-import { HEROES, distributeStartingGear, heroPool } from '../engine/data';
+import { HEROES, distributeStartingGear, heroPool, starterError, type HeroSet } from '../engine/data';
 import { MAPS, campaignList, type Edition } from '../engine/maps';
 import type { Game } from '../engine/game';
 import { CARDS } from '../engine/cards';
@@ -29,8 +29,8 @@ export interface OnlineSetup {
   step: 'draft' | 'vote' | 'equip' | 'done' | 'upgrade-curses' | 'upgrade-draft' | 'upgrade-buy' | 'upgrade-summary' | 'upgrade-arrange' | 'choose' | 'final';
   /** Configurações da partida: na Fase de Melhorias pega 1 carta por rodada (em vez de 2). */
   pickOne?: boolean;
-  /** Configurações da partida: "Permitir Todos os Heróis" (os extras entram no recrutamento). */
-  allHeroes?: boolean;
+  /** Configurações da partida: Heróis do recrutamento (Apenas Core, Core + Beyond the Grave ou Todos). */
+  heroSet?: HeroSet;
   /** Campanha: CBT Clássico ou Beyond the Grave. */
   edition?: Edition;
   /** Telas de "todos veem" (resumo das Maldições, resumo das compras): quem já clicou em Continuar. */
@@ -67,13 +67,13 @@ function shuffle<T>(a: T[], rnd: () => number): T[] {
   return r;
 }
 
-export function newSetup(seats: SeatInfo[], aiLevel: AILevel, rnd: () => number = Math.random, mode: 'single' | 'campaign' = 'single', diceCap = true, pickOne = true, allHeroes = false, edition: Edition = 'classic'): OnlineSetup {
+export function newSetup(seats: SeatInfo[], aiLevel: AILevel, rnd: () => number = Math.random, mode: 'single' | 'campaign' = 'single', diceCap = true, pickOne = true, heroSet: HeroSet = 'core', edition: Edition = 'classic'): OnlineSetup {
   const order = seats.map(s => s.guild);
   const size = order.length <= 3 ? 4 : 3;
-  const pool = shuffle(heroPool(allHeroes, mode === 'campaign' ? edition : 'classic'), rnd);
+  const pool = shuffle(heroPool(heroSet), rnd);
   const st: OnlineSetup = {
     step: 'draft', round: 0, order, hands: {}, choice: {}, picks: {}, votes: {}, equip: {}, tick: 0, aiLevel,
-    mode, diceCap, upPick: {}, upBuy: {}, upArr: {}, ...(pickOne ? { pickOne } : {}), ...(allHeroes ? { allHeroes } : {}), ...(mode === 'campaign' && edition !== 'classic' ? { edition } : {}),
+    mode, diceCap, upPick: {}, upBuy: {}, upArr: {}, ...(pickOne ? { pickOne } : {}), ...(heroSet !== 'core' ? { heroSet } : {}), ...(mode === 'campaign' && edition !== 'classic' ? { edition } : {}),
   };
   for (const g of order) { st.hands[g] = pool.splice(0, size); st.choice[g] = null; st.picks[g] = []; }
   return st;
@@ -103,7 +103,8 @@ export function equipErrors(st: OnlineSetup, g: GuildId, inv: Record<string, str
   const errs: string[] = [];
   const all = Object.values(inv).flat().slice().sort();
   if (Object.keys(inv).some(h => !heroes.includes(h))) errs.push('Herói inválido.');
-  if (JSON.stringify(all) !== JSON.stringify(STARTER.slice().sort())) errs.push('Distribua as 5 cartas iniciais.');
+  const se = starterError(all, st.mode === 'campaign' ? st.edition : undefined);
+  if (se) errs.push(se);
   for (const h of heroes) if ((inv[h] ?? []).length > 4) errs.push(`${HEROES[h].name}: no máximo 4 cartas.`);
   return errs;
 }
@@ -166,7 +167,7 @@ export function advance(st: OnlineSetup, seats: SeatInfo[], rnd: () => number = 
     }
   }
   if (st.step === 'equip') {
-    for (const g of all) if (isAI(g) && !st.equip[g]) { st.equip[g] = distributeStartingGear(st.picks[g]!); changed = true; }
+    for (const g of all) if (isAI(g) && !st.equip[g]) { st.equip[g] = distributeStartingGear(st.picks[g]!, st.mode === 'campaign' ? st.edition : undefined); changed = true; }
     if (all.every(g => st.equip[g])) { st.step = 'done'; st.tick++; st.news = 'Todos prontos! A partida vai começar.'; changed = true; }
   }
   if (st.camp && advanceCampaign(st, seats)) changed = true;
@@ -178,7 +179,7 @@ export function advance(st: OnlineSetup, seats: SeatInfo[], rnd: () => number = 
 export function startCampaign(st: OnlineSetup, seats: (SeatInfo & { team?: string })[]) {
   const c: CampaignState = {
     version: 1, guilds: [], played: [], chooser: st.order[0], phase: 'choose', seed: (Date.now() ^ (Math.random() * 1e9)) | 0,
-    elapsed: 0, aiLevel: st.aiLevel, diceCap: st.diceCap, voted: st.map, ...(st.pickOne ? { pickOne: true } : {}), ...(st.allHeroes ? { allHeroes: true } : {}), ...(st.edition ? { edition: st.edition } : {}),
+    elapsed: 0, aiLevel: st.aiLevel, diceCap: st.diceCap, voted: st.map, ...(st.pickOne ? { pickOne: true } : {}), ...(st.heroSet ? { heroSet: st.heroSet } : {}), ...(st.edition ? { edition: st.edition } : {}),
   };
   for (const g of st.order) {
     const s = seats.find(x => x.guild === g);

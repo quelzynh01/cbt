@@ -61,11 +61,12 @@
 .ac-text p { margin: 0; font-size: 11.5px; }
 .ac-text.sm p { font-size: 10.5px; }
 .ac-text.xs p { font-size: 9.8px; line-height: 1.2; }
+.ac-text.xxs p { font-size: 9.2px; line-height: 1.15; }
 .ac-text i { color: #ffb3a0; font-size: 10.5px; }
 .ac-bonus { display: flex; gap: 6px; justify-content: center; margin-bottom: 3px; }
 .ac-code { text-align: center; font-size: 10px; color: #1a1a1a; font-weight: 700; text-shadow: 0 1px 0 rgba(255,255,255,.4); }
 /* Itens, Monstros e Maldições: todas com o mesmo tamanho */
-.acard.item, .acard.monster, .acard.curse { width: 214px; height: 344px; flex: none; }
+.acard.item, .acard.monster, .acard.curse { width: 214px; height: 362px; flex: none; }
 .ac-code { flex: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cp-cards { grid-template-columns: repeat(auto-fill, 214px) !important; justify-content: center; }
 .cp-cards.small { zoom: .8; }
@@ -142,7 +143,7 @@
 
 /* ================= carta de Herói no estilo da carta oficial =================
    personagem grande à direita, saindo da moldura; medalhões, faixa "Habilidade" e texto à esquerda */
-.acard.hero { height: 300px; }
+.acard.hero { height: 318px; }
 .acard.hero .ac-title { font-size: 22px !important; padding: 4px 8px; }
 .acard.hero .ac-title small { font-size: 11px !important; }
 .acard.hero .hc-body { position: relative; display: block; overflow: visible; padding: 8px 8px 8px 8px;
@@ -189,3 +190,16 @@ canvas[data-art].art-wait { opacity: 0; }
 .acard.hero { position: relative; }
 .hc-rating { position: absolute; top: 6px; right: 8px; z-index: 3; padding: 1px 7px; border-radius: 10px; font: 800 12px 'Baloo 2', system-ui, sans-serif;
   color: #3a2200; background: linear-gradient(#ffe48a, #e9a83a); border: 1px solid #fff2c4; box-shadow: 0 2px 4px rgba(0,0,0,.45); }
+
+/* Lupa: amplia a carta */
+.ac-zoom { position: absolute; left: 5px; top: 5px; z-index: 6; width: 26px; height: 26px; padding: 0; border-radius: 50%; display: grid; place-items: center;
+  font-size: 13px; line-height: 1; background: rgba(20,14,30,.72); border: 2px solid rgba(255,255,255,.75); box-shadow: 0 2px 5px rgba(0,0,0,.5);
+  cursor: var(--cur-pointer, pointer); pointer-events: auto; opacity: .85; transition: transform .12s, opacity .12s; min-height: 0; }
+.ac-zoom:hover { opacity: 1; transform: scale(1.15); }
+/* cartas pequenas (slots, mão, hub): a lupa fica do tamanho de um botão normal */
+.inv-slot .ac-zoom, .hub-card .ac-zoom, .hub-ocard .ac-zoom, .inv-ghost .ac-zoom, .cr-sumhero .ac-zoom, .ip-card .ac-zoom { zoom: 1.5; }
+.inv-ghost .ac-zoom, #card-zoom .ac-zoom { display: none; }
+#card-zoom { position: fixed; inset: 0; z-index: 9800; background: rgba(8,5,14,.78); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+  animation: popin2 .15s; cursor: var(--cur-pointer, pointer); padding: 16px; }
+#card-zoom > .acard { transform: none !important; box-shadow: 0 14px 40px rgba(0,0,0,.7); }
+#card-zoom .cz-hint { color: #d8cfe8; font-size: 13px; opacity: .8; }

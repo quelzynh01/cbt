@@ -1153,3 +1153,26 @@ body:has(#roulette, #gamemenu:not(.hidden), #gamedialog) :is(#activebar, #banner
 .tp-card h3 { margin: 4px 0 6px; font-size: 22px; color: #ffd98a; }
 .tp-card p { margin: 0; font-size: 15px; line-height: 1.35; }
 @keyframes tombIn { 0% { opacity: 0; transform: translateY(18px) scale(.85); } 8% { opacity: 1; transform: none; } 85% { opacity: 1; } 100% { opacity: 0; transform: translateY(-8px); } }
+
+/* medalhões pequenos na dica do Monstro (passar o mouse) */
+.tip-meds { display: flex; gap: 3px; margin-top: 3px; flex-wrap: wrap; }
+.tip-meds .tipm { width: 26px; height: 26px; }
+.tip-meds .med.tipm { width: 22px; height: 22px; font-size: 12px; }
+
+/* votação para voltar o turno (online) */
+#undopoll { position: fixed; left: 50%; top: 84px; transform: translateX(-50%); z-index: 9400; width: min(380px, calc(100vw - 32px)); }
+#undopoll .up-box { background: var(--panel, #2a1f18); border: 3px solid #e0b43a; border-radius: 14px; padding: 10px 14px; box-shadow: 0 10px 30px rgba(0,0,0,.6); text-align: center; animation: popin2 .2s; }
+#undopoll .up-h { font-weight: 900; font-size: 18px; color: #ffd98a; }
+#undopoll p { margin: 6px 0; font-size: 13px; }
+#undopoll .up-votes { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin: 6px 0; }
+#undopoll .up-votes span { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: rgba(0,0,0,.3); }
+#undopoll .up-votes span.y { background: #2e7d3c; }
+#undopoll .up-votes span.n { background: #8a2e25; }
+#undopoll .up-btns { display: flex; gap: 8px; justify-content: center; margin: 6px 0; }
+#undopoll .up-btns button.on { outline: 3px solid #fff; }
+#undopoll small { opacity: .8; }
+
+/* medalhões no quadro "Ativar" */
+.ap-stats { align-items: center; }
+.ap-stats .apm { width: 26px; height: 26px; vertical-align: middle; }
+.ap-stats .med.apm { width: 22px; height: 22px; font-size: 12px; }

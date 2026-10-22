@@ -58,6 +58,8 @@ export interface MapDef {
   entryStart?: string[];
   /** Monstros (id base) que ignoram o Banimento neste cenário. */
   noBanish?: string[];
+  /** Piso com a arte do tabuleiro do livro (public/floors/<id>.webp, tools/build_floors.py). */
+  floorArt?: boolean;
   /** Espaços das cartas de Lápide (Beyond the Grave). */
   tombstones?: Cell[];
   /** Emboscada por cor: o marcador escondido desta cor vira este Monstro (O Cemitério). */

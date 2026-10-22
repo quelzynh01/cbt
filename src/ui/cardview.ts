@@ -1,6 +1,7 @@
 import { CARDS, CURSES } from '../engine/cards';
 import { HEROES, MONSTERS } from '../engine/data';
 import { CARD_ART } from './cardArt';
+import './cardArtBtg';
 import { drawFull, ensureArt } from '../render/chibi';
 import { dieImg } from '../render/dice';
 
@@ -81,7 +82,7 @@ export function itemCard(id: string, extra = '', attrs = '', qty = false, atkBon
   const bonus = [d.defBonus ? bonusImg('def', d.defBonus, 'ac-bmed') : '', d.hpBonus ? bonusImg('hp', d.hpBonus, 'ac-bmed') : '', d.rerolls ? bonusImg('rr', d.rerolls, 'ac-bmed') : ''].join('');
   const text = `${richText(d.text)}${d.partial ? ' <i>(efeito ainda não implementado)</i>' : ''}`;
   const art = CARD_ART[id];
-  return `<div class="acard item ${extra}" style="--lv:${lv.color}" ${attrs} title="${(d.text || d.name).replace(/"/g, '&quot;')}">
+  return `<div class="acard item ${extra}" style="--lv:${lv.color}" ${attrs} title="${(d.text || d.name).replace(/"/g, '&quot;')}">${ZOOM}
     ${title(d.name)}
     <div class="ac-art ${art?.kind === 'fill' ? 'fill' : ''}">${d.cost ? medal('coin', d.cost, `Custo: ${d.cost} moeda(s)`, 'ac-tl') : ''}${art
       ? artImg(art, `art-${art.img}`)
@@ -119,7 +120,7 @@ const textSize = (t = '') => t.length > 170 ? 'xxs' : t.length > 110 ? 'xs' : t.
 export function curseCard(id: string, extra = '', attrs = ''): string {
   const c = CURSES[id];
   if (!c) return '';
-  return `<div class="acard curse ${extra}" ${attrs}>
+  return `<div class="acard curse ${extra}" ${attrs}>${ZOOM}
     ${title(c.name)}
     <div class="ac-art curse-art">${med('curse ac-tl', c.value, 'Valor da Maldição')}${CARD_ART[`curse:${id}`] ? artImg(CARD_ART[`curse:${id}`], 'art-curse') : '<span class="ac-icon">💀</span>'}</div>
     <div class="ac-type"><div><b>Maldição Mortal</b><small>${c.slot ? 'Ocupa um espaço de carta' : 'Efeito permanente'}</small></div></div>
@@ -128,11 +129,54 @@ export function curseCard(id: string, extra = '', attrs = ''): string {
   </div>`;
 }
 
+/** Lupa no canto da carta: abre a carta grande no meio da tela (installCardZoom). */
+// <span> e não <button>: as cartas ficam dentro de botões (inventário) e botão dentro de botão quebra o HTML
+const ZOOM = '<span class="ac-zoom" role="button" title="Ampliar a carta" aria-label="Ampliar a carta">🔍</span>';
+
+/** Liga a lupa de todas as cartas (uma vez, no início): clique na 🔍 abre a carta ampliada; clique fora ou Esc fecha. */
+export function installCardZoom() {
+  const isZoom = (e: Event) => (e.target as HTMLElement | null)?.closest?.('.ac-zoom');
+  // a lupa não pode iniciar arrastar/selecionar a carta por baixo
+  for (const t of ['pointerdown', 'mousedown', 'touchstart'] as const) {
+    document.addEventListener(t, e => { if (isZoom(e)) e.stopPropagation(); }, true);
+  }
+  document.addEventListener('click', e => {
+    const btn = isZoom(e);
+    if (!btn) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const card = btn.closest('.acard') as HTMLElement | null;
+    if (card) openCardZoom(card);
+  }, true);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') document.getElementById('card-zoom')?.remove(); });
+}
+
+function openCardZoom(card: HTMLElement) {
+  document.getElementById('card-zoom')?.remove();
+  const box = document.createElement('div');
+  box.id = 'card-zoom';
+  const copy = card.cloneNode(true) as HTMLElement;
+  copy.querySelector('.ac-zoom')?.remove();
+  copy.classList.remove('sel', 'picked', 'disc');
+  for (const a of [...copy.attributes]) if (a.name.startsWith('data-')) copy.removeAttribute(a.name);
+  // tamanho natural da carta (sem o zoom do lugar onde ela estava): Herói 420x318; item, Monstro e Maldição 214x362
+  const hero = copy.classList.contains('hero');
+  const w = hero ? 420 : 214, h = hero ? 318 : 362;
+  copy.style.width = `${w}px`;
+  const k = Math.max(1, Math.min(2.4, (innerWidth - 32) / w, (innerHeight - 70) / h));
+  copy.style.zoom = String(k);
+  box.innerHTML = '<div class="cz-hint">Toque fora da carta para fechar</div>';
+  box.prepend(copy);
+  box.onclick = () => box.remove();
+  document.body.append(box);
+  paintCardArt(copy);
+}
+
 /** Carta de Herói (paisagem). O canvas `data-art` recebe o desenho do personagem. */
 export function heroCard(id: string, extra = '', attrs = '', foot = '', badge = '', live?: LiveStats): string {
   const h = HEROES[id];
   const def = live?.def ?? h.defense, hp = live?.hp ?? h.hp, rr = live?.rr ?? 0;
-  return `<div class="acard hero ${extra}" ${attrs}>${badge ? `<span class="pick-badge">${badge}</span>` : ''}
+  return `<div class="acard hero ${extra}" ${attrs}>${ZOOM}${badge ? `<span class="pick-badge">${badge}</span>` : ''}
     ${h.rating ? ratingBadge(h.rating) : ''}${title(h.name, h.title)}
     <div class="hc-body">
       <div class="hc-left">
@@ -155,7 +199,7 @@ function ratingBadge(r: number): string {
 /** Carta de Herói extra (só na Biblioteca, ainda não jogável): o retrato no lugar do boneco, carta mais escura. */
 export function extraHeroCard(h: { id: string; name: string; def: number; hp: number; ability: string; text: string; art: boolean; model?: boolean }): string {
   const rating = HEROES[`x_${h.id}`]?.rating;
-  return `<div class="acard hero extra" title="Herói extra — entra no recrutamento com &quot;Permitir Todos os Heróis&quot;">
+  return `<div class="acard hero extra" title="Herói extra — entra no recrutamento com &quot;Permitir Todos os Heróis&quot;">${ZOOM}
     ${rating ? ratingBadge(rating) : ''}${title(h.name, 'Herói Extra')}
     <div class="hc-body">
       <div class="hc-left">
@@ -175,7 +219,7 @@ export function monsterCard(id: string, extra = '', attrs = '', live?: LiveStats
   const m = MONSTERS[id];
   const def = live?.def ?? m.defense, hp = live?.hp ?? m.hp, rr = live?.rr ?? m.rerolls;
   const villain = m.category.startsWith('Vilão');
-  return `<div class="acard monster ${extra}" style="--lv:${monsterColor(id)}" ${attrs}>
+  return `<div class="acard monster ${extra}" style="--lv:${monsterColor(id)}" ${attrs}>${ZOOM}
     ${title(m.name, `Nível ${m.level}${villain ? ` · ${m.category}` : ''}`)}
     <div class="mc-art">
       <div class="mc-meds">${medal('hp', hp, live ? `Vida atual: ${hp}/${m.hp}` : `Vida ${m.hp}`, cmp(hp, m.hp))}${Number.isFinite(m.exterm) ? medal('skull', m.exterm, `Extermínio: ${m.exterm} Ferimentos num só ataque matam sem Vingança`) : ''}${m.defense || def ?medal('def', def, diff(def, m.defense, 'Defesa'), cmp(def, m.defense)) : ''}${m.rerolls || rr ?medal('rr', rr, diff(rr, m.rerolls, 'Rerrolagem'), cmp(rr, m.rerolls)) : ''}</div>

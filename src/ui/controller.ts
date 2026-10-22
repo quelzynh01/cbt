@@ -6,7 +6,7 @@ import { loadGame } from './mapLoading';
 import { showRoulette } from './roulette';
 import { actingGuild, applyAction, type Action } from '../engine/actions';
 import type { GameState } from '../engine/types';
-import type { ClientSession, HostSession, Lobby, Session, SessionEvents } from '../net/net';
+import type { ClientSession, HostSession, Lobby, Session, SessionEvents, UndoPoll } from '../net/net';
 import { key, parseKey, sameCell } from '../engine/board';
 import { setCursor } from '../render/cursors';
 import { CARDS, GUILDS, HEROES, MONSTERS } from '../engine/data';
@@ -21,7 +21,7 @@ import { fmtTime, getSettings, onSettings } from './settings';
 import { CURSES } from '../engine/cards';
 import { TOKEN_INFO } from '../engine/data';
 import { NeedDecision, type ChoiceRequest, type RestOptions } from '../engine/game';
-import { itemColor } from './cardview';
+import { itemColor, medal } from './cardview';
 import { play } from '../audio/sfx';
 
 /** Liga motor + renderer + HUD + IA + rede. Modos: local (teste), anfitrião e cliente (online). */
@@ -44,6 +44,9 @@ export class Controller {
   private turnStart: { key: string; state: string; histLen: number } | null = null;
   private keepDice = false;
   private vDest: Cell | null = null; // destino escolhido para o Monstro na Vingança
+  private pDest: Cell | null = null; // destino do Monstro ativado pela Lápide
+  private pRepick = false; // Lápide: voltou para escolher outro Monstro (só na tela)
+  private puppetShown = false; // o quadro da esquerda está mostrando o Monstro da Lápide
   // ---- online
   mode: 'local' | 'host' | 'client' = 'local';
   myGuild: GuildId | null = null;
@@ -559,6 +562,8 @@ export class Controller {
     this.net = session;
     this.lobby = lobby;
     this.mode = session.isHost ? 'host' : 'client';
+    // votação aprovada: o anfitrião volta o turno para todos
+    if (session.isHost) session.onUndoPassed = () => { if (!this.turnStart || this.renderer.busy) return false; this.restartTurn(); this.refresh(); return true; };
     this.myGuild = lobby.seats.find(s => s.clientId === session.me)?.guild ?? null;
     this.waitingNet = false;
     this.stopped = false;
@@ -627,7 +632,44 @@ export class Controller {
       chat: (from, text, color) => this.addChat(from, text, color),
       view: (guild, c, m, sel) => this.onRemoteView(guild, c, m, sel),
       ping: (guild, cell) => this.showPing(guild, cell),
+      undoPoll: (poll, result) => this.showUndoPoll(poll, result),
     };
+  }
+
+  // ------------------------------------------------------------------
+  // VOTAÇÃO PARA VOLTAR O TURNO (online)
+  // ------------------------------------------------------------------
+  private poll: UndoPoll | null = null;
+  private pollTick = 0;
+  private myId() { return this.net?.me ?? ''; }
+  private undoVote(open: boolean, yes = true) {
+    if (this.mode === 'host') { const h = this.net as HostSession; if (open) h.openUndoVote(h.me); else h.castUndo(h.me, yes); }
+    else (this.net as ClientSession | null)?.undoVote(open, yes);
+  }
+  private showUndoPoll(poll: UndoPoll | null, result?: string) {
+    this.poll = poll;
+    let el = document.getElementById('undopoll');
+    clearInterval(this.pollTick);
+    if (result) this.hud.toast(result, result.startsWith('✅') ? '#3fa34d' : '#c0392b');
+    if (!poll) { el?.remove(); return; }
+    if (!el) { el = document.createElement('div'); el.id = 'undopoll'; document.body.append(el); }
+    const me = this.myId();
+    const mine = poll.yes.includes(me) ? 'sim' : poll.no.includes(me) ? 'não' : null;
+    const need = Math.floor(poll.voters.length / 2) + 1;
+    const draw = () => {
+      const left = Math.max(0, Math.ceil((poll.ends - Date.now()) / 1000));
+      el!.innerHTML = `<div class="up-box">
+        <div class="up-h">🗳️ Voltar o turno?</div>
+        <p><b>${poll.by}</b> pediu para voltar ao começo deste turno. Passa com <b>${need}</b> de ${poll.voters.length} votos sim.</p>
+        <div class="up-votes">${poll.voters.map(v => `<span class="${poll.yes.includes(v.id) ? 'y' : poll.no.includes(v.id) ? 'n' : ''}">${poll.yes.includes(v.id) ? '✔' : poll.no.includes(v.id) ? '✖' : '…'} ${v.name}</span>`).join('')}</div>
+        ${poll.voters.some(v => v.id === me) ? `<div class="up-btns"><button class="primary ${mine === 'sim' ? 'on' : ''}" id="up-yes">👍 Sim</button><button class="${mine === 'não' ? 'on' : ''}" id="up-no">👎 Não</button></div>` : ''}
+        <small>${mine ? `Seu voto: <b>${mine}</b> (pode mudar) · ` : ''}encerra em ${left}s</small></div>`;
+      const y = el!.querySelector('#up-yes') as HTMLElement | null, n = el!.querySelector('#up-no') as HTMLElement | null;
+      if (y) y.onclick = () => this.undoVote(false, true);
+      if (n) n.onclick = () => this.undoVote(false, false);
+    };
+    draw();
+    this.pollTick = window.setInterval(draw, 1000);
   }
 
   // ------------------------------------------------------------------
@@ -851,6 +893,18 @@ export class Controller {
       this.showMonsterControl();
       return;
     }
+    // Lápide: o jogador ativa um Monstro (escolhe, move e ataca pelo mapa)
+    const pup = this.game.s.puppet;
+    if (pup && !this.renderer.busy && !pend) {
+      if (this.isMine(pup.guild)) { this.showPuppetControl(); return; }
+      this.hud.monsterPanel(null);
+      this.hud.setHint(`🪦 ${this.hud.nameOf(pup.guild) ?? guildShort(pup.guild)} está ativando um Monstro (Lápide)…`);
+      return;
+    }
+    if (!pup) {
+      if (this.pDest || this.pRepick || this.puppetShown) { this.hud.inspected = null; this.hud.refresh(); }
+      this.pDest = null; this.pRepick = false; this.puppetShown = false;
+    } else this.puppetShown = true;
     this.hud.monsterPanel(null);
     if (pend && !this.renderer.busy) {
       this.hud.setHint(`Aguardando ${this.hud.nameOf(pend.controller) ?? guildShort(pend.controller)} decidir a Reação de Vingança…`);
@@ -953,9 +1007,17 @@ export class Controller {
       let html: string;
       if (u.kind === 'monster') {
         const md = MONSTERS[u.defId];
-        html = `<b>${md.name}</b><br/>❤ ${max - u.wounds}/${max} · ☠ Ext ${md.exterm} · ⛨ ${md.defense}<br/>${md.attackType === 'melee' ? '⚔' : '➶'} ${md.dice} dados · 👣 ${md.move} · 🪙 ${md.reward}${u.stunned ? '<br/>✷ Atordoado' : ''}`;
+        // medalhões como na carta (Defesa e Rerrolagem só quando tem)
+        const def = this.game.defenseDice(u), rr = this.game.rerollsOf(u), hp = Math.max(0, max - u.wounds);
+        const meds = [hp > 0 ? medal('hp', hp, `Vida ${hp}/${max}`, 'tipm') : '', Number.isFinite(md.exterm) && md.exterm > 0 ? medal('skull', md.exterm, 'Extermínio', 'tipm') : '',
+          def > 0 ? medal('def', def, 'Defesa', 'tipm') : '', rr > 0 ? medal('rr', rr, 'Rerrolagem', 'tipm') : '', medal(md.attackType === 'melee' ? 'melee' : 'ranged', md.dice, 'Dados de ataque', 'tipm'),
+          medal('move', md.move, 'Movimento', 'tipm'), medal('coin', md.reward, 'Recompensa', 'tipm')].join('');
+        html = `<b>${md.name}</b> <small>${hp}/${max} de Vida</small><div class="tip-meds">${meds}</div>${u.stunned ? '✷ Atordoado' : ''}`;
       } else {
-        html = `<b style="color:${GUILDS[u.guild!].light}">${HEROES[u.defId].name}</b> (${guildShort(u.guild!)})<br/>❤ ${max - u.wounds}/${max} · ⛨ ${this.game.defenseDice(u)}${u.stunned ? '<br/>✷ Atordoado' : ''}`;
+        // medalhões como na carta (Rerrolagem só quando tem)
+        const def = this.game.defenseDice(u), rr = this.game.rerollsOf(u), hp = Math.max(0, max - u.wounds);
+        const meds = [hp > 0 ? medal('hp', hp, `Vida ${hp}/${max}`, 'tipm') : '', def > 0 ? medal('def', def, 'Defesa', 'tipm') : '', rr > 0 ? medal('rr', rr, 'Rerrolagem', 'tipm') : ''].join('');
+        html = `<b style="color:${GUILDS[u.guild!].light}">${HEROES[u.defId].name}</b> (${guildShort(u.guild!)}) <small>${hp}/${max} de Vida</small><div class="tip-meds">${meds}</div>${u.stunned ? '✷ Atordoado' : ''}`;
       }
       if (hl.attackUnits.has(unitId)) html += '<br/><span style="color:#ff9b7a">Clique para atacar</span>';
       this.hud.tooltip(html, x, y);
@@ -1159,6 +1221,69 @@ export class Controller {
     this.hud.setHint('Você controla o Monstro: escolha um Espaço roxo e confirme no painel');
   }
 
+  /** Lápide "ativar um Monstro": 1) clique no Monstro que pisca; 2) Espaço roxo para mover e Herói vermelho para atacar. */
+  private showPuppetControl() {
+    const g = this.game;
+    const p = g.s.puppet!;
+    const hl = this.renderer.hl;
+    const cands = g.puppetCandidates(p.cat);
+    if (!p.monsterId || this.pRepick) {
+      hl.attackUnits = new Set();
+      // muitos candidatos: só pelo mapa (a lista cobriria o tabuleiro)
+      const list = cands.length > 4 ? '' : cands.map(m => `<button class="primary" data-pick="${m.id}"><img class="cf-face" src="${this.hud.portraitOf(m)}"/> ${g.name(m)}</button>`).join('');
+      const el = this.hud.monsterPanel(`
+        <div class="panel-h">🪦 ${p.source} — ative um ${p.cat}</div>
+        <div class="mc-body">
+          <p>Escolha qual <b>${p.cat}</b> você ativa: ele se move e/ou ataca <b>qualquer Herói</b>, como se fosse seu (as mortes são do jogo).</p>
+          <p class="mc-legend"><span class="pu">■</span> clique num Monstro que está <b>piscando</b> no mapa${list ? ' ou aqui:' : ` (${cands.length} no tabuleiro).`}</p>
+          <div class="mc-btns">${list}<button id="pp-skip">Não ativar</button></div>
+        </div>`);
+      el.querySelectorAll<HTMLElement>('[data-pick]').forEach(b => { b.onclick = () => { this.pRepick = false; this.act({ type: 'puppetPick', monsterId: b.dataset.pick! }, 'Lápide'); }; });
+      (el.querySelector('#pp-skip') as HTMLElement).onclick = () => this.act({ type: 'puppetSkip' }, 'Lápide');
+      this.hud.setHint(`🪦 <b>${p.source}</b>: clique num ${p.cat} que está piscando`);
+      return;
+    }
+    const m = g.unit(p.monsterId);
+    const md = MONSTERS[m.defId];
+    // o quadro da esquerda mostra o Monstro que você está controlando
+    if (this.hud.inspected !== m.id) { this.hud.inspected = m.id; this.hud.refresh(); }
+    const o = g.puppetOptions();
+    if (!o) { this.act({ type: 'puppetSkip' }, 'Lápide'); return; }
+    hl.moveColor = 'purple';
+    hl.activeUnit = m.id;
+    for (const [k, n] of o.reach) if (n.canEnd && n.prev !== null) hl.move.set(k, n.mp);
+    hl.attackCells = new Set([...o.targets].filter(([, ids]) => ids.length).map(([k]) => k));
+    const dest = this.pDest && o.reach.get(key(this.pDest))?.canEnd ? this.pDest : m.cell!;
+    hl.path = sameCell(dest, m.cell) ? [] : g.pathTo(o.reach, dest).map(n => n.cell);
+    const targets = o.targets.get(key(dest)) ?? [];
+    hl.attackUnits = new Set(targets);
+    const tl = targets.map(id => { const u = g.unit(id); return `<button class="primary" data-hit="${id}"><img class="cf-face" src="${this.hud.portraitOf(u)}"/> ⚔ ${g.name(u)}</button>`; }).join('');
+    const el = this.hud.monsterPanel(`
+      <div class="panel-h">🪦 ${p.source} — você controla o ${md.name}</div>
+      <div class="mc-body">
+        <p>Mova até <b>${md.move}</b> Espaço${md.move > 1 ? 's' : ''} (<span class="pu">■</span> roxo) e/ou ataque <b>qualquer Herói</b> (${md.attackType === 'melee' ? '⚔ Próximo' : '➶ Distância'}, ${md.dice} dados) — clique no Herói em <span class="rd">vermelho</span>.</p>
+        <p class="mc-legend">Destino: <b>${sameCell(dest, m.cell) ? 'ficar parado' : `(${dest.c},${dest.r})`}</b> · <span class="rd">◇</span> de lá ele ataca alguém</p>
+        <div class="mc-btns">${tl || '<i>Nenhum Herói ao alcance daqui.</i>'}
+          ${sameCell(dest, m.cell) ? '' : '<button id="pp-move">Só mover</button><button id="pp-reset">Ficar parado</button>'}
+          ${cands.length > 1 ? '<button id="pp-other">Outro Monstro</button>' : ''}<button id="pp-skip">Não ativar</button></div>
+      </div>`);
+    const go = (targetId: string | null) => {
+      const d = dest;
+      this.pDest = null;
+      this.hud.monsterPanel(null);
+      this.act({ type: 'puppet', dest: sameCell(d, m.cell) ? null : d, targetId }, 'Lápide');
+    };
+    el.querySelectorAll<HTMLElement>('[data-hit]').forEach(b => { b.onclick = () => go(b.dataset.hit!); });
+    const mv = el.querySelector('#pp-move') as HTMLElement | null;
+    if (mv) mv.onclick = () => go(null);
+    const rs = el.querySelector('#pp-reset') as HTMLElement | null;
+    if (rs) rs.onclick = () => { this.pDest = null; this.refresh(); };
+    const ot = el.querySelector('#pp-other') as HTMLElement | null;
+    if (ot) ot.onclick = () => { this.pDest = null; this.pRepick = true; this.refresh(); };
+    (el.querySelector('#pp-skip') as HTMLElement).onclick = () => { this.pDest = null; this.act({ type: 'puppetSkip' }, 'Lápide'); };
+    this.hud.setHint(`🪦 Você controla o <b>${md.name}</b>: Espaço roxo = mover · Herói vermelho = atacar`);
+  }
+
   /** Botas (Das Boot / Die Booten): escolhendo para onde mover o outro Herói. */
   private bootMode: { heroId: string; cardUid: string } | null = null;
   /** Habilidade do Herói (Teleporte, Chamado): escolhendo o Espaço. */
@@ -1330,6 +1455,30 @@ export class Controller {
         const i = uid ? cp.req.units!.indexOf(uid) : -1;
         if (i >= 0) cp.resolve(i);
       }
+      return;
+    }
+    const pup = this.game.s.puppet;
+    if (pup && !this.game.s.pending) {
+      if (!this.isMine(pup.guild) || this.renderer.busy) return;
+      const uid = this.renderer.pickUnit(x, y);
+      const cell = this.renderer.pickCell(x, y);
+      if (!pup.monsterId || this.pRepick) {
+        const ids = new Set(this.game.puppetCandidates(pup.cat).map(m => m.id));
+        const hit = uid && ids.has(uid) ? uid : cell ? this.game.unitsAt(cell).find(u => ids.has(u.id))?.id : undefined;
+        if (hit) { this.pRepick = false; this.act({ type: 'puppetPick', monsterId: hit }, 'Lápide'); }
+        return;
+      }
+      const hl = this.renderer.hl;
+      const target = uid && hl.attackUnits.has(uid) ? uid : cell ? this.game.unitsAt(cell).find(u => hl.attackUnits.has(u.id))?.id : undefined;
+      if (target) {
+        const m = this.game.unit(pup.monsterId);
+        const d = this.pDest && !sameCell(this.pDest, m.cell) ? this.pDest : null;
+        this.pDest = null;
+        this.hud.monsterPanel(null);
+        this.act({ type: 'puppet', dest: d, targetId: target }, 'Lápide');
+        return;
+      }
+      if (cell && hl.move.has(key(cell))) { this.pDest = cell; this.refresh(); }
       return;
     }
     const pend = this.game.s.pending;
@@ -1751,6 +1900,7 @@ export class Controller {
     const el = document.getElementById('gamemenu')!;
     this.menuOpen = true;
     const host = this.canRestart();
+    const online = this.mode !== 'local';
     const where = this.campaignEnd ? 'Campanha' : this.mode === 'local' ? 'Modo Teste' : 'Online';
     const item = (id: string, icon: string, label: string, sub: string, cls = '', off = false) =>
       `<button id="${id}" class="gm-item ${cls}" ${off ? 'disabled' : ''}><span class="gm-ic">${icon}</span><span class="gm-txt"><b>${label}</b><small>${sub}</small></span></button>`;
@@ -1759,7 +1909,8 @@ export class Controller {
       ${item('gm-continue', '▶', 'Continuar', 'Voltar para o jogo', 'primary')}
       <div class="gm-grid">
         ${item('gm-undo', '↶', 'Desfazer jogada', host ? (this.history.length ? `Volta: ${this.history[this.history.length - 1].label}` : 'Nenhuma jogada para desfazer') : 'Só o anfitrião', '', !(host && this.history.length))}
-        ${item('gm-turn', '⏮', 'Reiniciar turno', host ? 'Volta para o começo deste turno' : 'Só o anfitrião', '', !(host && this.turnStart))}
+        ${online ? item('gm-vote', '🗳️', 'Votar: voltar o turno', this.poll ? 'Já há uma votação aberta' : 'Todos votam; a maioria decide', '', !!this.poll)
+          : item('gm-turn', '⏮', 'Reiniciar turno', 'Volta para o começo deste turno', '', !this.turnStart)}
         ${item('gm-restart', '🔄', 'Reiniciar partida', host ? 'Começa este mapa de novo' : 'Só o anfitrião', '', !host)}
         ${item('gm-lib', '📚', 'Biblioteca', 'Heróis, cartas, regras')}
         ${item('gm-set', '⚙️', 'Configurações', 'Som, tela, velocidade')}
@@ -1775,7 +1926,10 @@ export class Controller {
       close();
       this.restartMatch();
     };
-    (el.querySelector('#gm-turn') as HTMLElement).onclick = () => { close(); this.restartTurn(); };
+    const gt = el.querySelector('#gm-turn') as HTMLElement | null;
+    if (gt) gt.onclick = () => { close(); this.restartTurn(); };
+    const gv = el.querySelector('#gm-vote') as HTMLElement | null;
+    if (gv) gv.onclick = () => { close(); this.undoVote(true); };
     (el.querySelector('#gm-undo') as HTMLElement).onclick = () => { close(); this.undoMove(); };
     (el.querySelector('#gm-lib') as HTMLElement).onclick = () => { close(); this.openLibrary(); };
     (el.querySelector('#gm-set') as HTMLElement).onclick = () => { close(); this.openSettings(); };

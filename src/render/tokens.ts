@@ -3,10 +3,10 @@ import type { Token } from '../engine/types';
 // Imagens dos marcadores (public/tokens/<id>.webp, geradas por tools/build_tokens.py).
 
 const IDS = ['fundo', 'cura', 'revigorante', 'turno', 'armadilha', 'bau1', 'bau2', 'bau3',
-  'missao_azul', 'missao_vermelho', 'missao_verde', 'missao_laranja', 'missao_morte'];
+  'missao_azul', 'missao_vermelho', 'missao_verde', 'missao_laranja', 'missao_morte', 'lapide'];
 const imgs = new Map<string, HTMLImageElement>();
 
-export const TOKEN_COUNT = 13;
+export const TOKEN_COUNT = 14;
 
 export function tokenUrl(id: string) { return `${import.meta.env.BASE_URL}tokens/${id}.webp`; }
 

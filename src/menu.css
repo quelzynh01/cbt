@@ -280,7 +280,7 @@
 .inv-count.bad { color: #ff7a5c; }
 .inv-curse { font-size: 12px; color: #ffb3a3; background: #4a1d1d; border-radius: 8px; padding: 3px 8px; margin-bottom: 8px; display: inline-block; }
 .inv-slots, .inv-row { display: flex; flex-wrap: wrap; gap: 10px; }
-.inv-slot { padding: 0; border-radius: 12px; background: none; border: none; box-shadow: none; width: 118px; height: 190px; position: relative; display: grid; place-items: center; overflow: hidden; }
+.inv-slot { padding: 0; border-radius: 12px; background: none; border: none; box-shadow: none; width: 118px; height: 200px; position: relative; display: grid; place-items: center; overflow: hidden; }
 .inv-slot.full .acard { zoom: .55; pointer-events: none; }
 .inv-slot.full:hover:not(:disabled) { transform: translateY(-3px); filter: brightness(1.12); }
 .inv-slot.full:hover:not(:disabled)::after { content: '⇄ Trocar'; position: absolute; left: 6px; right: 6px; bottom: 6px; background: rgba(20,12,6,.85); color: #ffe3a3; font-size: 12px; font-weight: 800; border-radius: 8px; padding: 2px 0; }
@@ -302,7 +302,7 @@
 .ip-head b { color: var(--gold); }
 .ip-cur { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; background: rgba(0,0,0,.3); border-radius: 12px; padding: 8px 10px; margin-bottom: 8px; }
 .ip-grid { display: flex; flex-wrap: wrap; gap: 12px; }
-.ip-card { padding: 0; background: none; border: none; box-shadow: none; position: relative; width: 140px; height: 228px; display: grid; place-items: start center; }
+.ip-card { padding: 0; background: none; border: none; box-shadow: none; position: relative; width: 140px; height: 240px; display: grid; place-items: start center; }
 .ip-card .acard { zoom: .65; pointer-events: none; }
 .ip-card:hover { transform: translateY(-3px); filter: brightness(1.12); }
 .ip-where { position: absolute; left: 6px; right: 6px; bottom: 2px; font-size: 11px; font-weight: 800; background: #5a4a3a; color: #fff; border-radius: 8px; text-align: center; padding: 1px 0; }
@@ -371,7 +371,7 @@
 #restbox .inv-heroes { grid-template-columns: repeat(auto-fit, minmax(236px, 1fr)); gap: 8px; }
 #restbox .inv-hero { padding: 8px; }
 #restbox .inv-hero .inv-slots { grid-template-columns: repeat(2, 104px); gap: 8px; }
-#restbox .inv-slot { width: 104px; height: 168px; }
+#restbox .inv-slot { width: 104px; height: 177px; }
 #restbox .inv-slot.full .acard { zoom: .485; }
 @media (max-height: 560px) {
   .inv-heroes, #restbox .inv-heroes { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 6px; }
@@ -379,7 +379,7 @@
   .inv-hh { margin-bottom: 4px; gap: 6px; }
   .inv-hh canvas { width: 32px; height: 32px; }
   .inv-hero .inv-slots, #restbox .inv-hero .inv-slots { grid-template-columns: repeat(2, 76px); gap: 6px; }
-  .inv-slot, #restbox .inv-slot { width: 76px; height: 122px; }
+  .inv-slot, #restbox .inv-slot { width: 76px; height: 129px; }
   .inv-slot.full .acard, #restbox .inv-slot.full .acard { zoom: .355; }
   .inv-slot.empty span { font-size: 26px; }
   .inv-slot.empty small { font-size: 9px; }
@@ -411,9 +411,9 @@
 .hub-curse { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #ffc6e0; background: #4a1d2e; border-radius: 8px; padding: 3px 8px; margin-bottom: 6px; }
 .hub-curse img { width: 30px; height: 30px; object-fit: contain; flex: none; }
 .hub-cards { display: grid; grid-template-columns: repeat(2, 96px); justify-content: center; gap: 6px; }
-.hub-card { width: 96px; height: 154px; }
+.hub-card { width: 96px; height: 163px; }
 .hub-card .acard { zoom: .448; }
-@media (max-height: 560px) { .hub-cards { grid-template-columns: repeat(4, 64px); } .hub-card { width: 64px; height: 103px; } .hub-card .acard { zoom: .3; } }
+@media (max-height: 560px) { .hub-cards { grid-template-columns: repeat(4, 64px); } .hub-card { width: 64px; height: 109px; } .hub-card .acard { zoom: .3; } }
 .hub-other { padding: 6px 8px; border-radius: 12px; background: rgba(0,0,0,.2); border-left: 4px solid var(--gc); margin-bottom: 8px; }
 .hub-ohs { display: grid; gap: 4px; margin-top: 4px; }
 .hub-oh { display: flex; align-items: center; gap: 6px; }
@@ -431,12 +431,12 @@
 .hub-oh { display: grid; gap: 4px; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,.06); }
 .hub-ohh { display: flex; align-items: center; gap: 6px; }
 .hub-ocards { display: flex; flex-wrap: wrap; gap: 4px; }
-.hub-ocard { width: 58px; height: 93px; }
+.hub-ocard { width: 58px; height: 98px; }
 .hub-ocard .acard { zoom: .27; }
 
 /* arrastar cartas no editor */
 .inv-slot.full { touch-action: none; }
-.inv-ghost { position: fixed; z-index: 9500; pointer-events: none; transform: translate(-50%, -60%) rotate(-4deg) scale(1.05); opacity: .92; filter: drop-shadow(0 10px 18px rgba(0,0,0,.6)); width: 118px; height: 190px; overflow: hidden; border-radius: 12px; }
+.inv-ghost { position: fixed; z-index: 9500; pointer-events: none; transform: translate(-50%, -60%) rotate(-4deg) scale(1.05); opacity: .92; filter: drop-shadow(0 10px 18px rgba(0,0,0,.6)); width: 118px; height: 200px; overflow: hidden; border-radius: 12px; }
 .inv-ghost .acard { zoom: .55; }
 .inv-dragging { opacity: .35; }
 .inv-over { outline: 3px solid #ffe14d; outline-offset: 2px; border-radius: 12px; }
@@ -474,7 +474,7 @@
 /* Descansar: mais alto e mais compacto (as bolsas cabem na tela) */
 #restbox { top: 60px; max-height: calc(100% - 140px); }
 #restbox .inv-hero .inv-slots { grid-template-columns: repeat(2, 88px); gap: 6px; }
-#restbox .inv-slot { width: 88px; height: 142px; }
+#restbox .inv-slot { width: 88px; height: 150px; }
 #restbox .inv-slot.full .acard { zoom: .41; }
 #restbox .inv-hh { margin-bottom: 4px; }
 #restbox .inv-hh canvas { width: 36px; height: 36px; }

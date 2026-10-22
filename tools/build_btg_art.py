@@ -118,3 +118,17 @@ def maps():
 
 if __name__ == '__main__' and os.environ.get('MAPS'):
     maps()
+
+
+# ------------------------------------------------------------------ carta inicial "Sickle" (Foice), p.6 do livro
+def card_art():
+    """public/cards/foice.webp: a ilustração da carta Sickle (mesmo formato 3:2 das outras artes 'fill')."""
+    doc = pymupdf.open(PDF)
+    pix = doc[5].get_pixmap(matrix=pymupdf.Matrix(8, 8), clip=pymupdf.Rect(127, 269, 199, 318.5))
+    im = Image.open(io.BytesIO(pix.tobytes('png'))).convert('RGB').resize((512, 343), Image.LANCZOS)
+    im.save(os.path.join(ROOT, 'public', 'cards', 'foice.webp'), 'WEBP', quality=88, method=6)
+    print('carta foice')
+
+
+if __name__ == '__main__' and os.environ.get('CARDS'):
+    card_art()

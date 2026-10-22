@@ -80,6 +80,8 @@ export interface CardDef {
   partial?: boolean;
   /** Recompensa: cenário de origem. */
   scenario?: string;
+  /** Carta de Beyond the Grave (a Foice inicial). */
+  btg?: boolean;
 }
 
 type Opt = Partial<Omit<CardDef, 'id' | 'name' | 'code' | 'kind' | 'level' | 'cost' | 'qty' | 'group'>>;
@@ -98,6 +100,8 @@ function boost(id: string, name: string, code: string, level: string, qty: numbe
 // ------------------------------------------------------------------ Iniciais
 atk('espada_enferrujada', 'Espada Enferrujada', 'S-01', 'I', 4, 0, 'melee', 'Espada', 3);
 atk('adaga_aparadora', 'Adaga Aparadora', 'S-02', 'I', 4, 0, 'melee', 'Espada', 2, { defBonus: 1, text: '+1 Defesa.' });
+// Beyond the Grave (p.6): a 6ª carta inicial; cada Guilda fica só com 5 e descarta 1
+atk('foice', 'Foice', 'BGS-01', 'I', 1, 0, 'melee', 'Machado', 2, { rerolls: 1, btg: true });
 atk('estilingue', 'Estilingue', 'S-03', 'I', 4, 0, 'ranged', 'Arco', 2);
 atk('raio_nova', 'Raio Nova', 'S-04', 'I', 4, 0, 'ranged', 'Mágica', 2, { fx: { extraOnCrit: true }, text: 'Se rolar algum ✷, pode atingir um Inimigo adicional Perto do alvo.' });
 atk('drenar_vida', 'Drenar Vida', 'S-05', 'I', 4, 0, 'ranged', 'Mágica', 2, { fx: { drain: 'self' }, text: 'Cada acerto cura 1 Ferimento deste Herói.' });
@@ -207,9 +211,21 @@ perm('tomo_iluminacao', 'Tomo da Iluminação', 'R-UP', 'R', 2, 0, 'Equipamento'
 
 export const CARDS: Record<string, CardDef> = Object.fromEntries(LIST.map(c => [c.id, c]));
 
-/** Baralho de Melhoria de um nível (com as quantidades). */
-export function upgradeDeck(level: number): string[] {
-  return LIST.filter(c => c.level === String(level)).flatMap(c => Array(c.qty).fill(c.id));
+/** Beyond the Grave (p.6, "Removed Cards"): 1 cópia de cada uma sai do baralho de Melhoria do nível.
+ *  (As 6 cartas novas de cada nível não estão no livro.) */
+export const BTG_REMOVED: Record<number, string[]> = {
+  1: ['lamina_confiavel', 'sangradora', 'arco_crescente', 'rajada_vento', 'fender', 'esmaga_orcs'],
+  2: ['dizimador', 'esmaga_cara', 'odio', 'coracao_unicornio', 'tiro_flamejante', 'armadura_cavaleiro'],
+  3: ['enxofre', 'espinho', 'rajada_vento2', 'grito_guerra', 'raio_nova2', 'anel_sol2'],
+  4: ['ulceracao', 'sede_sangue', 'odio2', 'incinerar', 'escudo_rei', 'coracao_fenix'],
+  5: ['bomba_apetitosa', 'tiro_certeiro', 'golpe_astral2', 'incinerar2', 'armadura_imperador', 'anel_lua3'],
+};
+
+/** Baralho de Melhoria de um nível (com as quantidades). Beyond the Grave tira 1 cópia das cartas de BTG_REMOVED. */
+export function upgradeDeck(level: number, edition?: string): string[] {
+  const deck = LIST.filter(c => c.level === String(level)).flatMap(c => Array(c.qty).fill(c.id) as string[]);
+  if (edition === 'btg') for (const id of BTG_REMOVED[level] ?? []) { const i = deck.indexOf(id); if (i >= 0) deck.splice(i, 1); }
+  return deck;
 }
 
 // ------------------------------------------------------------------ Maldições Mortais (deathcurses.csv)

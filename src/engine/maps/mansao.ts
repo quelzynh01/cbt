@@ -33,6 +33,8 @@ export const MANSAO: MapDef = {
     [C(7, 0), C(7, 1)], [C(8, 0), C(8, 1)],
     [C(1, 5), C(1, 4)], [C(2, 5), C(3, 5)],
     [C(6, 5), C(5, 5)], [C(7, 5), C(7, 4)], [C(7, 5), C(8, 5)],
+    // sala de cima (portais turquesa e magenta): fechada, só se entra pelos portais
+    [C(2, 0), C(3, 0)], [C(5, 0), C(6, 0)], [C(3, 0), C(3, 1)], [C(4, 0), C(4, 1)], [C(5, 0), C(5, 1)],
     // salão do meio (linha 2)
     [C(0, 2), C(0, 1)], [C(0, 2), C(0, 3)],
     [C(1, 2), C(1, 1)], [C(7, 2), C(7, 1)],

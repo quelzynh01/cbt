@@ -12,6 +12,7 @@ NAMES = {
     'fundo_tokens': 'fundo', 'healing': 'cura', 'refresh': 'revigorante', 'turn': 'turno', 'trap': 'armadilha',
     'gold1': 'bau1', 'gold2': 'bau2', 'gold3': 'bau3',
     'azul': 'missao_azul', 'vermelho': 'missao_vermelho', 'verde': 'missao_verde', 'laranja': 'missao_laranja',
+    'lapide': 'lapide',  # Lápide de Beyond the Grave (em pé no tabuleiro)
 }
 SIZE = 256
 

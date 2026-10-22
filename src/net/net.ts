@@ -59,7 +59,15 @@ export type Msg =
   /** Marcação no tabuleiro (Ctrl + clique): todos veem a seta na cor de quem marcou. */
   | { t: 'ping'; guild?: GuildId; cell: { c: number; r: number } }
   /** Batimento: mostra que a conexão continua viva (anfitrião <-> jogadores). */
-  | { t: 'hb' };
+  | { t: 'hb' }
+  /** Votação para voltar o turno: jogador -> anfitrião (abrir ou votar). */
+  | { t: 'undoVote'; open?: boolean; yes?: boolean }
+  /** Votação para voltar o turno: anfitrião -> todos (situação atual; null = encerrada). */
+  | { t: 'undoPoll'; poll: UndoPoll | null; result?: string };
+
+/** Votação "voltar o turno" (online): passa com a maioria dos jogadores (sim > metade). */
+export interface UndoPoll { by: string; voters: { id: string; name: string }[]; yes: string[]; no: string[]; ends: number }
+const POLL_MS = 30000;
 
 /** A cada quantos ms o anfitrião manda o batimento; sem notícia por DEAD_MS, a conexão é dada como morta e refeita. */
 const HB_MS = 4000;
@@ -104,6 +112,8 @@ export interface SessionEvents {
   view?(guild: GuildId, c: [number, number, number], m: [number, number] | null, sel?: string | null): void;
   /** Alguém marcou um Espaço (Ctrl + clique). */
   ping?(guild: GuildId, cell: { c: number; r: number }): void;
+  /** Votação para voltar o turno mudou (null = encerrada; `result` = como terminou). */
+  undoPoll?(poll: UndoPoll | null, result?: string): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -242,6 +252,8 @@ export class HostSession {
         if (why) conn.send({ t: 'reject', reason: why } satisfies Msg);
       } else if (m.t === 'chat') {
         this.chatAll(seat.name, m.text.slice(0, 200), colorOf(seat.guild));
+      } else if (m.t === 'undoVote' && this.lobby.started) {
+        if (m.open) this.openUndoVote(cid); else this.castUndo(cid, !!m.yes);
       } else if (m.t === 'ping' && this.lobby.started) {
         const out: Msg = { t: 'ping', guild: seat.guild, cell: m.cell };
         for (const [id, c] of this.conns) if (id !== cid && c.open) c.send(out);
@@ -282,6 +294,55 @@ export class HostSession {
       c.send({ t: 'lobby', lobby: this.lobbyFor(seat?.guild ?? null) } satisfies Msg);
     }
     this.ev.lobby(this.lobbyFor(this.lobby.seats[0].guild));
+  }
+
+  // ---------------------------------------------------------------- votação para voltar o turno
+  private poll: UndoPoll | null = null;
+  private pollTimer = 0;
+  /** O anfitrião faz a volta quando a votação passa (o controlador liga isto). Retorna false se não há turno para voltar. */
+  onUndoPassed: () => boolean = () => false;
+  /** Jogadores que votam: as vagas humanas conectadas (a IA não vota). */
+  private voters() { return this.lobby.seats.filter(s => !s.ai && (s.connected || s.clientId === this.me)).map(s => ({ id: s.clientId, name: s.name })); }
+  private pushPoll(result?: string) {
+    this.broadcast({ t: 'undoPoll', poll: this.poll, result });
+    this.ev.undoPoll?.(this.poll, result);
+  }
+  /** Abre a votação (quem abre já vota sim). */
+  openUndoVote(cid: string) {
+    if (this.poll) return;
+    const voters = this.voters();
+    const who = voters.find(v => v.id === cid);
+    if (!who) return;
+    this.poll = { by: who.name, voters, yes: [cid], no: [], ends: Date.now() + POLL_MS };
+    this.chatAll('Sistema', `🗳️ ${who.name} abriu uma votação para voltar o turno.`);
+    clearTimeout(this.pollTimer);
+    this.pollTimer = window.setTimeout(() => this.closePoll(false, 'tempo esgotado'), POLL_MS);
+    this.checkPoll();
+  }
+  castUndo(cid: string, yes: boolean) {
+    const p = this.poll;
+    if (!p || !p.voters.some(v => v.id === cid)) return;
+    p.yes = p.yes.filter(x => x !== cid); p.no = p.no.filter(x => x !== cid);
+    (yes ? p.yes : p.no).push(cid);
+    this.checkPoll();
+  }
+  private checkPoll() {
+    const p = this.poll!;
+    const n = p.voters.length;
+    if (p.yes.length * 2 > n) return this.closePoll(true);
+    if (p.no.length * 2 >= n || p.yes.length + p.no.length >= n) return this.closePoll(false, 'a maioria não aprovou');
+    this.pushPoll();
+  }
+  private closePoll(ok: boolean, why = '') {
+    if (!this.poll) return;
+    clearTimeout(this.pollTimer);
+    const p = this.poll;
+    this.poll = null;
+    const done = ok && this.onUndoPassed();
+    const result = done ? `✅ Votação aprovada (${p.yes.length}/${p.voters.length}): o turno voltou ao começo.`
+      : ok ? '⚠️ Votação aprovada, mas não há turno para voltar.' : `❌ Votação recusada (${why}). A partida continua.`;
+    this.chatAll('Sistema', result);
+    this.pushPoll(result);
   }
 
   chatAll(from: string, text: string, color?: string) {
@@ -446,6 +507,7 @@ export class ClientSession {
         case 'chat': this.ev.chat(m.from, m.text, m.color); break;
         case 'view': if (m.guild) this.ev.view?.(m.guild, m.c, m.m, m.sel); break;
         case 'ping': if (m.guild) this.ev.ping?.(m.guild, m.cell); break;
+        case 'undoPoll': this.ev.undoPoll?.(m.poll, m.result); break;
         case 'kicked': this.shutdown(); this.ev.status(m.reason, 'error'); break;
       }
     });
@@ -468,6 +530,8 @@ export class ClientSession {
     this.send({ t: 'pick', ...p });
   }
   chat(text: string) { this.send({ t: 'chat', from: this.name, text }); }
+  /** Votação para voltar o turno: abrir (open) ou votar. */
+  undoVote(open: boolean, yes = true) { this.send(open ? { t: 'undoVote', open: true } : { t: 'undoVote', yes }); }
   close() { this.shutdown(); }
   private shutdown() {
     if (!this.closed) keepAwake(false);

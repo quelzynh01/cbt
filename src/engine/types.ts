@@ -210,6 +210,8 @@ export interface GameState {
   winner: GuildId | null;
   turn: number;
   pending?: PendingVengeance | null;
+  /** Lápide "ativar um Monstro" esperando o jogador (humano): escolhe o Monstro e o move/ataca como um Herói. */
+  puppet?: { by: string; guild: GuildId; cat: string; source: string; monsterId: string | null } | null;
   /** Tempo de jogo da partida (ms). */
   elapsed?: number;
   /** Nível dos Monstros desta partida. */
@@ -305,6 +307,8 @@ export type GameEvent =
   | { t: 'reward'; heroId: string; cardId: string }
   /** Habilidade Natural ativada (Furtividade do Vapor, Vingança do Espetado…). */
   | { t: 'skill'; id: string; skill: string; name: string }
+  /** Aviso na tela de todos (ex.: a Lápide não tem Monstro para ativar). */
+  | { t: 'notice'; text: string; color?: string }
   /** Lápide revelada (Beyond the Grave): o texto aparece na tela de todos. */
   | { t: 'tomb'; heroId: string; name: string; text: string; good: boolean }
   | { t: 'drop'; cell: Cell; tokens: Token[] }

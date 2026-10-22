@@ -302,7 +302,7 @@ export class Hud {
     el.innerHTML = `<img src="${this.portrait(u.defId, cur.color)}"/>
       <div class="ap-info">
         <b>${HEROES[u.defId].name}</b><span class="ap-title">${HEROES[u.defId].title}</span>
-        <span class="ap-stats"><span title="Vida">❤ ${max - u.wounds}/${max}</span><span title="Defesa">⛨ ${g.defenseDice(u)}</span><span title="Cartas de Ataque prontas">⚔ ${ready} pronta${ready === 1 ? '' : 's'}</span>${u.stunned ? '<span class="ap-stun">✷ Atordoado</span>' : ''}</span>
+        ${u.stunned ? '<span class="ap-stats"><span class="ap-stun">✷ Atordoado</span></span>' : ''}
         ${note ? `<span class="ap-note">${note}</span>` : ''}
       </div>
       <button class="primary" id="ap-go">▶ Ativar</button><button id="ap-x" title="Cancelar (Esc)">✕</button>`;
@@ -761,9 +761,12 @@ export class Hud {
       const md = MONSTERS[u.defId];
       box.innerHTML = `
         <div class="hb-head"><img src="${this.portrait(u.defId, '#7a2b8f')}"/><div><div class="hb-name">${md.name}</div><div class="hb-sub">${md.category} · Nível ${md.level}</div></div><button class="lupa" id="hb-card" title="Ver a carta com os valores atuais">🔍</button><button class="x" id="hb-close">✕</button></div>
-        <div class="stats">
-          <span title="Vida atual" class="${stat(md.hp - u.wounds, md.hp)}">❤ ${md.hp - u.wounds}/${md.hp}</span><span title="Extermínio">☠ ${md.exterm}</span>
-          <span title="Defesa" class="${stat(g.defenseDice(u), md.defense)}">⛨ ${g.defenseDice(u)}</span><span title="Movimento">👣 ${md.move}</span><span title="Recompensa">🪙 ${md.reward}</span>
+        <div class="stats hb-meds">
+          ${u.alive && md.hp - u.wounds > 0 ? medal('hp', md.hp - u.wounds, `Vida: ${md.hp - u.wounds} de ${md.hp}`, `hbm${u.wounds ? ' down' : ''}`) : `<span class="hbm-zero" title="Sem Vida"><img src="${import.meta.env.BASE_URL}bonus/hp1.webp" alt=""/><b>0</b></span>`}
+          ${Number.isFinite(md.exterm) && md.exterm > 0 ? medal('skull', md.exterm, `Extermínio: ${md.exterm} Ferimentos num só ataque matam sem Vingança`, 'hbm') : ''}
+          ${g.defenseDice(u) > 0 ? medal('def', g.defenseDice(u), `${g.defenseDice(u)} dado${g.defenseDice(u) === 1 ? '' : 's'} de Defesa`, `hbm${g.defenseDice(u) > md.defense ? ' up' : g.defenseDice(u) < md.defense ? ' down' : ''}`) : ''}
+          ${g.rerollsOf(u) > 0 ? medal('rr', g.rerollsOf(u), `Rerrolagem ${g.rerollsOf(u)}`, 'hbm') : ''}
+          ${medal('move', md.move, `Movimento: ${md.move}`, 'hbm')}${medal('coin', md.reward, `Recompensa: ${md.reward} moeda(s)`, 'hbm')}
         </div>
         <div class="mcard"><b>${md.attackType === 'melee' ? '⚔ Ataque Próximo' : '➶ Ataque a Distância'}</b> — ${md.attackName}: ${md.dice} dados</div>
         <div class="hb-note">Reação de Alerta: ataca quem sair de um Espaço Perto dele ou atacar outro alvo estando Perto.<br/>Reação de Vingança: ao ser atacado, move até ${md.move} e revida.</div>
@@ -930,6 +933,7 @@ export class Hud {
         break;
       }
       case 'useToken': this.log(`${g.name(g.unit(e.heroId))} usou: ${TOKEN_INFO[e.token.type].name}`); break;
+      case 'notice': this.banner(e.text, e.color ?? '#b892ff'); this.log(e.text, e.color); break;
       case 'tomb': {
         const h = g.unit(e.heroId);
         const col = h.guild ? GUILDS[h.guild].color : '#b892ff';

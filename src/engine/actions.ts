@@ -16,6 +16,10 @@ export type Action =
   | { type: 'rest'; opts?: RestOptions }
   | { type: 'end' }
   | { type: 'vengeance'; dest: Cell | null; attack: boolean }
+  /** Lápide: escolhe o Monstro a ativar; depois move (opcional) até `dest` e ataca `targetId` (opcional). */
+  | { type: 'puppetPick'; monsterId: string }
+  | { type: 'puppet'; dest: Cell | null; targetId: string | null }
+  | { type: 'puppetSkip' }
   | { type: 'place'; heroId: string; cell: Cell }
   /** Posicionamento de vários Heróis de uma vez (troca de lugar, aleatório). */
   | { type: 'placeMany'; moves: { heroId: string; cell: Cell }[] }
@@ -33,6 +37,11 @@ export function applyAction(g: Game, by: GuildId, a: Action): boolean {
     return g.resolveVengeance(a.dest, a.attack);
   }
   if (g.currentGuild().id !== by || g.s.pending) return false;
+  if (a.type === 'puppetPick' || a.type === 'puppet' || a.type === 'puppetSkip') {
+    if (g.s.puppet?.guild !== by) return false;
+    return a.type === 'puppetPick' ? g.puppetPick(a.monsterId) : a.type === 'puppet' ? g.puppetAct(a.dest, a.targetId) : g.puppetSkip();
+  }
+  if (g.s.puppet) return false;
   switch (a.type) {
     case 'activate': return g.activate(a.heroId);
     case 'move': return g.moveTo(a.cell, !!a.openDoors);

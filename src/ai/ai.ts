@@ -47,6 +47,9 @@ export type AIAction =
   /** Habilidade do Herói usada como ação (Heróis extras). */
   | { type: 'power'; heroId: string; target?: string; cell?: Cell }
   | { type: 'tomb' }
+  /** Lápide que ativa um Monstro (quando a IA joga por um humano): escolhe, move e ataca. */
+  | { type: 'puppetPick'; monsterId: string }
+  | { type: 'puppet'; dest: Cell | null; targetId: string | null }
   | { type: 'rest'; opts?: RestOptions }
   | { type: 'end' };
 
@@ -113,6 +116,7 @@ export class SimpleAI {
   private noise(scale = 1) { return this.hard ? 0 : (this.rnd() - 0.5) * 1.4 * scale; }
 
   next(g: Game): AIAction {
+    if (g.s.puppet) return this.puppet(g);
     if (!g.s.activation) {
       this.queue = [];
       this.usedToken = false;
@@ -493,6 +497,30 @@ export class SimpleAI {
    *  cells: Espaços onde a presença de um Herói desta Guilda impede a Missão; heroes: quem derrubar.
    *  Vale o dobro contra quem está a 1 Missão da vitória. Calculado uma vez por situação do tabuleiro. */
   private thrCache: { k: string; v: { cells: Map<string, number>; heroes: Map<string, number> } } | null = null;
+  /** Lápide: ativa o Monstro que alcança o Herói Inimigo mais ferido e ataca. */
+  private puppet(g: Game): AIAction {
+    const p = g.s.puppet!;
+    const by = g.unit(p.by);
+    const foe = (id: string) => g.isEnemy(by, g.unit(id));
+    if (!p.monsterId) {
+      const mons = g.puppetCandidates(p.cat);
+      const best = mons.find(m => g.heroesInReach(m).some(u => foe(u.id))) ?? mons[0];
+      return { type: 'puppetPick', monsterId: best.id };
+    }
+    const o = g.puppetOptions();
+    let pick: { cell: string; t: string; score: number } | null = null;
+    for (const [k, ids] of o?.targets ?? []) for (const id of ids) {
+      if (!foe(id)) continue;
+      const u = g.unit(id);
+      const score = u.wounds / Math.max(1, g.maxHp(u)) + u.tokens.filter(x => x.type === 'missao').length;
+      if (!pick || score > pick.score) pick = { cell: k, t: id, score };
+    }
+    if (!pick) return { type: 'puppet', dest: null, targetId: null };
+    const m = g.unit(p.monsterId);
+    const [c, r] = pick.cell.split(',').map(Number);
+    return { type: 'puppet', dest: m.cell && m.cell.c === c && m.cell.r === r ? null : { c, r }, targetId: pick.t };
+  }
+
   threats(g: Game, me: GuildId): { cells: Map<string, number>; heroes: Map<string, number> } {
     const k = `${me}|${g.s.turn}|${g.s.current}|${g.onBoard().filter(u => u.kind === 'hero').map(u => `${u.id}${u.cell!.c},${u.cell!.r}${u.tokens.length}`).join(';')}|${Object.keys(g.s.floor).length}|${JSON.stringify(g.s.arena ?? {})}`;
     if (this.thrCache?.k === k) return this.thrCache.v;
