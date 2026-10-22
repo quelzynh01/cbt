@@ -1644,6 +1644,8 @@ export class Controller {
     const gid = this.myDeployGuild();
     const pending = this.game.s.deploying ?? [];
     if (!gid) {
+      // só faltam as IAs (posicionam na hora): não mostra o painel de espera, que piscava por cima do placar
+      if (pending.every(x => this.game.guild(x).controller === 'ai')) { this.hud.panel('deploybox', null); this.hud.setHint(''); return; }
       // já posicionou: espera os outros
       this.hud.panel('deploybox', `
         <div class="panel-h">⏳ Posicionamento</div>
@@ -1687,7 +1689,9 @@ export class Controller {
       const where = heroes.map(h => `<li><b>${HEROES[h.defId].name}</b> — ${sameCell(h.cell, this.game.startCellsByExit(gid)[0]) ? 'na porta' : 'na Área Inicial'}</li>`).join('');
       if (!await gameConfirm({ icon: '📍', title: 'Terminar o posicionamento?', body: `<ul class="gd-list">${where}</ul>Depois de confirmar não dá para mudar os lugares. Arraste os Heróis no mapa se quiser trocar.`, yes: 'Sim, terminar', no: 'Continuar arrumando' })) return;
       if (this.myDeployGuild() !== gid) return;
-      this.deploySel = null; this.hud.inspected = null; this.act({ type: 'ready' });
+      this.deploySel = null; this.hud.inspected = null;
+      // fecha o quadro na hora (antes ele ficava por cima do placar até a animação do turno acabar)
+      if (this.act({ type: 'ready' })) { this.deployPanel = false; this.deployFocused = null; this.hud.panel('deploybox', null); }
     };
     this.renderer.hl.activeUnit = this.deploySel;
     this.hud.setHint('Posicionamento: escolha o Herói e o Espaço da Área Inicial');
@@ -2067,6 +2071,7 @@ export class Controller {
   /** Aplica as Configurações (velocidade). */
   applySettings() {
     const st = getSettings();
+    this.renderer.resize(); // qualidade do desenho (Configurações > Gráficos)
     if (this.mode !== 'local' || this.campaignEnd) { this.renderer.speed = st.speed; this.hud.speed = st.speed; }
   }
 

@@ -385,6 +385,9 @@ export class MenuPages {
       <label class="set-opt"><input type="checkbox" id="set-clock" ${st.clock ? 'checked' : ''}/> Mostrar o tempo da partida e da campanha</label>
       </div>
       ${pane('grafico')}
+      <h3>Qualidade</h3>
+      ${opt('gfx', 'high', '<b>Alta</b> — mapa e personagens mais nítidos (recomendado)', st.gfx)}
+      ${opt('gfx', 'normal', '<b>Normal</b> — mais leve para computadores e celulares fracos', st.gfx)}
       <h3>Câmera</h3>
       ${opt('view', 'free', '<b>Visão livre</b> — você move a câmera (arrastar e roda do mouse)', st.view)}
       ${opt('view', 'players', '<b>Visão dos jogadores</b> — a câmera segue quem está jogando (online: a tela e o mouse do jogador da vez)', st.view)}
@@ -421,7 +424,8 @@ export class MenuPages {
       const alertConfirm = (this.page.querySelector('#set-alert') as HTMLInputElement).checked;
       const endConfirm = (this.page.querySelector('#set-endc') as HTMLInputElement).checked;
       const hints = (this.page.querySelector('#set-hints') as HTMLInputElement).checked;
-      saveSettings({ ...getSettings(), battle, speed, clock, reroll, view, ai, sound, volume, master, hints, music, musicVolume, muted, alertConfirm, endConfirm });
+      const gfx = ((this.page.querySelector('input[name=gfx]:checked') as HTMLInputElement | null)?.value ?? 'high') as 'high' | 'normal';
+      saveSettings({ ...getSettings(), gfx, battle, speed, clock, reroll, view, ai, sound, volume, master, hints, music, musicVolume, muted, alertConfirm, endConfirm });
     };
     this.page.querySelectorAll<HTMLInputElement>('input').forEach(i => { i.onchange = upd; });
     this.page.querySelectorAll<HTMLElement>('[data-stab]').forEach(b => { b.onclick = () => {

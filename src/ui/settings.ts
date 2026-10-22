@@ -29,10 +29,12 @@ export interface Settings {
   alertConfirm: boolean;
   /** Avisar ao encerrar o turno se ainda há o que fazer (ativar, mover, atacar…). */
   endConfirm: boolean;
+  /** Qualidade do desenho do mapa: alta (mais pixels, mais nítido) ou normal (mais leve). */
+  gfx: 'high' | 'normal';
 }
 
 const KEY = 'cbt.settings';
-const DEFAULT: Settings = { battle: 'always', speed: 1, clock: true, reroll: 'choose', view: 'free', ai: 'normal', sound: true, volume: 0.7, master: 1, hints: true, music: true, musicVolume: 0.12, muted: false, alertConfirm: true, endConfirm: true };
+const DEFAULT: Settings = { battle: 'always', speed: 1, clock: true, reroll: 'choose', view: 'free', ai: 'normal', sound: true, volume: 0.7, master: 1, hints: true, music: true, musicVolume: 0.12, muted: false, alertConfirm: true, endConfirm: true, gfx: 'high' };
 
 export function getSettings(): Settings {
   try { return { ...DEFAULT, ...JSON.parse(localStorage.getItem(KEY) ?? '{}') }; } catch { return { ...DEFAULT }; }

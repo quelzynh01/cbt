@@ -192,7 +192,10 @@ export class Renderer {
   }
 
   resize() {
-    this.dpr = Math.min(window.devicePixelRatio || 1, 2);
+    // nunca abaixo da resolução da tela (zoom do navegador < 100% deixava o mapa borrado);
+    // qualidade alta: desenha com mais pixels (até 2x) para ficar nítido
+    const dev = Math.max(1, window.devicePixelRatio || 1);
+    this.dpr = Math.min(2.5, getSettings().gfx === 'normal' ? Math.min(dev, 2) : Math.max(dev, 1.5));
     this.canvas.width = Math.floor(window.innerWidth * this.dpr);
     this.canvas.height = Math.floor(window.innerHeight * this.dpr);
     this.canvas.style.width = `${window.innerWidth}px`;
