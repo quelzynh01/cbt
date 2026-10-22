@@ -528,7 +528,7 @@ export class OnlineLobby {
     const results = `<div class="cp-results"><h4>Resultado: ${MAPS[last.mapId].name}</h4>
       <table><tr><th>Guilda</th><th>Missões</th><th>Mortes</th><th>Moedas</th></tr>
       ${last.guilds.map(r => `<tr class="${r.id === last.winner ? 'win' : ''}"><td><span class="dot" style="background:${GUILDS[r.id].color}"></span> ${esc(this.seatName(r.id))}${r.id === last.winner ? ' 🏆' : ''}</td><td>${r.missions}</td><td>${r.deaths}</td><td>${r.coins}</td></tr>`).join('')}</table>
-      ${up.cursesDrawn.filter(x => x.guild === me).map(x => `<div class="cp-curse">☠ ${HEROES[x.hero].name}: <b>${CURSES[x.kept].name}</b> — ${CURSES[x.kept].text}</div>`).join('')}</div>`;
+      ${up.cursesDrawn.filter(x => x.guild === me && CURSES[x.kept]).map(x => `<div class="cp-curse">☠ ${HEROES[x.hero].name}: <b>${CURSES[x.kept].name}</b> — ${CURSES[x.kept].text}</div>`).join('')}</div>`;
     const name = (x: GuildId) => this.seatName(x);
     // Maldições Mortais: as cartas viradas na mesa, um Herói de cada vez (todos veem); depois o resumo
     if (st.step === 'upgrade-curses') {
