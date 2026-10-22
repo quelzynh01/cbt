@@ -104,6 +104,10 @@ export class Renderer {
   private lastFrame = 0;
   speed = 1;
   showGrid = false;
+  /** Prévia do Descanso: Heróis mortos quase transparentes onde vão ressuscitar. */
+  ghosts: { defId: string; cell: Cell }[] = [];
+  /** Escolhendo onde ressuscitar: o Herói (defId) aparece transparente no Espaço verde sob o mouse. */
+  ghostPick: string | null = null;
   hl: Highlights = { move: new Map(), path: [], attackUnits: new Set(), hoverCell: null, hoverUnit: null, doorIcons: [], activeUnit: null, los: null };
   hooks: RendererHooks = { onEvent: () => {}, onIdle: () => {} };
 
@@ -146,6 +150,24 @@ export class Renderer {
   }
 
   get busy() { return !!this.current || this.queue.length > 0; }
+
+  /** Próximo ataque deste personagem na fila (antes de mudar o turno): quem ele vai atacar. */
+  upcomingTargets(attackerId: string): string[] {
+    for (const q of this.queue) {
+      if (q.t === 'turn') break;
+      if (q.t === 'attack' && q.attackerId === attackerId) return q.targets.map(t => t.id);
+    }
+    return [];
+  }
+
+  /** Personagens que vão ser atacados: mira vermelha pulsando em volta e "ALVO!" em cima (some sozinha). */
+  private targets = new Map<string, number>();
+  markTarget(id: string): boolean {
+    const t0 = this.targets.get(id);
+    const fresh = t0 === undefined || this.t - t0 > 3500;
+    this.targets.set(id, this.t);
+    return fresh;
+  }
 
   /** Libera um evento segurado pela tela de batalha. */
   release() {
@@ -465,12 +487,8 @@ export class Renderer {
       }
       case 'door': this.doors.set(e.doorId, e.open); break;
       case 'attack': {
-        const a = this.units.get(e.attackerId)!;
-        const t = this.units.get(e.targets[0].id)!;
-        const pa = g2s(a.pos.gx, a.pos.gy), pt = g2s(t.pos.gx, t.pos.gy);
-        a.flip = pt.x < pa.x;
-        a.dir = dirFromScreen(pt.x - pa.x, pt.y - pa.y);
-        if (t.kind === 'hero' || t.kind === 'monster') t.dir = dirFromScreen(pa.x - pt.x, pa.y - pt.y);
+        if (!e.spread) this.addTrail(e.attackerId, e.targets.map(x => x.id), e);
+        // os personagens só viram um para o outro na hora do golpe (animateAttack), não durante a rolagem
         break; // a investida / o projétil vêm depois da rolagem (animateAttack)
       }
       case 'strike': {
@@ -505,6 +523,12 @@ export class Renderer {
     const t = this.units.get(e.targets[0]?.id);
     if (!a || !t) return 0;
     const pa = g2s(a.pos.gx, a.pos.gy), pt = g2s(t.pos.gx, t.pos.gy);
+    // agora sim: o atacante vira para o alvo e o alvo para o atacante
+    if (a !== t) {
+      a.flip = pt.x < pa.x;
+      a.dir = dirFromScreen(pt.x - pa.x, pt.y - pa.y);
+      if (t.kind === 'hero' || t.kind === 'monster') t.dir = dirFromScreen(pa.x - pt.x, pa.y - pt.y);
+    }
     {
       {
         const kind = this.attackKind(e, a.defId);
@@ -745,6 +769,7 @@ export class Renderer {
       ctx.drawImage(this.ground, o.x, o.y, this.ground.width / o.scale, this.ground.height / o.scale);
     }
     this.drawGroundOverlays();
+    this.drawTrails();
     this.drawSprites();
     this.drawMissionBadges();
     this.drawDragged();
@@ -846,6 +871,56 @@ export class Renderer {
       ctx.fillStyle = '#fff'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
       ctx.fillText(p.name, 20, 36.5);
       ctx.restore();
+    }
+  }
+
+  /** Rastros de ataque: linha na cor de quem atacou, do atacante até cada alvo (some aos poucos). */
+  private trails: { from: Cell; to: Cell[]; color: string; t0: number; ev?: GameEvent }[] = [];
+  private addTrail(attackerId: string, targetIds: string[], ev?: GameEvent) {
+    const a = this.units.get(attackerId);
+    const to = targetIds.map(id => this.units.get(id)?.cell).filter((c): c is Cell => !!c);
+    if (!a?.cell || !to.length) return;
+    const color = a.guild ? GUILDS[a.guild as keyof typeof GUILDS].color : '#b04ad8';
+    this.trails.push({ from: { ...a.cell }, to: to.map(c => ({ ...c })), color, t0: this.t, ev });
+  }
+  private drawTrails() {
+    const ctx = this.ctx;
+    const LIFE = 7000;
+    // enquanto o ataque ainda está acontecendo (dados rolando), o tempo do rastro não corre
+    for (const tr of this.trails) if (tr.ev && this.current?.e === tr.ev) tr.t0 = this.t;
+    this.trails = this.trails.filter(tr => this.t - tr.t0 < LIFE);
+    for (const tr of this.trails) {
+      const age = this.t - tr.t0;
+      const fade = age < 5000 ? 1 : 1 - (age - 5000) / 2000;
+      const a = g2s(tr.from.c + 0.5, tr.from.r + 0.5);
+      for (const c of tr.to) {
+        const b = g2s(c.c + 0.5, c.r + 0.5);
+        const same = tr.from.c === c.c && tr.from.r === c.r;
+        ctx.save();
+        ctx.globalAlpha = fade;
+        // marca no chão do atacante e do alvo
+        for (const [cell, r] of [[tr.from, 0.22], [c, 0.36]] as [Cell, number][]) {
+          diamondPath(ctx, cell.c + 0.5 - r, cell.r + 0.5 - r, r * 2, r * 2);
+          ctx.fillStyle = tr.color + '55'; ctx.fill();
+          ctx.lineWidth = 5; ctx.strokeStyle = tr.color; ctx.stroke();
+        }
+        if (!same) {
+          // arco com setas andando do atacante até o alvo
+          const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2 - Math.hypot(b.x - a.x, b.y - a.y) * 0.25;
+          ctx.lineCap = 'round';
+          ctx.lineWidth = 12; ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+          ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.quadraticCurveTo(mx, my, b.x, b.y); ctx.stroke();
+          ctx.lineWidth = 7; ctx.strokeStyle = tr.color; ctx.setLineDash([26, 16]); ctx.lineDashOffset = -age / 25;
+          ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.quadraticCurveTo(mx, my, b.x, b.y); ctx.stroke();
+          ctx.setLineDash([]);
+          // ponta da seta no alvo
+          const ang = Math.atan2(b.y - my, b.x - mx);
+          ctx.translate(b.x, b.y); ctx.rotate(ang);
+          ctx.beginPath(); ctx.moveTo(4, 0); ctx.lineTo(-26, -15); ctx.lineTo(-26, 15); ctx.closePath();
+          ctx.fillStyle = tr.color; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = '#fff'; ctx.stroke();
+        }
+        ctx.restore();
+      }
     }
   }
 
@@ -1133,6 +1208,21 @@ export class Renderer {
       });
     }
 
+    // prévia de onde os Heróis mortos vão ressuscitar (Descanso)
+    const hov = this.hl.hoverCell;
+    const pickGhost = this.ghostPick && hov && this.hl.move.has(key(hov)) ? [{ defId: this.ghostPick, cell: hov }] : [];
+    for (const gh of [...this.ghosts, ...pickGhost]) {
+      // no lugar livre do Espaço (se já tem alguém, fica do outro lado)
+      const busy = this.game.unitsAt(gh.cell).length > 0;
+      const gx = gh.cell.c + (busy ? 0.43 : 0.58), gy = gh.cell.r + (busy ? 0.77 : 0.58);
+      list.push({ d: K(gh.cell.c + gh.cell.r, 2, 0.5), draw: () => {
+        const p = g2s(gx, gy);
+        ctx.save(); ctx.translate(p.x, p.y);
+        drawCharacter(ctx, gh.defId, { dir: 'se', flip: false, t: this.t / 1000, hurt: 0, alpha: 0.45, stunned: false, lunge: 0, scale: unitScale(gh.defId) * 0.66 });
+        ctx.restore();
+      } });
+    }
+
     // Lápides: em pé, na camada dos itens do Espaço (na frente da parede de trás)
     for (const tb of g.s.tombs ?? []) {
       const [tx, ty] = this.spots(tb.cell).tomb;
@@ -1262,6 +1352,25 @@ export class Renderer {
     ctx.save();
     ctx.translate(p.x, p.y);
     ctx.globalAlpha = u.alpha;
+    // Herói ativado: aura dourada no chão (anel girando + brilho) para todos verem quem está jogando
+    const activated = u.alive && this.game?.s.activation?.heroId === u.id;
+    const gcol = u.guild ? GUILDS[u.guild as keyof typeof GUILDS].color : '#ffd65a';
+    const gc = hexRgb(gcol);
+    if (activated) {
+      ctx.save();
+      ctx.scale(1, 0.5);
+      const R = 46 * L.scale;
+      const glow = ctx.createRadialGradient(0, 0, R * 0.2, 0, 0, R * 1.4);
+      glow.addColorStop(0, `rgba(${gc},${0.65 + 0.2 * Math.sin(tt * 4)})`); glow.addColorStop(0.7, `rgba(${gc},0.35)`); glow.addColorStop(1, `rgba(${gc},0)`);
+      ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(0, 0, R * 1.5, 0, Math.PI * 2); ctx.fill();
+      ctx.lineWidth = 8; ctx.strokeStyle = shade(gcol, 0.25); ctx.shadowColor = gcol; ctx.shadowBlur = 12; ctx.setLineDash([22, 12]); ctx.lineDashOffset = -tt * 40;
+      ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([]);
+      // contorno branco por fora: aparece mesmo em cima de um tapete da mesma cor
+      ctx.shadowBlur = 0; ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+      ctx.beginPath(); ctx.arc(0, 0, R + 7, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+    }
     // anel da Guilda (círculo de time do Dofus)
     const ringColor = u.guild ? GUILDS[u.guild as keyof typeof GUILDS].color : '#7a2b8f';
     ctx.save();
@@ -1340,6 +1449,43 @@ export class Renderer {
     if (blink) ctx.filter = 'none';
     if (spinFx && spinFront) spinFx();
     if (u.stunned) this.drawStun(ctx, -78 * L.scale - 6, tt);
+    // Herói ativado: seta dourada pulando em cima da cabeça
+    if (activated) {
+      const y = -78 * L.scale - 34 - Math.abs(Math.sin(tt * 4)) * 10;
+      ctx.save();
+      ctx.translate(0, y);
+      ctx.beginPath(); ctx.moveTo(-20, -18); ctx.lineTo(20, -18); ctx.lineTo(0, 8); ctx.closePath();
+      ctx.fillStyle = gcol; ctx.fill();
+      ctx.lineWidth = 3; ctx.strokeStyle = '#fff'; ctx.stroke();
+      ctx.restore();
+    }
+    // alvo de um ataque inimigo: mira vermelha no chão e aviso em cima
+    const tg = this.targets.get(u.id);
+    if (tg !== undefined) {
+      const age = (this.t - tg) / 1000;
+      if (age > 4) this.targets.delete(u.id);
+      else {
+        const fade = Math.min(1, (4 - age) / 0.6);
+        const pulse = 0.5 + 0.5 * Math.sin(age * 9);
+        ctx.save();
+        ctx.globalAlpha = fade;
+        ctx.scale(1, 0.5);
+        ctx.strokeStyle = `rgba(255,${50 + pulse * 60},40,0.95)`; ctx.lineWidth = 7;
+        ctx.beginPath(); ctx.arc(0, 0, 70 + pulse * 10, 0, Math.PI * 2); ctx.stroke();
+        for (let k = 0; k < 4; k++) {
+          const a = k * Math.PI / 2 + age * 1.5;
+          ctx.beginPath(); ctx.moveTo(Math.cos(a) * 55, Math.sin(a) * 55); ctx.lineTo(Math.cos(a) * 95, Math.sin(a) * 95); ctx.stroke();
+        }
+        ctx.restore();
+        ctx.save();
+        ctx.globalAlpha = fade;
+        const y = -78 * L.scale - 34 - pulse * 6;
+        ctx.font = '900 22px "Baloo 2", sans-serif'; ctx.textAlign = 'center';
+        ctx.lineWidth = 6; ctx.strokeStyle = '#2a0505'; ctx.strokeText('⚠ ALVO!', 0, y);
+        ctx.fillStyle = '#ff5a3c'; ctx.fillText('⚠ ALVO!', 0, y);
+        ctx.restore();
+      }
+    }
 
     // barra de vida + número
     const top = -78 * L.scale - 6;
@@ -1378,7 +1524,7 @@ export class Renderer {
       ctx.font = '900 20px "Baloo 2", sans-serif'; ctx.lineWidth = 5; ctx.strokeStyle = '#1b0f08'; ctx.textAlign = 'center';
       ctx.strokeText('★ MISSÃO', 0, top - 112); ctx.fillStyle = '#ffe9a8'; ctx.fillText('★ MISSÃO', 0, top - 112);
     }
-    if (active) {
+    if (active && !(u.alive && this.game?.s.activation?.heroId === u.id)) {
       const ay = top - 22 + Math.sin(tt * 5) * 3;
       ctx.fillStyle = '#ffe14d'; ctx.strokeStyle = '#5a3c00'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.moveTo(-8, ay - 8); ctx.lineTo(8, ay - 8); ctx.lineTo(0, ay + 2); ctx.closePath(); ctx.fill(); ctx.stroke();

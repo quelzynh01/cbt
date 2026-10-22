@@ -1,3 +1,4 @@
+import { BANS_EACH, aiBans, afterBans, drawBanPool, validBans } from '../engine/heroBan';
 import { HEROES, distributeStartingGear, heroPool, starterError, type HeroSet } from '../engine/data';
 import { MAPS, campaignList, type Edition } from '../engine/maps';
 import type { Game } from '../engine/game';
@@ -26,7 +27,7 @@ export interface OnlineSetup {
   mode: 'single' | 'campaign';
   /** Limite de dados (Configurações da partida): no máximo 8 dados de ataque e 6 de defesa por rolagem. Sem isso, ilimitado. */
   diceCap: boolean;
-  step: 'draft' | 'vote' | 'equip' | 'done' | 'upgrade-curses' | 'upgrade-draft' | 'upgrade-buy' | 'upgrade-summary' | 'upgrade-arrange' | 'choose' | 'final';
+  step: 'ban' | 'draft' | 'vote' | 'equip' | 'done' | 'upgrade-curses' | 'upgrade-draft' | 'upgrade-buy' | 'upgrade-summary' | 'upgrade-arrange' | 'choose' | 'final';
   /** Configurações da partida: na Fase de Melhorias pega 1 carta por rodada (em vez de 2). */
   pickOne?: boolean;
   /** Configurações da partida: Heróis do recrutamento (Apenas Core, Core + Beyond the Grave ou Todos). */
@@ -43,6 +44,9 @@ export interface OnlineSetup {
   upArr: Partial<Record<GuildId, Record<string, string[]> | null>>;
   /** Próximo cenário escolhido pelo vencedor. */
   nextMap?: string;
+  /** "Permitir Todos os Heróis": os 20 Heróis sorteados e os banimentos (escondidos até todos banirem). */
+  banPool?: string[];
+  bans?: Partial<Record<GuildId, string[] | null>>;
   round: number;
   order: GuildId[];
   hands: Partial<Record<GuildId, string[]>>;
@@ -69,14 +73,34 @@ function shuffle<T>(a: T[], rnd: () => number): T[] {
 
 export function newSetup(seats: SeatInfo[], aiLevel: AILevel, rnd: () => number = Math.random, mode: 'single' | 'campaign' = 'single', diceCap = true, pickOne = true, heroSet: HeroSet = 'core', edition: Edition = 'classic'): OnlineSetup {
   const order = seats.map(s => s.guild);
-  const size = order.length <= 3 ? 4 : 3;
-  const pool = shuffle(heroPool(heroSet), rnd);
   const st: OnlineSetup = {
     step: 'draft', round: 0, order, hands: {}, choice: {}, picks: {}, votes: {}, equip: {}, tick: 0, aiLevel,
     mode, diceCap, upPick: {}, upBuy: {}, upArr: {}, ...(pickOne ? { pickOne } : {}), ...(heroSet !== 'core' ? { heroSet } : {}), ...(mode === 'campaign' && edition !== 'classic' ? { edition } : {}),
   };
-  for (const g of order) { st.hands[g] = pool.splice(0, size); st.choice[g] = null; st.picks[g] = []; }
+  for (const g of order) { st.choice[g] = null; st.picks[g] = []; }
+  // "Permitir Todos os Heróis": primeiro o banimento (20 sorteados, cada um bane 2)
+  if (heroSet === 'all') {
+    st.step = 'ban';
+    st.banPool = drawBanPool(rnd);
+    st.bans = Object.fromEntries(order.map(g => [g, null]));
+    st.news = `Banimento: cada jogador bane ${BANS_EACH} dos ${st.banPool.length} Heróis sorteados.`;
+  } else dealHeroes(st, shuffle(heroPool(heroSet), rnd));
   return st;
+}
+
+/** Recrutamento: distribui as mãos de Heróis (4 cartas com até 3 jogadores, 3 com 4). */
+function dealHeroes(st: OnlineSetup, pool: string[]) {
+  const size = st.order.length <= 3 ? 4 : 3;
+  st.step = 'draft';
+  st.round = 0;
+  for (const g of st.order) st.hands[g] = pool.splice(0, size);
+}
+
+/** Um jogador bane 2 Heróis da pool (pode trocar até todos banirem). */
+export function banHeroes(st: OnlineSetup, g: GuildId, ids: string[]): boolean {
+  if (st.step !== 'ban' || !st.banPool || !validBans(st.banPool, ids)) return false;
+  st.bans![g] = ids.slice();
+  return true;
 }
 
 /** Um jogador escolhe 1 Herói da mão (pode trocar até todos escolherem). */
@@ -120,6 +144,16 @@ export function advance(st: OnlineSetup, seats: SeatInfo[], rnd: () => number = 
   let changed = false;
   const isAI = (g: GuildId) => seats.find(s => s.guild === g)?.ai ?? true;
   const all = st.order;
+  if (st.step === 'ban') {
+    for (const g of all) if (isAI(g) && !st.bans![g]) { st.bans![g] = aiBans(st.banPool!, rnd, all.flatMap(x => st.bans![x] ?? [])); changed = true; }
+    if (all.every(g => st.bans![g])) {
+      const left = afterBans(st.banPool!, all.map(g => st.bans![g]!), rnd);
+      st.news = `Banimento concluído: sobraram ${left.length} Heróis. Começa o recrutamento!`;
+      dealHeroes(st, left);
+      st.tick++;
+      changed = true;
+    }
+  }
   if (st.step === 'draft') {
     for (const g of all) if (isAI(g) && !st.choice[g]) { st.choice[g] = pickHero(st.hands[g]!, st.picks[g]!, st.aiLevel, rnd); changed = true; }
     if (all.every(g => st.choice[g])) {
@@ -370,6 +404,7 @@ export function redact(st: OnlineSetup, me: GuildId | null): OnlineSetup {
     if (g === me) continue;
     if (r.hands[g]) r.hands[g] = r.hands[g]!.map(() => HIDDEN);
     if (r.choice[g]) r.choice[g] = HIDDEN;
+    if (r.step === 'ban' && r.bans?.[g]) r.bans[g] = r.bans[g]!.map(() => HIDDEN);
     // Heróis recrutados ficam secretos até o fim do recrutamento
     if (r.step === 'draft') r.picks[g] = r.picks[g]!.map(() => HIDDEN);
     if (r.step === 'vote' && r.votes[g]) r.votes[g] = HIDDEN;

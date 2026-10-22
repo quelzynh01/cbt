@@ -30,6 +30,8 @@ export interface HudActions {
   revealTomb(): void;
   endTurn(): void;
   rest(): void;
+  /** Cancela o ataque do seu Herói antes de rolar os dados (volta como se não tivesse atacado). Null = não dá. */
+  cancelAttack: (() => void) | null;
   inspect(unitId: string | null): void;
   /** Mostra no mapa os objetivos da Missão. */
   mission(id: string): void;
@@ -97,17 +99,18 @@ export class Hud {
       <div id="topbar">
         <div class="brand"><span class="logo">CBT</span><div><div class="title">Champions Battle Tactics</div><div class="sub" id="mapname"></div></div><span class="badge-test">MODO TESTE</span></div>
         <div id="turninfo"></div>
-        <div id="clock"></div>
         <button id="testbtn" class="hidden" title="Opções do Modo Teste (T)">🧪 Teste</button>
         <button id="viewbtn" title="Câmera: visão livre ou visão dos jogadores (V)"></button>
         <button id="menubtn" title="Menu da partida (Esc)">☰</button>
       </div>
+      <div id="scorebar"></div>
       <div id="activebar" class="hidden"></div>
       <div id="heropick" class="hidden"></div>
       <div id="gamemenu" class="hidden"></div>
       <div id="restbox" class="panel hidden"></div>
       <div id="deploybox" class="panel hidden"></div>
       <div id="leftside">
+        <div id="clock" class="panel"></div>
         <div id="scorebox" class="panel ${loadFlag('cbt.scoreOpen') ? '' : 'collapsed'}">
           <div class="panel-h" id="scoretoggle" title="Mostrar / esconder os detalhes do Placar">Placar <small id="scoresub"></small><span class="mtoggle"></span></div>
           <div id="score"></div>
@@ -234,6 +237,16 @@ export class Hud {
     this.paintDock();
     this.renderActPrompt();
     $('#towin', this.root).textContent = `(vence com ${g.s.missionsToWin})`;
+    this.renderMissions();
+    this.renderTips();
+    this.renderTimeline();
+    this.renderCemetery();
+    this.renderHeroBox();
+  }
+
+  /** Painel de Missões (com os contadores): também redesenhado na hora em que uma Missão é cumprida ou um Monstro morre. */
+  private renderMissions() {
+    const g = this.game;
     $('#missionlist', this.root).innerHTML = g.s.missions.map(m => {
       // só quem já cumpriu na tela (sem adiantar o resultado do combate que ainda está sendo animado)
       const done = (g.s.missionDone[m.id] ?? []).filter(gid => this.shownMissions[gid]?.includes(m.id));
@@ -247,10 +260,6 @@ export class Hud {
       </div>`;
     }).join('');
     this.root.querySelectorAll<HTMLElement>('[data-mission]').forEach(el => { el.onclick = () => this.actions.mission(el.dataset.mission!); });
-    this.renderTips();
-    this.renderTimeline();
-    this.renderCemetery();
-    this.renderHeroBox();
   }
 
   /** Celular: abre a gaveta lateral com um painel (ou fecha, com null). */
@@ -290,6 +299,8 @@ export class Hud {
     const id = this.pendingActivate;
     const u = id ? g.s.units[id] : null;
     const cur = g.currentGuild();
+    // a tela da Entrada de Monstros vem primeiro: o "Ativar" só aparece depois que ela sair
+    if (!$('#spawnbox', this.root).classList.contains('hidden')) { el.classList.add('hidden'); return; }
     if (!u || !u.alive || u.guild !== cur.id || !this.isMine(cur.id) || g.s.activation?.heroId === u.id || g.s.winner) {
       if (id && (!u || g.s.activation?.heroId === id || u.guild !== cur.id)) this.pendingActivate = null;
       el.classList.add('hidden');
@@ -326,28 +337,92 @@ export class Hud {
       : '<span class="ab-hero"><small>escolhendo Herói…</small></span>'}`;
     bar.classList.remove('hidden');
     this.renderHeroPick();
+    this.renderScoreBar();
   }
 
-  /** Sua vez: os quadradinhos dos seus Heróis logo abaixo da faixa (toque = seleciona e a câmera vai até ele). */
+  /** Cenário da campanha (ex.: "Cenário 1/6"), mostrado no placar do topo. */
+  scenarioLabel = '';
+  private clockHtml = '';
+
+  /** Placar do topo (como no Dota): seus Heróis | tempo, rodada e Missões | os outros times. */
+  private renderScoreBar() {
+    const g = this.game;
+    const el = $('#scorebar', this.root);
+    if (g.s.deploying?.length) { el.classList.add('hidden'); return; }
+    el.classList.remove('hidden');
+    const cur = g.currentGuild();
+    const a = g.s.activation;
+    const viewer = this.viewerGuild();
+    const mineId = this.isMine(viewer) ? viewer : g.s.guildOrder[0];
+    const myTurn = cur.id === mineId && this.isMine(mineId);
+    const choosing = myTurn && !g.s.pending && !g.s.winner && (!a || g.activationFresh() || g.heroesOf(cur.id).some(h => h.id !== a.heroId && g.canBless(h.id)));
+    const done = g.s.activatedThisTurn ?? [];
+    const face = (h: Unit, gc: string, mine: boolean) => {
+      const max = g.maxHp(h);
+      const state = !h.alive || !h.cell ? 'dead' : h.spent ? 'spent' : a?.heroId === h.id ? 'on' : mine && myTurn && done.includes(h.id) && !g.canBless(h.id) ? 'used' : '';
+      const tag = state === 'dead' ? '☠' : state === 'spent' ? '💤' : state === 'on' ? '✔' : state === 'used' ? '✓' : '';
+      return `<button class="hp-hero sb-hero ${state} ${this.pendingActivate === h.id ? 'sel' : ''} ${this.inspected === h.id ? 'insp' : ''}" data-sb="${h.id}" style="--gc:${gc}" title="${HEROES[h.defId].name}">
+        <img src="${this.portrait(h.defId, gc)}"/><span class="hp-num" style="background:${gc}">${h.num}</span>${tag ? `<span class="hp-tag">${tag}</span>` : ''}${h.stunned ? '<span class="hp-stun">✷</span>' : ''}
+        <span class="hp-life"><i style="width:${h.alive ? ((max - h.wounds) / max) * 100 : 0}%"></i></span></button>`;
+    };
+    const team = (id: GuildId, mine: boolean) => {
+      const gs = g.guild(id);
+      const shown = (this.shownMissions[id] ?? []).filter(m => gs.missions.includes(m)).length;
+      const hot = !g.s.winner && shown === g.s.missionsToWin - 1;
+      return `<div class="sb-team ${id === cur.id && !g.s.winner ? 'cur' : ''} ${hot ? 'hot' : ''}" style="--gc:${gs.color}">
+        <div class="sb-heroes">${g.heroesOf(id).map(h => face(h, gs.color, mine)).join('')}</div>
+        <div class="sb-info"><b>${guildShort(id)}</b><span title="Missões cumpridas">🏆 ${shown}/${g.s.missionsToWin}</span><span title="Moedas">🪙 ${g.wealth(id)}</span></div></div>`;
+    };
+    const who = g.s.winner ? 'Fim do cenário' : myTurn ? '<span class="sb-you">Sua vez!</span>' : cur.controller === 'ai' ? `Vez da IA · ${guildShort(cur.id)}` : `Vez de ${this.nameOf(cur.id) ?? guildShort(cur.id)}`;
+    const others = g.s.guildOrder.filter(id => id !== mineId);
+    el.innerHTML = `${team(mineId, true)}
+      <div class="sb-mid">
+        <div class="sb-map">${g.map.name}${this.scenarioLabel ? ` · ${this.scenarioLabel}` : ''}</div>
+        <div class="sb-clock" id="sb-clock">${this.clockHtml}</div>
+        <div class="sb-turn">Rodada <b>${g.s.turn}</b> · ${who}</div>
+      </div>
+      ${others.map(id => team(id, false)).join('<div class="sb-vs">VS</div>')}`;
+    el.querySelectorAll<HTMLElement>('[data-sb]').forEach(b => {
+      b.onclick = () => {
+        const id = b.dataset.sb!;
+        if (choosing && g.unit(id).guild === cur.id) this.actions.pick(id); else this.actions.inspect(id);
+      };
+    });
+  }
+
+  /** Seus Heróis: quadradinhos fixos logo abaixo da faixa (na sua vez, toque = seleciona; fora dela, mostra a ficha). */
   private renderHeroPick() {
     const g = this.game;
     const el = $('#heropick', this.root);
     const cur = g.currentGuild();
     const a = g.s.activation;
-    // aparece enquanto dá para escolher quem ativar: no começo do turno, antes de agir, ou com Bênção / Grito de Guerra
-    const choosing = !a || g.activationFresh() || g.heroesOf(cur.id).some(h => h.id !== a.heroId && g.canBless(h.id));
-    if (!this.isMine(cur.id) || g.s.winner || g.s.pending || !choosing) { el.classList.add('hidden'); return; }
-    const done = g.s.activatedThisTurn ?? [];
-    el.innerHTML = g.heroesOf(cur.id).map(h => {
+    const mine = this.viewerGuild();
+    if (g.s.winner || !this.isMine(mine)) { el.classList.add('hidden'); return; }
+    const myTurn = cur.id === mine;
+    // dá para escolher quem ativar: no começo do turno, antes de agir, ou com Bênção / Grito de Guerra
+    const choosing = myTurn && !g.s.pending && (!a || g.activationFresh() || g.heroesOf(cur.id).some(h => h.id !== a.heroId && g.canBless(h.id)));
+    el.classList.toggle('idle', !choosing);
+    const done = myTurn ? g.s.activatedThisTurn ?? [] : [];
+    const gc = g.guild(mine).color;
+    el.innerHTML = g.heroesOf(mine).map(h => {
       const max = g.maxHp(h);
       const state = !h.alive || !h.cell ? 'dead' : h.spent ? 'spent' : a?.heroId === h.id ? 'on' : done.includes(h.id) && !g.canBless(h.id) ? 'used' : '';
       const tag = state === 'dead' ? '☠' : state === 'spent' ? '💤' : state === 'on' ? '✔' : state === 'used' ? '✓' : '';
       return `<button class="hp-hero ${state} ${this.pendingActivate === h.id ? 'sel' : ''}" data-hp="${h.id}" ${state === 'dead' ? 'disabled' : ''} title="${HEROES[h.defId].name}">
-        <img src="${this.portrait(h.defId, cur.color)}"/><span class="hp-num">${h.num}</span>${tag ? `<span class="hp-tag">${tag}</span>` : ''}
+        <img src="${this.portrait(h.defId, gc)}"/><span class="hp-num">${h.num}</span>${tag ? `<span class="hp-tag">${tag}</span>` : ''}${h.stunned ? '<span class="hp-stun">✷</span>' : ''}
         <span class="hp-life"><i style="width:${h.alive ? ((max - h.wounds) / max) * 100 : 0}%"></i></span></button>`;
     }).join('');
     el.classList.remove('hidden');
-    el.querySelectorAll<HTMLElement>('[data-hp]').forEach(b => { b.onclick = () => this.actions.pick(b.dataset.hp!); });
+    el.querySelectorAll<HTMLElement>('[data-hp]').forEach(b => { b.onclick = () => (choosing ? this.actions.pick(b.dataset.hp!) : this.actions.inspect(b.dataset.hp!)); });
+  }
+
+  /** Um Herói seu vai ser atacado: o retrato no topo pisca em vermelho e aparece o aviso. */
+  alertTarget(heroId: string, attackerId: string) {
+    const g = this.game;
+    play('stun', 0.5);
+    this.toast(`⚠ ${g.name(g.unit(attackerId))} vai atacar ${g.name(g.unit(heroId))}!`, '#ff5a3c');
+    const b = this.root.querySelector(`#heropick [data-hp="${heroId}"]`) as HTMLElement | null;
+    if (b) { b.classList.remove('hit'); void b.offsetWidth; b.classList.add('hit'); setTimeout(() => b.classList.remove('hit'), 3000); }
   }
 
   /** Guilda de quem está olhando a tela (a da vez, se for sua). */
@@ -685,7 +760,7 @@ export class Hud {
       this.cem = this.cem.filter(x => x !== e.id);
       this.renderCemetery();
       clearTimeout(this.spawnHideTimer);
-      this.spawnHideTimer = window.setTimeout(() => $('#spawnbox', this.root).classList.add('hidden'), 2600 / this.speed);
+      this.spawnHideTimer = window.setTimeout(() => { $('#spawnbox', this.root).classList.add('hidden'); this.renderActPrompt(); }, 2600 / this.speed);
       done();
     };
     if (!row) { finish(); return; }
@@ -711,7 +786,9 @@ export class Hud {
     const g = this.game;
     const act = g.s.activation;
     const cur = g.currentGuild();
-    const html = g.guilds().map(gs => {
+    // embaixo só as outras Guildas: as suas ficam fixas no topo
+    const viewer = this.viewerGuild();
+    const html = g.guilds().filter(gs => !(gs.id === viewer && this.isMine(viewer))).map(gs => {
       const heroes = g.heroesOf(gs.id).map(h => {
         const max = g.maxHp(h);
         const hp = h.alive ? max - h.wounds : 0;
@@ -738,18 +815,32 @@ export class Hud {
     });
   }
 
+  /** Último personagem que agiu (a barra de baixo mostra ele quando ninguém está ativado nem escolhido). */
+  lastActor: string | null = null;
+
   private renderHeroBox() {
     const g = this.game;
     const box = $('#herobox', this.root);
     const act = g.s.activation;
     const cur = g.currentGuild();
-    const id = this.inspected ?? act?.heroId ?? null;
+    // sem ninguém escolhido: o ativado, senão o último que agiu, senão o primeiro Herói seu (a barra nunca fica vazia)
+    const fallback = this.lastActor && g.s.units[this.lastActor] ? this.lastActor
+      : g.heroesOf(this.viewerGuild()).find(h => h.alive)?.id ?? null;
+    const id = (this.inspected && g.s.units[this.inspected] ? this.inspected : null) ?? act?.heroId ?? (g.s.deploying?.length ? null : fallback);
     const human = this.isMine(cur.id) && !g.s.winner && !g.s.deploying?.length;
     const fresh = g.canRest();
+    // Ativar (Herói escolhido) em cima do Descansar; depois de ativar, mostra quem está ativo
+    const pa = this.pendingActivate ? g.s.units[this.pendingActivate] : null;
+    const canAct = !!pa && human && pa.alive && pa.guild === cur.id && act?.heroId !== pa.id;
+    const activeH = act ? g.unit(act.heroId) : null;
+    const actBtn = canAct
+      ? `<button id="btn-act" class="primary hb-act">▶ Ativar ${HEROES[pa!.defId].name}<small class="kbd">Enter</small></button>`
+      : activeH && human && activeH.guild === cur.id ? `<div class="hb-act hb-active" style="--gc:${g.guild(cur.id).color}"><img src="${this.portrait(activeH.defId, g.guild(cur.id).color)}"/>✔ ${HEROES[activeH.defId].name} ativo</div>` : '';
     const actions = `
       <div class="actions">
-        <button id="btn-rest" ${human && fresh ? '' : 'disabled'} title="Restaurar cartas, recuperar atordoados e ressuscitar (R)">💤 Descansar Guilda</button>
-        <button id="btn-end" class="primary ${human && this.nothingLeft() ? 'end-now' : ''}" ${human ? '' : 'disabled'} title="Encerrar o turno (Espaço)">Encerrar Turno ⏎</button>
+        ${actBtn}
+        <button id="btn-rest" ${human && fresh ? '' : 'disabled'} title="Restaurar cartas, recuperar atordoados e ressuscitar (R)">💤 Descansar Guilda <small class="kbd">R</small></button>
+        <button id="btn-end" class="primary ${human && this.nothingLeft() ? 'end-now' : ''}" ${human ? '' : 'disabled'} title="Encerrar o turno (Enter)">Encerrar Turno <small class="kbd">Enter</small></button>
       </div>`;
     if (!id) {
       box.innerHTML = `<div class="empty">${g.s.deploying?.length ? 'Posicionamento: coloque seus Heróis na Área Inicial.' : human ? 'Clique em um dos seus Heróis (anel colorido) e depois em <b>▶ Ativar</b>,<br/>ou <b>Descanse</b> a Guilda.<br/><small>Ctrl + clique num Espaço marca o lugar para todos.</small>' : 'Aguardando o adversário…'}</div>${actions}`;
@@ -759,7 +850,7 @@ export class Hud {
     const u = g.unit(id);
     if (u.kind === 'monster') {
       const md = MONSTERS[u.defId];
-      box.innerHTML = `
+      box.innerHTML = `<div class="hb-c1">
         <div class="hb-head"><img src="${this.portrait(u.defId, '#7a2b8f')}"/><div><div class="hb-name">${md.name}</div><div class="hb-sub">${md.category} · Nível ${md.level}</div></div><button class="lupa" id="hb-card" title="Ver a carta com os valores atuais">🔍</button><button class="x" id="hb-close">✕</button></div>
         <div class="stats hb-meds">
           ${u.alive && md.hp - u.wounds > 0 ? medal('hp', md.hp - u.wounds, `Vida: ${md.hp - u.wounds} de ${md.hp}`, `hbm${u.wounds ? ' down' : ''}`) : `<span class="hbm-zero" title="Sem Vida"><img src="${import.meta.env.BASE_URL}bonus/hp1.webp" alt=""/><b>0</b></span>`}
@@ -767,10 +858,10 @@ export class Hud {
           ${g.defenseDice(u) > 0 ? medal('def', g.defenseDice(u), `${g.defenseDice(u)} dado${g.defenseDice(u) === 1 ? '' : 's'} de Defesa`, `hbm${g.defenseDice(u) > md.defense ? ' up' : g.defenseDice(u) < md.defense ? ' down' : ''}`) : ''}
           ${g.rerollsOf(u) > 0 ? medal('rr', g.rerollsOf(u), `Rerrolagem ${g.rerollsOf(u)}`, 'hbm') : ''}
           ${medal('move', md.move, `Movimento: ${md.move}`, 'hbm')}${medal('coin', md.reward, `Recompensa: ${md.reward} moeda(s)`, 'hbm')}
-        </div>
+        </div></div><div class="hb-c2">
         <div class="mcard"><b>${md.attackType === 'melee' ? '⚔ Ataque Próximo' : '➶ Ataque a Distância'}</b> — ${md.attackName}: ${md.dice} dados</div>
         <div class="hb-note">Reação de Alerta: ataca quem sair de um Espaço Perto dele ou atacar outro alvo estando Perto.<br/>Reação de Vingança: ao ser atacado, move até ${md.move} e revida.</div>
-        ${u.stunned ? '<div class="tag stun">Atordoado (não rola Defesa)</div>' : ''}
+        ${u.stunned ? '<div class="tag stun">Atordoado (não rola Defesa)</div>' : ''}</div>
         ${actions}`;
       $('#hb-close', box).onclick = () => this.actions.inspect(null);
       $('#hb-card', box).onclick = () => this.showCard(u.id);
@@ -789,7 +880,7 @@ export class Hud {
     const usableIds = isActive && !act!.attacked ? new Set(g.usableCards(u).map(c => c.uid)) : new Set<string>();
     if (isActive && this.selectedCard && !usableIds.has(this.selectedCard)) this.selectedCard = null;
     if (isActive && !this.selectedCard && usableIds.size) this.selectedCard = [...usableIds][0];
-    box.innerHTML = `
+    box.innerHTML = `<div class="hb-c1">
       <div class="hb-head">
         <img src="${this.portrait(u.defId, gs.color)}" style="border-color:${gs.color}"/>
         <div><div class="hb-name">${hd.name} <span class="num" style="background:${gs.color}">${u.num}</span></div><div class="hb-sub">${hd.title} · ${guildShort(gs.id)}</div></div>
@@ -803,7 +894,7 @@ export class Hud {
         ${u.deaths ? medal('skull', u.deaths, `Morreu ${u.deaths} vez${u.deaths === 1 ? '' : 'es'} neste cenário`, 'hbm') : ''}
         ${isActive ? (g.freeMode ? '<span class="mp" title="Modo Livre">👣 ∞</span>' : `<span class="mp" title="Pontos de Movimento">👣 ${[0, 1, 2].map(i => `<i class="${i < act!.mp && !act!.moveLocked ? 'on' : ''}"></i>`).join('')}</span>`) : ''}
         ${isActive ? `<span title="Ataque">${act!.attacked ? '⚔ usado' : '⚔ disponível'}</span>` : ''}
-      </div>
+      </div></div><div class="hb-c2">
       <div class="ability ${u.curse === 'amnesia' ? 'off' : ''}"><b>${hd.abilityName}</b> — ${richText(hd.abilityText)}</div>
       ${(() => { const p = mine ? g.heroPower(u) : null; return p ? `<button class="hb-power ${p.ok ? '' : 'off'}" id="hb-power" title="${p.label}${p.why ? ` — ${p.why}` : ''}">⚡ ${hd.abilityName}<small>${p.ok ? p.label : p.why}</small></button>` : ''; })()}
       ${mine && isActive && g.canRevealTomb() ? `<button class="hb-power hb-tomb" id="hb-tomb" title="Gasta 1 Ponto de Movimento; não aciona Reação de Alerta">🪦 Revelar a Lápide<small>1 PM — o efeito acontece na hora</small></button>` : ''}
@@ -816,9 +907,10 @@ export class Hud {
       ${u.stunned ? '<div class="tag stun">✷ Atordoado — não rola Defesa até Descansar</div>' : ''}
       ${!u.alive ? '<div class="tag dead">☠ Morto — ressuscita quando a Guilda Descansar</div>' : ''}
       ${u.spent ? '<div class="tag stun">💤 Exausto por uma carta — não pode ser ativado até a Guilda Descansar</div>' : ''}
+      </div><div class="hb-c3">
       <div class="cards">${cards.map(c => this.cardHtml(c, u, usableIds, mine || (human && this.isMine(u.guild!)))).join('')}${curseSlot ? `<div class="card mini curse-slot" title="${CURSES[u.curse!].name}: ${CURSES[u.curse!].text}${u.covered ? ` Debaixo dela: ${CARDS[u.covered.defId].name} (indisponível até uma Poção de Cura).` : ''}">
         <div class="cname">☠ ${CURSES[u.curse!].name}</div><div class="cart">${curseArt(u.curse!)}</div>${u.covered ? `<div class="ccov">cobre: ${CARDS[u.covered.defId].name}</div>` : '<div class="ccov">Maldição</div>'}</div>` : ''}</div>
-      <div class="tokrow"><button class="tok-bag" id="hb-bag2" title="Abrir a bolsa">🎒</button>${u.tokens.length ? `${sortTokens(u.tokens).slice(0, 3).map(t => `<img class="tok-mini" src="${tokenUrl(tokenImageId(t) ?? 'fundo')}" title="${tokenName(t)}"/>`).join('')}${u.tokens.length > 3 ? `<span class="tok-more">+${u.tokens.length - 3}</span>` : ''}` : '<span class="muted">Bolsa vazia</span>'}</div>
+      <div class="tokrow"><button class="tok-bag" id="hb-bag2" title="Abrir a bolsa">🎒</button>${u.tokens.length ? `${sortTokens(u.tokens).slice(0, 3).map(t => `<img class="tok-mini" src="${tokenUrl(tokenImageId(t) ?? 'fundo')}" title="${tokenName(t)}"/>`).join('')}${u.tokens.length > 3 ? `<span class="tok-more">+${u.tokens.length - 3}</span>` : ''}` : '<span class="muted">Bolsa vazia</span>'}</div></div>
       ${actions}`;
     if (this.inspected) $('#hb-close', box).onclick = () => this.actions.inspect(null);
     $('#hb-card', box).onclick = () => this.showCard(u.id);
@@ -865,6 +957,8 @@ export class Hud {
     const e = box.querySelector<HTMLButtonElement>('#btn-end');
     if (r) r.onclick = () => this.actions.rest();
     if (e) e.onclick = () => this.actions.endTurn();
+    const a = box.querySelector<HTMLButtonElement>('#btn-act');
+    if (a) a.onclick = () => { if (this.pendingActivate) this.actions.confirmActivate(this.pendingActivate); };
   }
 
   /** Painel "Você controla o Monstro" (Reação de Vingança decidida pelo jogador à direita). */
@@ -877,7 +971,12 @@ export class Hud {
   }
 
   /** Atualiza o cronômetro (partida e, na campanha, total). */
-  setClock(html: string) { $('#clock', this.root).innerHTML = html; }
+  setClock(html: string, time = '') {
+    $('#clock', this.root).innerHTML = html;
+    this.clockHtml = time;
+    const c = this.root.querySelector('#sb-clock');
+    if (c) c.innerHTML = time;
+  }
 
   /** Painel genérico (Descanso, posicionamento). */
   panel(id: 'restbox' | 'deploybox', html: string | null): HTMLElement {
@@ -897,6 +996,9 @@ export class Hud {
   // ------------------------------------------------------------------
   onEvent(e: GameEvent, battleShown = false) {
     const g = this.game;
+    // quem agiu por último (Herói): a barra de baixo mostra ele quando ninguém está ativado
+    const actor = e.t === 'move' ? e.id : e.t === 'attack' ? e.attackerId : null;
+    if (actor && g.s.units[actor]?.kind === 'hero' && this.lastActor !== actor) { this.lastActor = actor; if (!this.inspected) this.renderHeroBox(); }
     switch (e.t) {
       case 'log': this.log(e.text); break;
       case 'attack': break; // rolagem: centerDice (chamado pelo controlador, que espera acabar)
@@ -913,10 +1015,13 @@ export class Hud {
         this.log(`— Rodada ${e.turn}: vez ${daTime(e.guild)} —`, gs.color);
         break;
       }
+      case 'death': this.renderMissions(); break; // contadores (ex.: Matar 3 Monstros) na hora
       case 'mission':
         play('mission');
         { const l = (this.shownMissions[e.guild] ??= []); if (!l.includes(e.missionId)) l.push(e.missionId); }
         this.renderScore();
+        this.renderMissions();
+        this.renderScoreBar();
         this.banner(`Missão cumprida!`, GUILDS[e.guild].color, `${guildShort(e.guild)}: ${e.name}${e.how ? ` — ${e.how}` : ''}${e.first ? ' (+1 moeda de Primeiro Bônus)' : ''}`);
         this.log(`🏆 ${guildShort(e.guild)} cumpriu a Missão "${e.name}"${e.how ? ` (${e.how})` : ''}`, GUILDS[e.guild].color);
         break;
@@ -972,8 +1077,8 @@ export class Hud {
     el.style.borderColor = color;
     el.textContent = text;
     $('#toasts', this.root).append(el);
-    setTimeout(() => el.classList.add('out'), 2200);
-    setTimeout(() => el.remove(), 2700);
+    setTimeout(() => el.classList.add('out'), 6000);
+    setTimeout(() => el.remove(), 6500);
   }
 
   banner(title: string, color: string, sub = '') {
@@ -1027,13 +1132,15 @@ export class Hud {
     const alive = () => token === this.centerRun;
 
     /** Botão "Rolar" (só para os dados de quem joga neste computador). */
-    const askClick = (holder: Element, label: string) => new Promise<void>(res => {
-      holder.innerHTML = `<button class="primary cd-roll">🎲 ${label}</button>`;
+    const askClick = (holder: Element, label: string, cancel = false) => new Promise<void>(res => {
+      holder.innerHTML = `<button class="primary cd-roll">🎲 ${label}</button>${cancel && this.actions.cancelAttack ? '<button class="cd-cancel">✕ Cancelar ataque</button>' : ''}`;
+      const cb = holder.querySelector('.cd-cancel') as HTMLElement | null;
+      if (cb) cb.onclick = () => this.actions.cancelAttack?.();
       box.classList.add('interactive');
       const b = holder.querySelector('button') as HTMLButtonElement;
-      const go = () => { holder.innerHTML = ''; box.classList.remove('interactive'); window.removeEventListener('keydown', key, true); res(); };
+      const go = () => { holder.innerHTML = ''; box.classList.remove('interactive'); this.diceUnkey(key); res(); };
       const key = (ev: KeyboardEvent) => { if (ev.code === 'Enter' || ev.code === 'Space') { ev.preventDefault(); ev.stopImmediatePropagation(); go(); } };
-      window.addEventListener('keydown', key, true);
+      this.diceKey(key);
       b.onclick = go;
       b.focus();
     });
@@ -1073,7 +1180,7 @@ export class Hud {
       } else if (!carry) {
         if (!e.dice.length) atkRow.innerHTML = '<span class="muted">sem dados</span>';
         else {
-          if (mineAtk && !e.rr?.asked && !e.spread) await askClick(box.querySelector('.cd-btn.atk')!, 'Rolar ataque');
+          if (mineAtk && !e.rr?.asked && !e.spread) await askClick(box.querySelector('.cd-btn.atk')!, 'Rolar ataque', e.reason === 'heroi');
           if (!alive()) return;
           // dano espalhado: mesmos dados do ataque anterior, já rolados
           if (e.spread) await rollRow(atkRow, e.dice, true, e.attackType, undefined, true);
@@ -1123,6 +1230,20 @@ export class Hud {
   }
   private centerRun = 0;
   /** Decisão de Rerrolagem feita no painel do centro: a rolagem seguinte continua nele (sem reconstruir). */
+  /** Teclas (Espaço/Enter) da rolagem no centro: guardadas para poder soltar todas ao voltar o turno. */
+  private diceKeys = new Set<(ev: KeyboardEvent) => void>();
+  private diceKey(k: (ev: KeyboardEvent) => void) { this.diceKeys.add(k); window.addEventListener('keydown', k, true); }
+  private diceUnkey(k: (ev: KeyboardEvent) => void) { this.diceKeys.delete(k); window.removeEventListener('keydown', k, true); }
+  /** Fecha a rolagem do centro no meio (voltar o turno / desfazer): some a tela e as teclas voltam ao normal. */
+  resetDice() {
+    for (const k of [...this.diceKeys]) this.diceUnkey(k);
+    this.carry = null;
+    const box = $('#dicecenter', this.root);
+    box.classList.add('hidden');
+    box.classList.remove('interactive');
+    box.innerHTML = '';
+  }
+
   private carry: {
     heroId: string; kind: 'attack' | 'defense'; attackerId: string;
     dice: HTMLElement[]; before: DieFace[]; idx: number[];
@@ -1188,9 +1309,9 @@ export class Hud {
         // mantém o painel clicável se ele já estava (a escolha da Rerrolagem vem logo depois)
         const was = box.classList.contains('interactive');
         box.classList.add('interactive');
-        const go = () => { holder.innerHTML = ''; if (!was) box.classList.remove('interactive'); window.removeEventListener('keydown', key, true); res(); };
+        const go = () => { holder.innerHTML = ''; if (!was) box.classList.remove('interactive'); this.diceUnkey(key); res(); };
         const key = (ev: KeyboardEvent) => { if (ev.code === 'Enter' || ev.code === 'Space') { ev.preventDefault(); ev.stopImmediatePropagation(); go(); } };
-        window.addEventListener('keydown', key, true);
+        this.diceKey(key);
         (holder.querySelector('button') as HTMLButtonElement).onclick = go;
       });
     } else {
@@ -1295,11 +1416,14 @@ export class Hud {
           row.innerHTML = '';
           // minha rolagem: espera o clique
           await new Promise<void>(res => {
-            btn.innerHTML = `<button class="primary cd-roll">🎲 Rolar ${black ? 'ataque' : 'defesa'}</button>`;
+            const canCancel = black && (req.round ?? 1) === 1 && g.unit(req.heroId).kind === 'hero' && !!this.actions.cancelAttack;
+            btn.innerHTML = `<button class="primary cd-roll">🎲 Rolar ${black ? 'ataque' : 'defesa'}</button>${canCancel ? '<button class="cd-cancel">✕ Cancelar ataque</button>' : ''}`;
+            const cb = btn.querySelector('.cd-cancel') as HTMLElement | null;
+            if (cb) cb.onclick = () => this.actions.cancelAttack?.();
             box.classList.add('interactive');
-            const go = () => { btn.innerHTML = ''; window.removeEventListener('keydown', key, true); res(); };
+            const go = () => { btn.innerHTML = ''; this.diceUnkey(key); res(); };
             const key = (ev: KeyboardEvent) => { if (ev.code === 'Enter' || ev.code === 'Space') { ev.preventDefault(); ev.stopImmediatePropagation(); go(); } };
-            window.addEventListener('keydown', key, true);
+            this.diceKey(key);
             (btn.querySelector('button') as HTMLButtonElement).onclick = go;
           });
           dice = await this.rollWaves(row, req.faces, req.base ?? (black ? req.card?.dice : undefined), black, req.success, true, btn, wait);
@@ -1321,10 +1445,10 @@ export class Hud {
           d.classList.add('pickable');
           d.onclick = () => { if (sel.has(i)) sel.delete(i); else if (sel.size < req.rerolls) sel.add(i); paint(); };
         });
-        const key = (ev: KeyboardEvent) => { if (ev.code === 'Enter') { ev.preventDefault(); ev.stopImmediatePropagation(); finish([...sel]); } };
-        window.addEventListener('keydown', key, true);
+        const key = (ev: KeyboardEvent) => { if (ev.code === 'Enter' || ev.code === 'Space') { ev.preventDefault(); ev.stopImmediatePropagation(); finish([...sel]); } };
+        this.diceKey(key);
         const finish = (idx: number[]) => {
-          window.removeEventListener('keydown', key, true);
+          this.diceUnkey(key);
           btn.innerHTML = '';
           box.classList.remove('interactive');
           dice.forEach(d => { d.onclick = null; d.classList.remove('pickable', 'pick'); });

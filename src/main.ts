@@ -98,7 +98,7 @@ camp.onPlay = mapId => {
   getController().startCampaign(mapId, gameOptions(camp.c!), game => {
     recordResult(camp.c!, game);
     backToCampaign();
-  }, { baseMs: camp.c!.elapsed ?? 0, onExit: backToCampaign, aiLevel: camp.c!.aiLevel ?? 'normal', roulette: camp.c!.played.length === 0 });
+  }, { baseMs: camp.c!.elapsed ?? 0, onExit: backToCampaign, aiLevel: camp.c!.aiLevel ?? 'normal', roulette: camp.c!.played.length === 0, scenario: camp.c!.played.length + 1 });
 };
 
 function showMenu() {

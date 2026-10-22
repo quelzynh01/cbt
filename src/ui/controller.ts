@@ -70,6 +70,7 @@ export class Controller {
     this.renderer.hooks = {
       onEvent: e => {
         this.followEvent(e);
+        this.warnTarget(e);
         // Tela de batalha: segura a fila de animações até o jogador clicar em Continuar
         const humanInvolved = this.game.guilds().some(g => this.isMine(g.id));
         const bm = getSettings().battle;
@@ -80,7 +81,8 @@ export class Controller {
         if (showBattle && e.t === 'attack' && (this.battle.hasCarry || !this.hud.hasCarry)) {
           this.battle.playAttack(e, () => {
             const ms = e.noAnim ? 0 : this.renderer.animateAttack(e);
-            setTimeout(() => this.renderer.release(), ms + 80);
+            // depois da animação, uma pausa para ver o resultado no mapa antes do próximo lance
+            setTimeout(() => this.renderer.release(), ms + 80 + (minePart && !e.noAnim ? 2000 / Math.max(1, this.renderer.speed) : 0));
           });
           return true;
         }
@@ -89,7 +91,7 @@ export class Controller {
           // primeiro a rolagem (ataque e defesa) no centro da tela; com o resultado, a investida / o projétil
           this.hud.centerDice(e, () => {
             const ms = e.noAnim ? 0 : this.renderer.animateAttack(e);
-            setTimeout(() => this.renderer.release(), ms + 80);
+            setTimeout(() => this.renderer.release(), ms + 80 + (minePart && !e.noAnim ? 2000 / Math.max(1, this.renderer.speed) : 0));
           });
           return true;
         }
@@ -183,7 +185,14 @@ export class Controller {
       revealTomb: () => { if (this.isHumanTurn() && !this.renderer.busy) this.act({ type: 'tomb' }); },
       endTurn: () => this.tryEndTurn(),
       rest: () => this.openRest(),
-      inspect: id => { this.hud.inspected = id; this.refresh(); },
+      cancelAttack: null,
+      inspect: id => {
+        this.hud.inspected = id;
+        // a câmera vai até o personagem (como quando escolhe um Herói seu)
+        const u = id ? this.game.unit(id) : null;
+        if (u?.cell) this.renderer.glideCells([u.cell]);
+        this.refresh();
+      },
       mission: id => this.showMission(id),
       menu: () => this.openMenu(),
     });
@@ -195,8 +204,10 @@ export class Controller {
   private campaignAI: AILevel | null = null;
   private aiFor(g: GuildId): SimpleAI { return (this.ais[g] ??= new SimpleAI(this.campaignEnd && this.campaignAI ? this.campaignAI : getSettings().ai)); }
 
-  startCampaign(mapId: string, opts: Omit<Parameters<typeof Game.create>[1], 'seed'>, onEnd: (g: Game) => void, info: { baseMs: number; onExit: () => void; aiLevel?: AILevel; roulette?: boolean }) {
+  startCampaign(mapId: string, opts: Omit<Parameters<typeof Game.create>[1], 'seed'>, onEnd: (g: Game) => void, info: { baseMs: number; onExit: () => void; aiLevel?: AILevel; roulette?: boolean; scenario?: number }) {
     this.campaignAI = info.aiLevel ?? null;
+    this.campaignScenario = info.scenario ?? 0;
+    this.hud.scenarioLabel = this.campaignScenario ? `Cenário ${this.campaignScenario}/6` : '';
     this.leaveOnline(false);
     this.mode = 'local';
     this.campaignEnd = onEnd;
@@ -439,6 +450,9 @@ export class Controller {
     if (this.deciding) return false;
     // jogadas guardadas para "Desfazer jogada" (no computador e pelo anfitrião online)
     const snap = JSON.stringify(this.game.s);
+    // ataque do seu Herói: dá para cancelar antes de rolar os dados (volta para este estado)
+    this.preAttack = a.type === 'attack' ? { snap, histLen: this.history.length } : null;
+    this.hud.actions.cancelAttack = this.preAttack ? () => this.cancelAttack() : null;
     const guild = (a.type === 'place' || a.type === 'placeMany' || a.type === 'ready') ? this.myDeployGuild() : actingGuild(this.game);
     if (!guild) return false;
     let result: boolean | null = null;
@@ -563,10 +577,14 @@ export class Controller {
     this.lobby = lobby;
     this.mode = session.isHost ? 'host' : 'client';
     // votação aprovada: o anfitrião volta o turno para todos
-    if (session.isHost) session.onUndoPassed = () => { if (!this.turnStart || this.renderer.busy) return false; this.restartTurn(); this.refresh(); return true; };
+    if (session.isHost) session.onUndoPassed = () => { if (!this.turnStart) return false; this.restartTurn(); this.refresh(); return true; };
     this.myGuild = lobby.seats.find(s => s.clientId === session.me)?.guild ?? null;
     this.waitingNet = false;
     this.stopped = false;
+    // estado novo (começo, reconexão ou turno voltado): fecha combate e rolagem que estavam no meio
+    this.battle.close();
+    this.hud.resetDice();
+    this.deciding = false;
     this.game = new Game(getMap(state.mapId), state);
     // começo da partida (avulsa ou 1º cenário da campanha): a roleta mostra quem foi sorteado (todos veem a mesma, uma vez só)
     const rk = `${lobby.code}:${lobby.scenario ?? 1}:${state.mapId}`;
@@ -950,7 +968,7 @@ export class Controller {
     if (this.game.canRevealTomb()) parts.push('🪦 <b>Lápide</b> aqui: revele no quadro do Herói (1 PM)');
     if (a.moved && !a.attacked && !a.moveLocked) parts.push('<i>atacar agora encerra o Movimento</i>');
     if (this.game.s.blessing) parts.push('✨ <b>Bênção</b>: clique em um Aliado em Linha de Visão de Hobsbawm para ativá-lo');
-    parts.push('<b>Espaço</b> encerra o turno');
+    parts.push('<b>Enter</b> encerra o turno · <b>R</b> descansar');
     this.hud.setHint(parts.join(' · '));
     this.updateHover();
   }
@@ -1136,9 +1154,11 @@ export class Controller {
       }
       if (PAN_KEYS.includes(e.code) && !e.ctrlKey && !e.metaKey) { this.panKeys.add(e.code); return; }
       if (e.code === 'KeyB') { const id = this.hud.inspected ?? this.game.s.activation?.heroId; if (id && this.game.unit(id).kind === 'hero') { if (this.hud.bagIsOpen) this.hud.closeBag(); else this.hud.showBag(id); } return; }
-      if (e.code === 'Space' || e.code === 'Enter') {
+      // Espaço é só para rolar os dados (nas telas de rolagem); Enter ativa o Herói escolhido ou encerra o turno
+      if (e.code === 'Space') e.preventDefault();
+      else if (e.code === 'Enter') {
         e.preventDefault();
-        if (this.hud.pendingActivate && e.code === 'Enter') this.doActivate(this.hud.pendingActivate);
+        if (this.hud.pendingActivate) this.doActivate(this.hud.pendingActivate);
         else if (this.isHumanTurn() && !this.restDraft) this.tryEndTurn();
       }
       else if (e.code === 'KeyR') { if (this.isHumanTurn()) this.openRest(); }
@@ -1282,6 +1302,22 @@ export class Controller {
     if (ot) ot.onclick = () => { this.pDest = null; this.pRepick = true; this.refresh(); };
     (el.querySelector('#pp-skip') as HTMLElement).onclick = () => { this.pDest = null; this.act({ type: 'puppetSkip' }, 'Lápide'); };
     this.hud.setHint(`🪦 Você controla o <b>${md.name}</b>: Espaço roxo = mover · Herói vermelho = atacar`);
+  }
+
+  /** Um Inimigo vai atacar um Herói seu: mira no alvo, retrato piscando e aviso — já quando ele começa a andar. */
+  private warnTarget(e: GameEvent) {
+    const g = this.game;
+    if (!g) return;
+    const attacker = e.t === 'attack' ? e.attackerId : e.t === 'move' ? e.id : e.t === 'reaction' ? e.monsterId : null;
+    if (!attacker) return;
+    const au = g.unit(attacker);
+    if (au.kind === 'hero' && au.guild && this.isMine(au.guild)) return;
+    const ids = e.t === 'attack' ? e.targets.map(t => t.id) : this.renderer.upcomingTargets(attacker);
+    for (const id of ids) {
+      const t = g.unit(id);
+      if (t.kind !== 'hero' || !t.guild || !this.isMine(t.guild) || !t.alive) continue;
+      if (this.renderer.markTarget(id)) this.hud.alertTarget(id, attacker);
+    }
   }
 
   /** Botas (Das Boot / Die Booten): escolhendo para onde mover o outro Herói. */
@@ -1555,7 +1591,7 @@ export class Controller {
       // mover
       if (a && cell && hl.move.has(key(cell))) { this.confirmMove(cell); return; }
     }
-    if (unitId) { this.hud.inspected = unitId === this.game.s.activation?.heroId && !this.freeView() ? null : unitId; this.refresh(); }
+    if (unitId) { this.hud.inspected = unitId; this.refresh(); }
   }
 
   /** Menu pequeno no ponto do clique (ex.: Atacar ou Mover). Fecha ao escolher, no ✕, tocando fora ou com Esc. */
@@ -1704,6 +1740,8 @@ export class Controller {
   // DESCANSO (p.18): restaurar, reorganizar cartas e marcadores, ressuscitar
   // ------------------------------------------------------------------
   private restDraft: { cards: Record<string, string>; tokens: Record<string, string>; res: Record<string, Cell>; picking: string | null;
+    /** Heróis mortos cujo lugar de ressurreição o jogador escolheu no mapa. */
+    chosen: string[];
     /** Cartas no editor (mesmo da campanha): id da carta, Herói (id do personagem) e a carta no jogo. */
     items: (InvItem & { uid: string })[] } | null = null;
 
@@ -1723,7 +1761,7 @@ export class Controller {
     this.restDraft = {
       cards: Object.fromEntries(heroes.flatMap(h => h.cards.map(c => [c.uid, h.id]))),
       tokens: Object.fromEntries(heroes.flatMap(h => h.tokens.filter(t => t.type !== 'missao').map(t => [t.id, h.id]))),
-      res, picking: null,
+      res, picking: null, chosen: [],
       items: heroes.flatMap(h => h.cards.map(c => ({ id: c.defId, to: h.defId, uid: c.uid }))),
     };
     this.refresh();
@@ -1748,6 +1786,9 @@ export class Controller {
       for (const c of this.game.resurrectCells(this.game.unit(d.picking))) hl.move.set(key(c), 0);
     }
     hl.path = Object.values(d.res);
+    // o Herói aparece quase transparente onde vai ressuscitar (e sob o mouse enquanto escolhe)
+    this.renderer.ghosts = Object.entries(d.res).filter(([id]) => id !== d.picking).map(([id, cell]) => ({ defId: this.game.unit(id).defId, cell }));
+    this.renderer.ghostPick = d.picking ? this.game.unit(d.picking).defId : null;
     const tokPool = heroes.flatMap(h => h.tokens);
     const sel = (cur: string, aliveOnly: boolean, attr: string) => `<select ${attr}>${heroes.filter(h => !aliveOnly || h.alive).map(h => `<option value="${h.id}" ${cur === h.id ? 'selected' : ''}>${HEROES[h.defId].name}</option>`).join('')}</select>`;
     // ressuscitar e marcadores de Exploração (por Herói); as cartas ficam no editor (o mesmo da campanha)
@@ -1804,7 +1845,11 @@ export class Controller {
       this.refresh();
     }; });
     (el.querySelector('#rb-cancel') as HTMLElement).onclick = () => this.closeRest();
-    (el.querySelector('#rb-ok') as HTMLElement).onclick = () => {
+    (el.querySelector('#rb-ok') as HTMLElement).onclick = async () => {
+      // morto sem lugar escolhido: avisa que ele nasce na base (Área Inicial)
+      const auto = heroes.filter(h => !h.alive && d.res[h.id] && !d.chosen.includes(h.id));
+      if (auto.length && !await gameConfirm({ icon: '💤', title: 'Ressuscitar na base?', body: `Você não escolheu onde ${auto.map(h => `<b>${HEROES[h.defId].name}</b>`).join(' e ')} ${auto.length > 1 ? 'vão' : 'vai'} ressuscitar. Sem escolher, ${auto.length > 1 ? 'nascem' : 'nasce'} na <b>base</b> (Área Inicial da Guilda).`, yes: 'Descansar assim', no: 'Escolher o lugar' })) return;
+      if (this.restDraft !== d) return;
       const o = this.restOptions();
       this.closeRest();
       this.act({ type: 'rest', opts: o }, 'descanso');
@@ -1814,6 +1859,8 @@ export class Controller {
 
   private closeRest() {
     this.restDraft = null;
+    this.renderer.ghosts = [];
+    this.renderer.ghostPick = null;
     this.hud.panel('restbox', null);
     this.refresh();
   }
@@ -1825,6 +1872,7 @@ export class Controller {
     const others = Object.entries(d.res).filter(([id, c]) => id !== d.picking && sameCell(c, cell)).length;
     if (this.game.unitsAt(cell).length + others >= 2) { this.hud.toast('Máximo de 2 personagens por Espaço.', '#c0392b'); return; }
     d.res[d.picking] = cell;
+    if (!d.chosen.includes(d.picking)) d.chosen.push(d.picking);
     d.picking = null;
     this.refresh();
   }
@@ -1946,6 +1994,19 @@ export class Controller {
     };
   }
 
+  /** Estado antes do ataque do seu Herói (para "Cancelar ataque" na hora de rolar). */
+  private preAttack: { snap: string; histLen: number } | null = null;
+  private cancelAttack() {
+    const p = this.preAttack;
+    if (!p || this.mode === 'client') return;
+    this.preAttack = null;
+    this.hud.actions.cancelAttack = null;
+    this.history.length = Math.min(this.history.length, p.histLen);
+    this.restore(p.snap, '✕ Ataque cancelado');
+    if (this.mode === 'host') (this.net as HostSession).startGame(this.game.s);
+    this.refresh();
+  }
+
   private restartMatch() {
     this.battle.close();
     this.closeRestSilently();
@@ -1971,7 +2032,7 @@ export class Controller {
     if (this.mode === 'host') (this.net as HostSession).startGame(this.game.s);
   }
 
-  private closeRestSilently() { this.restDraft = null; this.hud.panel('restbox', null); }
+  private closeRestSilently() { this.restDraft = null; this.renderer.ghosts = []; this.renderer.ghostPick = null; this.hud.panel('restbox', null); }
 
   /** Anfitrião: nova partida com a mesma sala. */
   private restartOnline() {
@@ -1987,15 +2048,20 @@ export class Controller {
   // CRONÔMETRO
   // ------------------------------------------------------------------
   private campaignBase = 0;
+  /** Número do cenário na campanha (1 a 6). */
+  private campaignScenario = 0;
   private clockShown = '';
   private tickClock(dt: number) {
     const g = this.game;
     if (!g) return;
     const visible = !document.getElementById('hud')?.classList.contains('hidden') && !document.hidden;
     if (visible && !this.stopped && !g.s.deploying?.length && !g.s.winner && !this.menuOpen && dt > 0 && dt < 1000) g.s.elapsed = (g.s.elapsed ?? 0) + dt;
-    if (!getSettings().clock) { if (this.clockShown) { this.clockShown = ''; this.hud.setClock(''); } return; }
-    const html = `<span title="Tempo da partida">⏱ <b>${fmtTime(g.s.elapsed ?? 0)}</b></span>${this.campaignEnd ? `<span title="Tempo total da campanha">🏰 <b>${fmtTime(this.campaignBase + (g.s.elapsed ?? 0))}</b></span>` : ''}`;
-    if (html !== this.clockShown) { this.clockShown = html; this.hud.setClock(html); }
+    // linha acima do Placar: cenário da campanha (1/6), rodada e tempo
+    const scen = this.campaignEnd ? this.campaignScenario : this.mode !== 'local' && this.lobby?.campaign ? this.lobby.scenario ?? 0 : 0;
+    const clock = getSettings().clock;
+    const html = `${scen ? `<span title="Cenário da campanha">🗺️ <b>${scen}/6</b></span>` : ''}<span title="Rodada">🔄 Rodada <b>${g.s.turn}</b></span>`
+      + (clock ? `<span title="Tempo da partida">⏱ <b>${fmtTime(g.s.elapsed ?? 0)}</b></span>${this.campaignEnd ? `<span title="Tempo total da campanha">🏰 <b>${fmtTime(this.campaignBase + (g.s.elapsed ?? 0))}</b></span>` : ''}` : '');
+    if (html !== this.clockShown) { this.clockShown = html; this.hud.setClock(html, fmtTime(g.s.elapsed ?? 0)); }
   }
 
   /** Aplica as Configurações (velocidade). */
@@ -2129,6 +2195,7 @@ export class Controller {
   private restore(state: string, msg: string) {
     clearTimeout(this.aiTimer);
     this.battle.close();
+    this.hud.resetDice();
     const debug = this.game.s.debug;
     const controllers = Object.fromEntries(this.game.guilds().map(g => [g.id, g.controller]));
     const s = JSON.parse(state) as typeof this.game.s;

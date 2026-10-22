@@ -44,7 +44,7 @@
   #zoombtns button { width: 40px; height: 40px; font-size: 22px; }
 
   /* "Ativar Herói": em cima da ordem dos Heróis */
-  #actprompt { bottom: calc(132px + env(safe-area-inset-bottom)); width: calc(100% - 12px); justify-content: space-between; }
+  #actprompt { top: auto; bottom: calc(132px + env(safe-area-inset-bottom)); width: calc(100% - 12px); justify-content: space-between; }
 
   /* gavetas (Herói, Placar, Missões…): folha de baixo para cima, sem cobrir a barra de botões */
   #hud[data-drawer] #drawerhead { width: 100vw; top: auto; bottom: calc(66px + env(safe-area-inset-bottom) + min(66vh, 560px)); border-radius: 16px 16px 0 0; border-top: 2px solid var(--line); }

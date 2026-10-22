@@ -1,4 +1,5 @@
 import { play } from '../audio/sfx';
+import { BANS_EACH } from '../engine/heroBan';
 import { GUILDS, HEROES, HERO_SETS, heroSetName, starterCards, type HeroSet } from '../engine/data';
 import { buyHint, buySummaryHtml, curseRevealHtml, curseSummaryHtml } from './upgradeViews';
 import { draftRounds, picksPerRound } from '../campaign/campaign';
@@ -9,7 +10,7 @@ import type { GameState, GuildId } from '../engine/types';
 import { drawFace } from '../render/chibi';
 import { ClientSession, HostSession, type Lobby, type Session, type SessionEvents, type SetupMsg, savedName, saveName } from '../net/net';
 import {
-  HIDDEN, STARTER, type OnlineSetup, advance, chooseHero, equipErrors, newSetup, pickNextMap, scenarioOver, setEquip, startCampaign,
+  HIDDEN, STARTER, type OnlineSetup, advance, banHeroes, chooseHero, equipErrors, newSetup, pickNextMap, scenarioOver, setEquip, startCampaign,
   upgradeArrange, upgradeBuy, upgradePick, votableMaps, voteMap, curseFlip, curseAuto, upgradeOk,
 } from '../net/onlineSetup';
 import { CARDS, CURSES } from '../engine/cards';
@@ -30,6 +31,8 @@ export class OnlineLobby {
   private chatLog: { from: string; text: string; color?: string }[] = [];
   /** Escolhas locais ainda não enviadas (Herói marcado, distribuição das cartas). */
   private pickHero: string | null = null;
+  /** Banimento: Heróis marcados para banir (ainda não enviados). */
+  private banSel: string[] = [];
   private equipDraft: InvItem[] | null = null;
   /** Editor de inventário desenhado nesta tela (liga os cliques depois de montar o HTML). */
   private invBind: { items: InvItem[]; opts: InvOptions } | null = null;
@@ -235,7 +238,8 @@ export class OnlineLobby {
   private hostSetupMsg(g: GuildId, m: SetupMsg) {
     const st = (this.session as HostSession).lobby.setup;
     if (!st) return;
-    if (m.t === 'draft') chooseHero(st, g, m.hero);
+    if (m.t === 'ban') banHeroes(st, g, m.ids);
+    else if (m.t === 'draft') chooseHero(st, g, m.hero);
     else if (m.t === 'vote') voteMap(st, g, m.map);
     else if (m.t === 'equip') setEquip(st, g, m.inv);
     else if (m.t === 'upPick') upgradePick(st, g, m.ids);
@@ -359,17 +363,18 @@ export class OnlineLobby {
     const name = (g: GuildId) => { const s = l.seats.find(x => x.guild === g); return s ? (s.ai ? 'IA' : s.name) : g; };
     const camp = st.camp;
     const isHumanG = (g: GuildId) => camp ? camp.guilds.find(x => x.id === g)?.controller === 'human' : !l.seats.find(s => s.guild === g)?.ai;
-    const done = (g: GuildId) => st.step === 'draft' ? !!st.choice[g] : st.step === 'vote' ? !!st.votes[g] : st.step === 'equip' ? !!st.equip[g]
+    const done = (g: GuildId) => st.step === 'ban' ? !!st.bans?.[g] : st.step === 'draft' ? !!st.choice[g] : st.step === 'vote' ? !!st.votes[g] : st.step === 'equip' ? !!st.equip[g]
       : st.step === 'upgrade-draft' ? !isHumanG(g) || !!st.upPick[g] : st.step === 'upgrade-buy' ? !isHumanG(g) || !!st.upBuy[g]
       : st.step === 'upgrade-arrange' ? !isHumanG(g) || !!st.upArr[g] : st.step === 'choose' ? camp?.chooser !== g || !!st.nextMap
       : st.step === 'upgrade-summary' || st.step === 'upgrade-curses' ? !isHumanG(g) || !!st.upOk?.[g] : true;
-    const verb = st.step === 'draft' || st.step === 'upgrade-draft' ? ['escolheu', 'escolhendo…'] : st.step === 'vote' ? ['votou', 'votando…']
+    const verb = st.step === 'ban' ? ['baniu', 'banindo…'] : st.step === 'draft' || st.step === 'upgrade-draft' ? ['escolheu', 'escolhendo…'] : st.step === 'vote' ? ['votou', 'votando…']
       : st.step === 'upgrade-buy' ? ['comprou', 'comprando…'] : st.step === 'choose' ? ['pronto', 'escolhendo o cenário…']
       : st.step === 'upgrade-summary' || st.step === 'upgrade-curses' ? ['pronto', 'vendo…'] : ['pronto', 'distribuindo cartas…'];
     if (st.tick !== this.lastTick) {
       if (this.lastTick >= 0 && st.news) this.setStatus(st.news, 'ok');
       this.lastTick = st.tick;
       this.pickHero = null;
+      this.banSel = [];
       this.upSel.clear();
       if (st.step !== 'upgrade-arrange') this.arrState = null;
     }
@@ -389,7 +394,18 @@ export class OnlineLobby {
       </div>`;
     };
     let center = '';
-    if (st.step === 'draft' && me) {
+    if (st.step === 'ban' && me) {
+      const pool = st.banPool ?? [];
+      const mine = st.bans?.[me] ?? null;
+      const sel = this.banSel.length ? this.banSel : mine ?? [];
+      const ready = this.banSel.length === BANS_EACH;
+      center = `<h3>Banimento de Heróis</h3>
+        <p>O jogo sorteou <b>${pool.length} Heróis</b>. Cada jogador bane ${BANS_EACH} (escondido até todos banirem). Os que sobrarem são embaralhados e vão para o recrutamento.</p>
+        <div class="hgrid cards3 ban-grid">${pool.map(h => heroCard(h, sel.includes(h) ? 'picked banned' : '', `data-ban="${h}"`)).join('')}</div>
+        <div class="tb-actions">${mine && !this.banSel.length
+          ? `<span class="tb-wait">✓ Você baniu <b>${mine.map(h => HEROES[h].name).join(' e ')}</b> (clique em outros para trocar). Aguardando: ${st.order.filter(g => !st.bans?.[g]).map(g => esc(name(g))).join(', ') || '…'}</span>`
+          : `<button class="primary" id="tb-ban" ${ready ? '' : 'disabled'}>${ready ? `🚫 Banir ${this.banSel.map(h => HEROES[h].name).join(' e ')}` : `Escolha ${BANS_EACH - this.banSel.length} Herói(s)`}</button>`}</div>`;
+    } else if (st.step === 'draft' && me) {
       const hand = st.hands[me] ?? [];
       const chosen = st.choice[me];
       center = `<h3>Recrutamento — rodada ${st.round + 1} de 3</h3>
@@ -462,6 +478,15 @@ export class OnlineLobby {
       if (await gameConfirm({ icon: '🚪', title: 'Sair da sala?', body: 'A mesa continua sem você — a IA assume o seu lugar.', yes: 'Sair', no: 'Ficar', danger: true })) this.leave();
     };
     this.page.querySelectorAll<HTMLElement>('[data-h]').forEach(el => { el.onclick = () => { this.pickHero = el.dataset.h!; this.renderTable(); }; });
+    this.page.querySelectorAll<HTMLElement>('[data-ban]').forEach(el => {
+      el.onclick = () => {
+        const h = el.dataset.ban!;
+        this.banSel = this.banSel.includes(h) ? this.banSel.filter(x => x !== h) : [...this.banSel, h].slice(-BANS_EACH);
+        const y = this.page.scrollTop; this.renderTable(); this.page.scrollTop = y;
+      };
+    });
+    const ban = this.page.querySelector('#tb-ban') as HTMLElement | null;
+    if (ban) ban.onclick = () => { if (this.banSel.length === BANS_EACH) { this.send({ t: 'ban', ids: this.banSel }); this.banSel = []; } };
     const pick = this.page.querySelector('#tb-pick') as HTMLElement | null;
     if (pick) pick.onclick = () => { if (this.pickHero) this.send({ t: 'draft', hero: this.pickHero }); };
     this.bindUpgrade(st, me);

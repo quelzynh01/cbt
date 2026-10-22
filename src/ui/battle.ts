@@ -1,4 +1,5 @@
-import { medal, richText } from './cardview';
+import { itemArt, itemColor, medal, richText } from './cardview';
+import { CARD_ART } from './cardArt';
 import { play } from '../audio/sfx';
 import { dieImg } from '../render/dice';
 import { CARDS, GUILDS, HEROES, MONSTERS } from '../engine/data';
@@ -154,6 +155,10 @@ export class BattlePanel {
     this.el.classList.add('hidden');
     this.el.innerHTML = '';
     this.resolveBtn = null;
+    // escolha de Rerrolagem / botão Rolar pendentes (ex.: voltou o turno no meio do combate)
+    this.askResolve = null;
+    this.askRoll = null;
+    this.askEl?.classList.add('hidden');
   }
 
   // ---------------------------------------------------------------
@@ -171,6 +176,7 @@ export class BattlePanel {
     let sel = usable.find(c => c.uid === preselect)?.uid ?? usable[0]?.uid ?? null;
     let sacrifice = false;
     const boosts = new Set<string>();
+    let first = true;
     const render = () => {
       const card = pool.find(c => c.uid === sel);
       const avail = card ? [...g.boostsFor(h, card), ...g.optionalPerms(h)] : [];
@@ -178,7 +184,7 @@ export class BattlePanel {
       const prev = card ? g.attackDicePreview(h, card, t, [...boosts]) : null;
       const pierce = !!card && g.piercing(h, card);
       const defDice = pierce ? 0 : g.defenseDice(t, h, card ? CARDS[card.defId].attackType : undefined);
-      this.el.innerHTML = `<div class="bt-box">
+      const html = `<div class="bt-box">
         <div class="bt-head"><span class="bt-reason">Batalha</span><span class="bt-title">Escolha a arma</span><button class="bt-x" title="Cancelar (Esc)">✕</button></div>
         <div class="bt-arena">${this.fighterHtml(h, 'left', h.wounds)}<div class="bt-vs">VS</div>${this.fighterHtml(t, 'right', t.wounds)}</div>
         <div class="bt-weapons">${pool.map(c => {
@@ -186,7 +192,8 @@ export class BattlePanel {
           const can = usable.includes(c);
           const why = c.exhausted ? 'Exaustada' : !can ? (d.fx.astral ? 'Alvo não está Perto de um Aliado' : d.attackType === 'melee' ? 'Alvo não está Perto' : 'Sem Linha de Visão') : '';
           const pv = can ? g.attackDicePreview(h, c, t).dice : d.dice;
-          return `<button class="bt-weapon ${c.uid === sel ? 'sel' : ''}" data-uid="${c.uid}" ${can ? '' : 'disabled'}>
+          return `<button class="bt-weapon ${c.uid === sel ? 'sel' : ''}" data-uid="${c.uid}" ${can ? '' : 'disabled'} style="--lv:${itemColor(c.defId)}">
+            <div class="bw-art ${CARD_ART[c.defId]?.kind === 'fill' ? 'fill' : ''}">${itemArt(c.defId)}</div>
             <b>${d.name}</b><span class="bw-dice">${medal(d.attackType === 'melee' ? 'melee' : 'ranged', pv, `${pv} dado${pv > 1 ? 's' : ''} de ataque ${d.attackType === 'melee' ? 'Próximo' : 'a Distância'}`, pv > d.dice ? 'up' : '')}</span>
             <small>${d.attackType === 'melee' ? 'Próximo' : 'Distância'} · ${d.group}</small>${d.text ? `<em>${richText(d.text)}</em>` : ''}${why ? `<i>${why}</i>` : ''}</button>`;
         }).join('')}</div>
@@ -194,11 +201,23 @@ export class BattlePanel {
           ? `Você rola <b>${prev.dice}</b> dado${prev.dice > 1 ? 's' : ''} de ataque${prev.notes.length ? ` <span class="bt-notes">(${prev.notes.join(', ')})</span>` : ''} · ${MONSTERS[t.defId]?.name ?? HEROES[t.defId].name} rola <b>${defDice}</b> de defesa${t.stunned ? ' (Atordoado)' : ''}`
           : 'Nenhuma arma consegue atingir este alvo agora.'}</div>
         <div class="bt-hint">${t.kind === 'monster' ? `Atenção: ${MONSTERS[t.defId].name} faz <b>Reação de Vingança</b> se sobreviver (Extermínio com ${MONSTERS[t.defId].exterm}+ Ferimentos num só ataque evita).` : 'Matar um Herói inimigo cumpre a Missão contra Jogador e rende 1 moeda.'}</div>
-        ${avail.length ? `<div class="bt-boosts"><b>Ampliações:</b> ${avail.map(b => { const d = CARDS[b.defId]; return `<label title="${d.text}"><input type="checkbox" data-boost="${b.uid}" ${boosts.has(b.uid) ? 'checked' : ''}/> ${d.name}${d.fx.selfWound || (d.kind === 'permanent' && d.fx.grrr) ? ' <small>(fere você)</small>' : ''}</label>`; }).join('')}</div>` : ''}
+        <div class="bt-boostwrap">${avail.length ? `<div class="bt-boosts"><b>Ampliações:</b> ${avail.map(b => { const d = CARDS[b.defId]; return `<label title="${d.text}"><input type="checkbox" data-boost="${b.uid}" ${boosts.has(b.uid) ? 'checked' : ''}/> ${d.name}${d.fx.selfWound || (d.kind === 'permanent' && d.fx.grrr) ? ' <small>(fere você)</small>' : ''}</label>`; }).join('')}</div>` : ''}</div>
         ${g.canSacrifice(h) ? `<label class="bt-sac"><input type="checkbox" id="bt-sac" ${sacrifice ? 'checked' : ''}/> <b>Autossacrifício</b>: sofrer 1 Ferimento em vez de exaustar a carta</label>` : ''}
         <div class="bt-btns"><button class="bt-cancel">Cancelar</button><button class="primary bt-go" ${sel ? '' : 'disabled'}>⚔ Atacar</button></div>
       </div>`;
-      this.mountFighters(h, t);
+      if (first) {
+        first = false;
+        this.el.innerHTML = html;
+        this.mountFighters(h, t);
+      } else {
+        // trocar a arma: só atualiza seleção, prévia e ampliações (sem redesenhar os bonecos e as artes: não pisca)
+        const tmp = document.createElement('div');
+        tmp.innerHTML = html;
+        for (const q of ['.bt-preview', '.bt-boostwrap', '.bt-btns']) this.el.querySelector(q)?.replaceWith(tmp.querySelector(q)!);
+        const sac0 = this.el.querySelector('.bt-sac'), sac1 = tmp.querySelector('.bt-sac');
+        if (sac0 && sac1) sac0.replaceWith(sac1);
+        this.el.querySelectorAll<HTMLElement>('.bt-weapon').forEach(b => b.classList.toggle('sel', b.dataset.uid === sel));
+      }
       this.el.querySelectorAll<HTMLButtonElement>('.bt-weapon').forEach(b => { b.onclick = () => { sel = b.dataset.uid!; render(); }; });
       this.el.querySelectorAll<HTMLInputElement>('[data-boost]').forEach(cb => { cb.onchange = () => { if (cb.checked) boosts.add(cb.dataset.boost!); else boosts.delete(cb.dataset.boost!); render(); }; });
       const sac = this.el.querySelector('#bt-sac') as HTMLInputElement | null;

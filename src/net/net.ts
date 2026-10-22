@@ -40,9 +40,9 @@ export interface Lobby {
 }
 
 /** Jogadas da preparação. */
-export type SetupMsg = { t: 'draft'; hero: string } | { t: 'vote'; map: string } | { t: 'equip'; inv: Record<string, string[]> }
+export type SetupMsg = { t: 'ban'; ids: string[] } | { t: 'draft'; hero: string } | { t: 'vote'; map: string } | { t: 'equip'; inv: Record<string, string[]> }
   | { t: 'upPick'; ids: string[] } | { t: 'upBuy'; ids: string[] } | { t: 'upArr'; inv: Record<string, string[]> } | { t: 'pickmap'; map: string } | { t: 'curseFlip' } | { t: 'upOk' };
-const SETUP_MSGS = ['draft', 'vote', 'equip', 'upPick', 'upBuy', 'upArr', 'pickmap', 'curseFlip', 'upOk'];
+const SETUP_MSGS = ['ban', 'draft', 'vote', 'equip', 'upPick', 'upBuy', 'upArr', 'pickmap', 'curseFlip', 'upOk'];
 
 export type Msg =
   | { t: 'hello'; clientId: string; name: string; heroes: string[] }

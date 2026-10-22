@@ -957,7 +957,7 @@ html.touch #zoombtns { display: grid; gap: 6px; position: absolute; right: 8px; 
 /* Sua vez: quadradinhos dos seus Heróis abaixo da faixa; "Ativar" logo abaixo deles */
 #heropick { position: absolute; left: 50%; transform: translateX(-50%); top: 108px; z-index: 9; display: flex; gap: 8px; pointer-events: auto; animation: tfIn .25s ease-out; }
 #heropick.hidden { display: none; }
-#heropick:not(.hidden) ~ #hint { display: none; }
+#heropick:not(.hidden):not(.idle) ~ #hint { display: none; }
 .hp-hero { position: relative; width: 56px; height: 62px; padding: 0; border-radius: 12px; overflow: hidden; border: 3px solid #fff3c4; background: #2a1a10;
   box-shadow: 0 4px 12px rgba(0,0,0,.55); display: block; }
 .hp-hero img { width: 100%; height: 56px; object-fit: cover; display: block; }
@@ -1176,3 +1176,207 @@ body:has(#roulette, #gamemenu:not(.hidden), #gamedialog) :is(#activebar, #banner
 .ap-stats { align-items: center; }
 .ap-stats .apm { width: 26px; height: 26px; vertical-align: middle; }
 .ap-stats .med.apm { width: 22px; height: 22px; font-size: 12px; }
+
+/* ---------------- topo sem a faixa: nome do jogo e do mapa à esquerda, botões à direita ---------------- */
+#topbar { background: none; border: none; box-shadow: none; pointer-events: none; height: 46px; top: 6px; justify-content: space-between; }
+#topbar > * { pointer-events: auto; }
+#topbar .brand { pointer-events: none; text-shadow: 0 2px 4px rgba(0,0,0,.85), 0 0 10px rgba(0,0,0,.6); }
+#topbar .brand .title { color: #ffd66e; }
+#topbar .brand .sub { color: #f2e6d0; }
+#turninfo { display: none !important; }
+#topbar .sndw-vol { display: none !important; }
+#topbar #testbtn { margin-left: auto; }
+#topbar > button, #topbar .sndw button { box-shadow: 0 3px 8px rgba(0,0,0,.5); }
+/* tudo sobe: o que ficava abaixo da faixa */
+#leftside, #rightside { top: 58px; }
+#rightside { top: 58px; }
+#activebar { top: 8px; }
+#hint { top: 128px; }
+#testpanel { top: 58px; }
+#deploybox { top: 58px; }
+/* linha acima do Placar: cenário, rodada e tempo */
+#clock { display: flex; gap: 12px; align-items: center; padding: 5px 12px; font-size: 13px; flex: none; }
+#clock:empty { display: none; }
+#clock b { color: var(--gold); }
+
+/* seus Heróis fixos logo abaixo de "Sua vez" (sem espaço sobrando) */
+#heropick { top: 54px; }
+#heropick.idle .hp-hero { cursor: var(--cur-pointer, pointer); }
+#heropick.idle:not(:hover) { opacity: .92; }
+.hp-hero .hp-stun { position: absolute; left: 50%; top: 18px; transform: translateX(-50%); font-size: 18px; color: #ffe14d; text-shadow: 0 0 4px #000; }
+.hp-hero.hit { animation: hpHit .35s ease-in-out 8 alternate; border-color: #ff3b2f; }
+@keyframes hpHit { from { box-shadow: 0 0 0 2px #ff3b2f; transform: none; } to { box-shadow: 0 0 0 5px #ff3b2f, 0 0 22px #ff3b2f; transform: translateY(2px) scale(1.08); } }
+
+/* atalhos de teclado: Enter (encerrar), R (descansar) e Espaço (rolar) */
+#btn-end, #btn-rest { position: relative; }
+small.kbd { position: absolute; left: -4px; top: -8px; font-size: 9px; font-weight: 800; line-height: 1; padding: 2px 4px; border-radius: 4px;
+  background: #1b120a; color: #ffe9a8; border: 1px solid #e0b43a; pointer-events: none; }
+/* atalho no canto de cima à esquerda do botão (como no Dota), sem mudar o tamanho */
+:is(.cd-roll, .bt-act, #rr-roll, #rr-go, #cd-rr, #bt-rr) { position: relative; }
+:is(.cd-roll, .bt-act, #rr-roll, #rr-go, #cd-rr, #bt-rr)::after { content: 'Espaço'; position: absolute; left: -4px; top: -8px; font-size: 9px; font-weight: 800; line-height: 1;
+  padding: 2px 4px; border-radius: 4px; background: #1b120a; color: #ffe9a8; border: 1px solid #e0b43a; pointer-events: none; }
+:is(#cd-rr, #rr-go, #bt-rr):disabled::after { content: none; }
+html.touch :is(small.kbd) { display: none; }
+html.touch :is(.cd-roll, .bt-act, #rr-roll, #rr-go, #cd-rr, #bt-rr)::after { content: none; }
+/* "Ativar" colado logo abaixo dos seus Heróis */
+#actprompt { top: 122px; }
+#actprompt:not(.hidden) ~ #hint { top: 200px; }
+
+/* =====================================================================
+   Layout estilo Dota (computador): placar no topo, ficha do Herói numa barra flutuante embaixo
+   ===================================================================== */
+#scorebar { display: none; }
+@media (min-width: 1101px) and (min-height: 561px) {
+  #scorebar { display: flex; position: absolute; left: 50%; top: 0; transform: translateX(-50%); z-index: 9; align-items: stretch; gap: 10px;
+    padding: 6px 12px 8px; background: var(--panel); border: 2px solid var(--line); border-top: none; border-radius: 0 0 18px 18px; box-shadow: 0 6px 18px rgba(0,0,0,.5); }
+  #scorebar.hidden { display: none; }
+  #activebar, #heropick, #timeline, #scorebox, #clock { display: none !important; }
+  .sb-team { display: grid; gap: 3px; justify-items: center; padding: 3px 5px; border-radius: 12px; border: 2px solid transparent; }
+  .sb-team.cur { border-color: var(--gc); background: color-mix(in srgb, var(--gc) 16%, transparent); }
+  .sb-heroes { display: flex; gap: 5px; }
+  .sb-hero { border-color: var(--gc); width: 50px; height: 56px; }
+  .sb-hero img { height: 50px; }
+  #scorebar { gap: 8px; padding: 5px 10px 7px; }
+  .sb-mid { min-width: 150px; }
+  .sb-hero.insp { box-shadow: 0 0 0 3px #9fe8ff; }
+  .sb-info { display: flex; gap: 8px; font-size: 12px; font-weight: 700; align-items: center; }
+  .sb-info b { color: var(--gc); }
+  .sb-mid { display: grid; justify-items: center; align-content: center; min-width: 170px; padding: 0 6px; }
+  .sb-map { font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .sb-clock { font-size: 26px; font-weight: 800; line-height: 1; color: var(--gold); min-height: 26px; }
+  .sb-turn { font-size: 13px; white-space: nowrap; }
+  .sb-you { color: #7fe08a; font-weight: 800; }
+  .sb-vs { align-self: center; font-weight: 800; color: var(--gold); font-size: 13px; }
+  /* o resto desce para baixo do placar */
+  #rightside { top: 58px; }
+  #topbar .badge-test { position: absolute; left: 56px; top: 40px; }
+  #hint { top: 112px; }
+  #actprompt { top: 112px; }
+  #actprompt:not(.hidden) ~ #hint { top: 186px; }
+  #toasts { top: 110px; }
+  #topbar .brand { pointer-events: none; }
+  #leftside { top: 64px; }
+  /* barra do Herói flutuante embaixo */
+  #herobox { position: fixed; left: 50%; bottom: 8px; transform: translateX(-50%); margin: 0; z-index: 12; max-height: none; overflow: visible;
+    display: flex; align-items: center; gap: 14px; padding: 10px 14px; border-radius: 18px; width: max-content; max-width: calc(100vw - 16px); }
+  #herobox .hb-c1 { display: grid; gap: 6px; width: 250px; }
+  #herobox .hb-head img { width: 64px; height: 64px; }
+  #herobox .hb-head .hb-name { font-size: 18px; white-space: nowrap; }
+  #herobox .hb-head .hb-sub { font-size: 12px; }
+  #herobox .hb-head .lupa, #herobox .hb-head .x { padding: 2px 6px; font-size: 14px; }
+  #herobox .hb-c2 { display: grid; gap: 4px; width: 230px; max-height: 150px; overflow: auto; }
+  #herobox .hb-c2:empty { display: none; }
+  #herobox .hb-c3 { display: grid; gap: 4px; }
+  #herobox .cards { grid-template-columns: repeat(4, 82px); margin-top: 0; }
+  #herobox .cards .card.empty-slot { height: 118px; }
+  #herobox .tokrow { margin: 0; }
+  #herobox .actions { display: grid; gap: 10px; margin: 0; }
+  #herobox .actions button { min-width: 140px; }
+  #herobox .empty { max-width: 380px; }
+  #herobox .ability { font-size: 12px; }
+}
+
+/* celular / tela pequena: os seus Heróis abaixo da faixa "Sua vez" */
+@media (max-width: 1100px), (max-height: 560px) {
+  #heropick { top: 92px; }
+  #actprompt { top: 160px; }
+}
+
+/* Ativar dentro da barra do Herói (computador); no celular continua o quadro "Ativar" de cima */
+.hb-act { display: none; }
+@media (min-width: 1101px) and (min-height: 561px) {
+  #actprompt { display: none !important; }
+  #herobox .hb-act { display: flex; align-items: center; justify-content: center; gap: 6px; position: relative; }
+  #herobox .hb-active { font-weight: 800; font-size: 14px; color: #7fe08a; border: 2px solid var(--gc); border-radius: 10px; padding: 4px 8px; background: rgba(0,0,0,.25); }
+  #herobox .hb-active img { width: 26px; height: 26px; border-radius: 6px; }
+  #btn-act { animation: actPulse 1.2s ease-in-out infinite alternate; }
+  @keyframes actPulse { to { box-shadow: 0 0 0 3px #ffe14d, 0 0 16px #ffe14d; } }
+}
+
+/* barra do Herói: tudo alinhado em colunas de mesma altura */
+@media (min-width: 1101px) and (min-height: 561px) {
+  #herobox { align-items: stretch; gap: 0; padding: 10px 12px; }
+  #herobox > div { display: flex; flex-direction: column; justify-content: center; padding: 0 12px; }
+  #herobox > div + div, #herobox > .actions { border-left: 1px solid rgba(255,255,255,.12); }
+  /* coluna 1: retrato à esquerda; nome, lupa e ✕ em cima; medalhões embaixo */
+  #herobox .hb-c1 { display: grid; grid-template-columns: 72px minmax(0, 1fr) auto auto; grid-template-rows: auto auto; column-gap: 8px; row-gap: 6px; width: 280px; align-content: center; }
+  #herobox .hb-c1 .hb-head { display: contents; }
+  #herobox .hb-c1 .hb-head img { grid-row: 1 / 3; grid-column: 1; width: 72px; height: 72px; align-self: center; }
+  #herobox .hb-c1 .hb-head > div { grid-row: 1; grid-column: 2; min-width: 0; }
+  #herobox .hb-c1 .hb-head .lupa { grid-row: 1; grid-column: 3; margin: 0; align-self: start; }
+  #herobox .hb-c1 .hb-head .x { grid-row: 1; grid-column: 4; margin: 0; align-self: start; }
+  #herobox .hb-c1 .hb-head .lupa:last-child { grid-column: 3 / 5; justify-self: end; }
+  #herobox .hb-c1 .hb-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #herobox .hb-c1 .stats { grid-row: 2; grid-column: 2 / 5; margin: 0; gap: 6px; align-self: center; }
+  #herobox .hb-c1 .stats .hbm { width: 34px; height: 34px; }
+  /* coluna 2: habilidade */
+  #herobox .hb-c2 { display: flex; width: 230px; max-height: 128px; overflow: auto; gap: 4px; }
+  #herobox .hb-c2 .ability, #herobox .hb-c2 .tag, #herobox .hb-c2 .mcard, #herobox .hb-c2 .hb-note { margin: 0; }
+  /* coluna 3: cartas e bolsa */
+  #herobox .hb-c3 { gap: 6px; }
+  #herobox .cards { grid-template-columns: repeat(4, 78px); gap: 6px; }
+  #herobox .cards .card, #herobox .cards .card.empty-slot { height: 112px; }
+  #herobox .tokrow { display: flex; align-items: center; gap: 6px; min-height: 30px; }
+  #herobox .tokrow .tok-bag { width: 32px; height: 30px; padding: 0; }
+  /* coluna 4: botões iguais */
+  #herobox .actions { display: flex; flex-direction: column; justify-content: center; gap: 12px; padding-left: 14px; }
+  #herobox .actions > * { width: 180px; height: 40px; margin: 0; }
+  #herobox .actions button { min-width: 0; font-size: 14px; }
+  #herobox .actions .hb-active { height: 40px; }
+}
+
+@media (min-width: 1101px) and (min-height: 561px) {
+  #herobox .hb-c1 { width: 300px; }
+  #herobox .hb-c1 .hb-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 17px; }
+  /* coluna da habilidade: centraliza sem cortar o começo quando o texto é grande */
+  #herobox .hb-c2 { justify-content: flex-start; font-size: 12px; }
+  #herobox .hb-c2 > :first-child { margin-top: auto; }
+  #herobox .hb-c2 > :last-child { margin-bottom: auto; }
+  #herobox .hb-c2 .hb-note { font-size: 11.5px; line-height: 1.25; }
+}
+
+/* Recompensa / Título da Missão: encaixado na esquerda, embaixo do nome do jogo (sem cobrir a barra do Herói) */
+@media (min-width: 1101px) and (min-height: 561px) {
+  #prizebox { left: 8px; top: 72px; bottom: auto; max-height: calc(100% - 270px); }
+  #prizebox .pz-box { max-width: 300px; padding: 14px 16px 12px; }
+  #prizebox .aw-kind { padding-right: 26px; }
+}
+.bt-weapon .bw-art .ac-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.bt-weapon .bw-art.fill .ac-img { object-fit: cover; }
+
+/* tela de batalha: arte da carta em cada arma */
+.bt-weapon { align-content: start; }
+.bt-weapon .bw-art { position: relative; height: 70px; border-radius: 8px; overflow: hidden; margin-bottom: 4px;
+  background: radial-gradient(circle at 50% 40%, color-mix(in srgb, var(--lv, #3a7bc8) 45%, #fff), color-mix(in srgb, var(--lv, #3a7bc8) 70%, #111)); border: 1px solid rgba(255,255,255,.3); }
+.bt-weapon .bw-art .ac-icon { position: absolute; inset: 0; display: grid; place-items: center; font-size: 34px; }
+
+@media (min-width: 1101px) and (min-height: 561px) {
+  /* últimos eventos (avisos): no canto esquerdo, abaixo do nome do jogo */
+  #toasts { left: 8px; top: 74px; transform: none; justify-items: start; margin-top: 0; max-width: 340px; }
+  #toasts .toast { text-align: left; }
+
+  /* falta 1 Missão para vencer: os quadrados dos Heróis com a borda pegando fogo (faíscas subindo) */
+  .sb-team.hot .sb-hero { overflow: visible; border-color: var(--gc); animation: heroFire 1.6s ease-in-out infinite alternate; }
+  .sb-team.hot .sb-hero img { border-radius: 9px; }
+  .sb-team.hot .sb-hero .hp-life { border-radius: 0 0 9px 9px; overflow: hidden; }
+  /* chama na cor do time saindo da borda do retrato (sem partículas): halo borrado, tremulando e girando devagar */
+  .sb-team.hot .sb-hero { z-index: 0; }
+  .sb-team.hot .sb-hero::before { content: ''; position: absolute; inset: -4px; border-radius: 14px; z-index: -1; pointer-events: none;
+    background: conic-gradient(from 0deg, var(--gc), #fff 6%, var(--gc) 12%, transparent 20%, var(--gc) 30%, color-mix(in srgb, var(--gc) 35%, #fff) 37%, transparent 47%,
+      var(--gc) 56%, #fff 62%, var(--gc) 68%, transparent 78%, var(--gc) 88%, color-mix(in srgb, var(--gc) 35%, #fff) 94%, var(--gc));
+    filter: blur(3px) saturate(1.2); animation: flameSpin 6s linear infinite, flameFlicker 1.8s ease-in-out infinite; }
+  @keyframes flameSpin { to { transform: rotate(360deg); } }
+  @keyframes flameFlicker {
+    0%, 100% { opacity: .5; inset: -3px; }
+    20% { opacity: .7; inset: -5px; }
+    38% { opacity: .45; inset: -3px; }
+    60% { opacity: .75; inset: -6px; }
+    80% { opacity: .55; inset: -4px; }
+  }
+  @keyframes heroFire {
+    from { box-shadow: 0 0 2px 0 var(--gc), 0 0 5px 1px color-mix(in srgb, var(--gc) 45%, transparent); border-color: var(--gc); }
+    to { box-shadow: 0 0 4px 1px color-mix(in srgb, var(--gc) 55%, #fff), 0 0 8px 2px color-mix(in srgb, var(--gc) 55%, transparent); border-color: color-mix(in srgb, var(--gc) 65%, #fff); }
+  }
+}
+/* "Cancelar ataque" ao lado do Rolar ataque */
+.cd-cancel { margin-left: 8px; font-size: 13px; padding: 6px 12px; }

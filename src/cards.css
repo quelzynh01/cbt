@@ -203,3 +203,9 @@ canvas[data-art].art-wait { opacity: 0; }
   animation: popin2 .15s; cursor: var(--cur-pointer, pointer); padding: 16px; }
 #card-zoom > .acard { transform: none !important; box-shadow: 0 14px 40px rgba(0,0,0,.7); }
 #card-zoom .cz-hint { color: #d8cfe8; font-size: 13px; opacity: .8; }
+
+/* Banimento de Heróis: 20 cartas menores; as banidas ficam riscadas */
+.hgrid.ban-grid { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+.hgrid.ban-grid .acard.hero { zoom: .72; cursor: var(--cur-pointer, pointer); }
+.acard.hero.banned { box-shadow: 0 0 0 4px #e5452c, 0 0 18px #e5452c; filter: grayscale(.7) brightness(.8); }
+.acard.hero.banned::after { content: '🚫'; position: absolute; inset: 0; display: grid; place-items: center; font-size: 110px; opacity: .85; pointer-events: none; z-index: 5; }

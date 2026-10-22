@@ -1,4 +1,5 @@
 import { CARDS, CURSES, curseDeck, upgradeDeck } from '../engine/cards';
+import { aiBans, afterBans, drawBanPool, validBans } from '../engine/heroBan';
 import { HEROES, distributeStartingGear, heroPool, levelForScenario, setGuildNames, starterError, teamName, type HeroSet } from '../engine/data';
 import type { Game } from '../engine/game';
 import { MAPS, campaignList, type Edition } from '../engine/maps';
@@ -60,7 +61,10 @@ export interface Upgrade {
 
 /** Preparação da campanha: escolha de Heróis em rodadas, votação do mapa e equipamento inicial. */
 export interface Setup {
-  step: 'draft' | 'vote' | 'equip';
+  step: 'ban' | 'draft' | 'vote' | 'equip';
+  /** "Permitir Todos os Heróis": os 20 Heróis sorteados para o banimento e quem cada Guilda baniu. */
+  banPool?: string[];
+  bans?: Partial<Record<GuildId, string[]>>;
   round: number;
   hands: Partial<Record<GuildId, string[]>>;
   votes?: Partial<Record<GuildId, string>>;
@@ -128,10 +132,26 @@ export function newCampaign(opponents: number, name?: string, aiLevel: AILevel =
   for (let i = 0; i <= opponents; i++) c.guilds.push({ id: ids[i], controller: i === 0 ? 'human' : 'ai', heroes: [], inventory: {}, saved: 0, titles: [], curses: {}, ...(i === 0 && name?.trim() ? { name: name.trim().slice(0, 20) } : {}) });
   useCampaignNames(c);
   // Recrutamento de Heróis (p.7): cada jogador recebe uma mão, escolhe 1 e passa o resto para a esquerda.
-  const size = c.guilds.length <= 3 ? 4 : 3;
-  const pool = shuffled(c, heroPool(hs));
-  c.setup = { step: 'draft', round: 0, hands: Object.fromEntries(c.guilds.map(g => [g.id, pool.splice(0, size)])) };
+  // "Permitir Todos os Heróis": antes, o banimento (20 sorteados, cada um bane 2)
+  if (hs === 'all') { c.setup = { step: 'ban', round: 0, hands: {}, banPool: drawBanPool(() => rnd(c)), bans: {} }; return c; }
+  dealHeroes(c, shuffled(c, heroPool(hs)));
   return c;
+}
+
+/** Recrutamento: distribui as mãos de Heróis (4 cartas com até 3 jogadores, 3 com 4). */
+function dealHeroes(c: CampaignState, pool: string[]) {
+  const size = c.guilds.length <= 3 ? 4 : 3;
+  c.setup = { ...c.setup, step: 'draft', round: 0, hands: Object.fromEntries(c.guilds.map(g => [g.id, pool.splice(0, size)])) };
+}
+
+/** Banimento: o jogador bane 2 Heróis da pool; as IAs banem ao mesmo tempo. Depois, o recrutamento normal. */
+export function banHeroes(c: CampaignState, ids: string[]): boolean {
+  const st = c.setup!;
+  if (st.step !== 'ban' || !st.banPool || !validBans(st.banPool, ids)) return false;
+  st.bans = {};
+  for (const g of c.guilds) st.bans[g.id] = g.controller === 'human' ? ids.slice() : aiBans(st.banPool, () => rnd(c), [ids, ...Object.values(st.bans)].flat() as string[]);
+  dealHeroes(c, afterBans(st.banPool, Object.values(st.bans) as string[][], () => rnd(c)));
+  return true;
 }
 
 

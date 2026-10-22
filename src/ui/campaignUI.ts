@@ -3,11 +3,12 @@ import type { GuildId } from '../engine/types';
 import { play } from '../audio/sfx';
 import {
   useCampaignNames,
-  CIRCLES, CIRCLE_NEED, STARTER_CARDS, type CampaignState, aiChoice, draftHero, finishEquip, voteMap, availableScenarios, draftPick, finishArrange, finishBuy, guildName,
+  CIRCLES, CIRCLE_NEED, STARTER_CARDS, type CampaignState, aiChoice, banHeroes, draftHero, finishEquip, voteMap, availableScenarios, draftPick, finishArrange, finishBuy, guildName,
   guildOf, heroSlots, human, picksPerRound, draftRounds, loadCampaign, medals, newCampaign, nextScenario, progress, saveCampaign, scenarioLevel, scenarioNumber,
   validateInventory, victoryRank,
 } from '../campaign/campaign';
 import { CARDS, CURSES } from '../engine/cards';
+import { BANS_EACH } from '../engine/heroBan';
 import { GUILDS, HEROES, HERO_SETS, heroSetName, starterCards, type HeroSet } from '../engine/data';
 import { MAPS, campaignList, difficultyBadge, type Edition } from '../engine/maps';
 import { TITLES, TITLE_TEXT } from '../engine/titles';
@@ -150,12 +151,45 @@ export class CampaignUI {
 
   /** Preparação: recrutamento, votação e equipamento inicial. */
   private pickHero: string | null = null;
+  /** Banimento: os Heróis marcados para banir. */
+  private banSel: string[] = [];
   private equipItems: InvItem[] | null = null;
   setupFlow() {
     const c = this.c!;
     const st = c.setup!;
     const me = human(c);
     const guildsHtml = c.guilds.map(g => `<div class="cp-mini" style="--gc:${GUILDS[g.id].color}"><span class="dot" style="background:${GUILDS[g.id].color}"></span><b>${guildName(g.id)}</b> ${g.controller === 'human' ? '(você)' : '(IA)'}: ${g.heroes.map(h => HEROES[h].name).join(', ') || '—'}</div>`).join('');
+    if (st.step === 'ban') {
+      const pool = st.banPool!;
+      this.banSel = this.banSel.filter(h => pool.includes(h));
+      const n = this.banSel.length;
+      this.show('Campanha · Banimento de Heróis', `
+        <div class="cp-step"><h3>Banimento — escolha ${BANS_EACH} Heróis para banir</h3>
+        <p>O jogo sorteou <b>${pool.length} Heróis</b>. Cada jogador bane ${BANS_EACH} (as IAs banem ao mesmo tempo, escondido). Os que sobrarem são embaralhados e vão para o recrutamento.</p>
+        <div class="hgrid cards3 ban-grid">${pool.map(h => heroCard(h, this.banSel.includes(h) ? 'picked banned' : '', `data-ban="${h}"`)).join('')}</div>
+        <button class="primary cp-big" id="cp-ok" ${n === BANS_EACH ? '' : 'disabled'}>${n === BANS_EACH ? `🚫 Banir ${this.banSel.map(h => HEROES[h].name).join(' e ')}` : `Escolha mais ${BANS_EACH - n}`}</button></div>`);
+      paintCardArt(this.page);
+      this.page.querySelectorAll<HTMLElement>('[data-ban]').forEach(el => {
+        el.onclick = () => {
+          const h = el.dataset.ban!;
+          this.banSel = this.banSel.includes(h) ? this.banSel.filter(x => x !== h) : [...this.banSel, h].slice(-BANS_EACH);
+          const y = this.page.scrollTop; this.setupFlow(); this.page.scrollTop = y;
+        };
+      });
+      (this.page.querySelector('#cp-ok') as HTMLElement).onclick = () => {
+        if (!banHeroes(c, this.banSel)) return;
+        this.banSel = [];
+        this.save();
+        // mostra o que cada Guilda baniu antes do recrutamento
+        const all = new Set(Object.values(st.bans ?? {}).flat());
+        this.show('Campanha · Banimento de Heróis', `
+          <div class="cp-step cp-wait"><h3>Heróis banidos</h3>
+          <div class="cp-picks">${c.guilds.map(g => `<div class="cp-mini" style="--gc:${GUILDS[g.id].color}"><span class="dot" style="background:${GUILDS[g.id].color}"></span><b>${guildName(g.id)}</b> ${g.controller === 'human' ? '(você)' : '(IA)'} baniu <b>${(st.bans?.[g.id] ?? []).map(h => HEROES[h].name).join(' e ')}</b></div>`).join('')}</div>
+          <p>Sobraram <b>${pool.length - all.size} Heróis</b>: embaralhando para o recrutamento…</p></div>`);
+        setTimeout(() => { if (this.c === c && c.setup) this.setupFlow(); }, 2600);
+      };
+      return;
+    }
     if (st.step === 'draft') {
       const hand = st.hands[me.id]!;
       if (this.pickHero && !hand.includes(this.pickHero)) this.pickHero = null;
