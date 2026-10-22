@@ -103,8 +103,15 @@ const artImg = (a: { img: string; kind: string }, cls = '') => `<img class="ac-i
 
 /** Texto de carta: o ✷ vira o ícone do dado crítico. */
 export const richText = (t = '') => t.replace(/✷/g, `<span class="ic-crit" title="Crítico">${dieImg('crit', true)}</span>`)
-  // {rrN}: o medalhão de Rerrolagem dentro do texto
-  .replace(/\{rr(\d+)\}/g, (_, n) => `<img class="ic-rr" src="${import.meta.env.BASE_URL}bonus/rr${n}.webp" title="+${n} Rerrolagem" alt="+${n} Rerrolagem"/>`);
+  // {rrN} {defN} {hpN}: medalhões (Rerrolagem, Defesa, Vida) dentro do texto
+  .replace(/\{(rr|def|hp)(\d+)\}/g, (_, k, n) => `<img class="ic-rr" src="${import.meta.env.BASE_URL}bonus/${k}${n}.webp" title="+${n} ${({ rr: 'Rerrolagem', def: 'Defesa', hp: 'Vida' } as Record<string, string>)[k]}" alt=""/>`);
+
+/** Texto de Herói: os medalhões do começo do texto ficam numa linha própria, grandes, em cima (como na carta oficial). */
+function heroText(t: string): string {
+  const m = t.match(/^((?:\{(?:rr|def|hp)\d+\}\s*)+)/);
+  if (!m) return `<p>${richText(t)}</p>`;
+  return `<div class="ic-row">${richText(m[1].trim())}</div><p>${richText(t.slice(m[0].length))}</p>`;
+}
 
 const textSize = (t = '') => t.length > 170 ? 'xxs' : t.length > 110 ? 'xs' : t.length > 80 ? 'sm' : '';
 
@@ -147,7 +154,7 @@ export function extraHeroCard(h: { id: string; name: string; def: number; hp: nu
       <div class="hc-left">
         <div class="hc-meds">${h.def > 0 ? medal('def', h.def, 'Defesa', 'big') : `<span class="med def big" title="Defesa"><b>0</b></span>`}${medal('hp', h.hp, 'Vida', 'big')}</div>
         <div class="ac-ribbon"><small>Habilidade</small><b>${h.ability}</b></div>
-        <div class="ac-text ${textSize(h.text)}"><p>${richText(h.text)}</p></div>
+        <div class="ac-text ${textSize(h.text)} ${/^\{/.test(h.text) ? 'has-row' : ''}">${heroText(h.text)}</div>
       </div>
       ${h.model ? `<img class="hc-artc xh-full" src="${import.meta.env.BASE_URL}extras/x_${h.id}.webp" alt="" draggable="false"/>`
         : h.art ? `<img class="hc-artc xh-img" src="${import.meta.env.BASE_URL}portraits/x_${h.id}.webp" alt="" draggable="false"/>` : `<div class="hc-artc xh-none">${h.name.split(' ').map(w => w[0]).join('').slice(0, 2)}</div>`}

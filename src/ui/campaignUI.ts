@@ -14,7 +14,7 @@ import { TITLES, TITLE_TEXT } from '../engine/titles';
 import { drawFace } from '../render/chibi';
 import { curseCard, heroCard, itemCard, paintCardArt } from './cardview';
 import { CARD_ART } from './cardArt';
-import { buySummaryHtml, curseRevealHtml, curseSummaryHtml } from './upgradeViews';
+import { buyHint, buySummaryHtml, curseRevealHtml, curseSummaryHtml } from './upgradeViews';
 import { attachMapPeek, closeMapPeek, mapChoiceCard } from './mapInfo';
 import { bindInvEditor, invEditorHtml, poolErrors, type InvItem, type InvOptions } from './inventoryEditor';
 import { fmtTime, getSettings } from './settings';
@@ -356,11 +356,14 @@ export class CampaignUI {
         <p>Compre até <b>3 cartas</b>. Sobrando moedas, só <b>1</b> fica guardada para a próxima Fase de Melhorias.</p>
         <div class="cp-cards">${picked.map((id, i) => cardHtml(id, this.sel.has(`${i}`) ? 'sel' : '', `data-i="${i}"`)).join('')}</div>
         <div class="cp-sum">Selecionadas: ${this.sel.size}/3 · Custo: 🪙 ${spent} ${spent > coins ? '<b class="bad">— moedas insuficientes</b>' : ''}</div>
+        ${buyHint(picked, [...this.sel].map(Number), coins).html}
         <button class="primary cp-big" id="cp-ok" ${spent <= coins ? '' : 'disabled'}>Comprar e continuar</button></div>`, false);
       this.page.querySelectorAll<HTMLElement>('[data-i]').forEach(el => {
         el.onclick = () => { const k = el.dataset.i!; if (this.sel.has(k)) this.sel.delete(k); else if (this.sel.size < 3) this.sel.add(k); this.upgrade(); };
       });
-      (this.page.querySelector('#cp-ok') as HTMLElement).onclick = () => {
+      (this.page.querySelector('#cp-ok') as HTMLElement).onclick = async () => {
+        const hint = buyHint(picked, [...this.sel].map(Number), coins);
+        if (hint.more && !await gameConfirm({ icon: '🪙', title: 'Ainda dá para comprar!', body: hint.html, yes: 'Comprar assim mesmo', no: 'Voltar e escolher' })) return;
         finishBuy(c, me, [...this.sel].map(i => picked[Number(i)]));
         this.sel.clear();
         up.step = 'arrange';

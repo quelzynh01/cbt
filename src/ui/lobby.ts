@@ -1,6 +1,6 @@
 import { play } from '../audio/sfx';
 import { GUILDS, HEROES } from '../engine/data';
-import { buySummaryHtml, curseRevealHtml, curseSummaryHtml } from './upgradeViews';
+import { buyHint, buySummaryHtml, curseRevealHtml, curseSummaryHtml } from './upgradeViews';
 import { draftRounds, picksPerRound } from '../campaign/campaign';
 import { gameConfirm } from './dialog';
 import { Game } from '../engine/game';
@@ -242,8 +242,15 @@ export class OnlineLobby {
     const l = host.lobby;
     const st = l.setup;
     if (!st) return;
-    // quem caiu durante a preparação vira IA (para a mesa não travar)
-    for (const s of l.seats) if (!s.connected && !s.ai) s.ai = true;
+    // quem caiu na preparação (Maldições, compras…) tem um tempo para voltar; depois disso a IA assume a vaga
+    // (para a mesa não travar) — e devolve quando ele reconectar
+    const GRACE = 90_000;
+    clearTimeout(this.graceTimer);
+    for (const s of l.seats) if (!s.connected && !s.ai) {
+      const left = GRACE - (Date.now() - (s.lostAt ?? 0));
+      if (left <= 0) { s.ai = true; s.autoAI = true; }
+      else this.graceTimer = window.setTimeout(() => this.hostAdvance(), left + 200);
+    }
     advance(st, l.seats.map(s => ({ guild: s.guild, ai: s.ai })));
     host.pushLobby();
     if (st.step === 'done') setTimeout(() => this.startGame(), 1500);
@@ -259,6 +266,7 @@ export class OnlineLobby {
     }
   }
   private curseTimer = 0;
+  private graceTimer = 0;
 
   /** Campanha online (anfitrião): o cenário acabou — volta todos para a mesa na Fase de Melhorias. */
   get isCampaign() { return !!this.stash; }
@@ -516,6 +524,7 @@ export class OnlineLobby {
         <p>Compre até <b>3 cartas</b>. Sobrando moedas, só 1 fica guardada.</p>
         <div class="cp-cards">${picked.map((id, i) => itemCard(id, this.upSel.has(i) ? 'sel' : '', `data-up="${i}"`)).join('')}</div>
         <div class="cp-sum">Selecionadas: ${this.upSel.size}/3 · Custo: 🪙 ${spent} ${spent > coins ? '<b class="bad">— moedas insuficientes</b>' : ''}</div>
+        ${buyHint(picked, [...this.upSel], coins).html}
         <div class="tb-actions"><button class="primary" id="up-go" ${spent <= coins ? '' : 'disabled'}>Comprar e continuar</button></div>`;
     }
     // distribuição
@@ -557,7 +566,17 @@ export class OnlineLobby {
     if (!go) return;
     go.onclick = () => {
       if (st.step === 'upgrade-draft') { const hand = up.hands[me] ?? []; this.send({ t: 'upPick', ids: [...this.upSel].map(i => hand[i]) }); }
-      else if (st.step === 'upgrade-buy') { const picked = up.picked[me] ?? []; this.send({ t: 'upBuy', ids: [...this.upSel].map(i => picked[i]) }); }
+      else if (st.step === 'upgrade-buy') {
+        const picked = up.picked[me] ?? [];
+        const sel = [...this.upSel];
+        const hint = buyHint(picked, sel, up.coins[me] ?? 0);
+        void (async () => {
+          if (hint.more && !await gameConfirm({ icon: '🪙', title: 'Ainda dá para comprar!', body: hint.html, yes: 'Comprar assim mesmo', no: 'Voltar e escolher' })) return;
+          this.send({ t: 'upBuy', ids: sel.map(i => picked[i]) });
+          this.upSel.clear();
+        })();
+        return;
+      }
       else { const arr = this.arrState!; this.send({ t: 'upArr', inv: Object.fromEntries(g.heroes.map(h => [h, arr.filter(x => x.to === h).map(x => x.id)])) }); }
       this.upSel.clear();
     };

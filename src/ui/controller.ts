@@ -461,6 +461,7 @@ export class Controller {
     // retrato do início do turno humano (para "Voltar ao início do turno")
     const fresh = !this.game.s.activation || (!this.game.s.activation.moved && !this.game.s.activation.attacked && this.game.s.activation.mp >= 3);
     if (this.stopped) return;
+    this.hud.syncMissions(); // as animações acabaram: o placar mostra tudo
     if (this.deploying) {
       // Guildas da IA (ou que viraram IA) não posicionam: ficam prontas na hora
       const ai = this.mode !== 'client' ? this.game.s.deploying!.find(g => this.game.guild(g).controller === 'ai') : null;
@@ -1896,6 +1897,7 @@ export class Controller {
     this.hud.inspected = null;
     this.hud.selectedCard = null;
     this.renderer.reset();
+    this.hud.syncMissions();
     this.hud.syncCemetery();
     this.hud.toast(msg, '#a983d8');
     this.hud.log(msg, '#d7b8ff');

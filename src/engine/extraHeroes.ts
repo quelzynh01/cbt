@@ -158,7 +158,7 @@ export const EXTRA_HEROES: ExtraHero[] = [
     "def": 1,
     "hp": 1,
     "ability": "Aura Mística",
-    "text": "+1 dado de Defesa e +1 de Vida para cada carta de ataque Mágica equipada.",
+    "text": "{def1} {hp1} para cada carta de ataque Mágica equipada.",
     "art": true,
     "model": true
   },

@@ -70,3 +70,14 @@ export function buySummaryHtml(c: CampaignState, name: (g: GuildId) => string, m
     <p>As cartas escolhidas e não compradas voltam para a caixa.</p>
     ${rows}</div>`;
 }
+
+/** Compra: o que ainda dá para comprar com as moedas que sobram (até 3 cartas). */
+export function buyHint(picked: string[], sel: number[], coins: number): { html: string; more: boolean } {
+  const spent = sel.reduce((s, i) => s + CARDS[picked[i]].cost, 0);
+  const left = coins - spent;
+  const slots = 3 - sel.length;
+  const can = slots > 0 ? picked.filter((id, i) => !sel.includes(i) && CARDS[id].cost <= left) : [];
+  if (left < 0) return { html: '<div class="buy-hint bad">⚠ Moedas insuficientes para essas cartas.</div>', more: false };
+  if (can.length) return { html: `<div class="buy-hint more">💡 Você ainda tem <b>🪙 ${left}</b> e pode comprar mais <b>${slots}</b> carta${slots > 1 ? 's' : ''} — dá para levar: ${[...new Set(can.map(id => CARDS[id].name))].join(', ')}.</div>`, more: true };
+  return { html: `<div class="buy-hint ok">✔ ${slots === 0 ? 'Você já escolheu 3 cartas (o máximo).' : 'Nenhuma outra carta cabe nas moedas que sobram.'} Sobram 🪙 ${left}${left > 1 ? ' (só 1 fica guardada)' : ''}.</div>`, more: false };
+}

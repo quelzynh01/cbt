@@ -21,6 +21,10 @@ export interface Seat {
   team?: string;
   connected: boolean;
   host?: boolean;
+  /** A IA assumiu porque o jogador caiu: quando ele voltar, a vaga volta para ele. */
+  autoAI?: boolean;
+  /** Quando caiu (ms) — a IA só assume depois de um tempo, para dar chance de reconectar. */
+  lostAt?: number;
 }
 
 export interface Lobby {
@@ -155,6 +159,9 @@ export class HostSession {
           this.chatAll('Sistema', `${seat.name} entrou na sala.`);
         } else {
           seat.connected = true;
+          seat.lostAt = undefined;
+          // a IA tinha assumido só porque ele caiu: devolve a vaga
+          if (seat.autoAI) { seat.ai = false; seat.autoAI = false; }
           this.chatAll('Sistema', `${seat.name} ${this.lobby.started ? 'voltou para a partida' : 'reconectou'}.`);
         }
         const old = this.conns.get(m.clientId);
@@ -198,7 +205,7 @@ export class HostSession {
       const seat = this.lobby.seats.find(s => s.clientId === cid);
       if (!seat) return;
       if (!this.lobby.started && !this.lobby.setup) this.lobby.seats = this.lobby.seats.filter(s => s !== seat);
-      else seat.connected = false;
+      else { seat.connected = false; seat.lostAt = Date.now(); }
       this.chatAll('Sistema', `${seat.name} desconectou.`);
       this.pushLobby();
       this.onSeatsChanged();

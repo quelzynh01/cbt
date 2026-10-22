@@ -182,9 +182,17 @@ export class Hud {
     onSettings(viewLabel);
   }
 
+  /** Missões já mostradas na tela, por Guilda (o placar não adianta o que ainda vai ser animado). */
+  private shownMissions: Partial<Record<GuildId, string[]>> = {};
+  /** Animações terminaram: o placar alcança o estado do jogo. */
+  syncMissions() {
+    this.shownMissions = Object.fromEntries(this.game.guilds().map(g => [g.id, g.missions.slice()]));
+  }
+
   bind(game: Game, actions: HudActions) {
     this.game = game;
     this.actions = actions;
+    this.syncMissions();
     this.selectedCard = null;
     this.inspected = null;
     this.cem = [];
@@ -222,7 +230,8 @@ export class Hud {
     this.renderActPrompt();
     $('#towin', this.root).textContent = `(vence com ${g.s.missionsToWin})`;
     $('#missionlist', this.root).innerHTML = g.s.missions.map(m => {
-      const done = g.s.missionDone[m.id] ?? [];
+      // só quem já cumpriu na tela (sem adiantar o resultado do combate que ainda está sendo animado)
+      const done = (g.s.missionDone[m.id] ?? []).filter(gid => this.shownMissions[gid]?.includes(m.id));
       return `<div class="mission ${m.kind}" data-mission="${m.id}" title="Clique para ver os objetivos no mapa">
         <div class="mrow"><span class="mkind">${m.kind === 'pve' ? 'Contra o Jogo' : 'Contra Jogador'}</span>
         <span class="mdone">${done.map((gid, i) => `<span class="dot" title="${guildShort(gid)}${i === 0 ? ' (1º bônus)' : ''}" style="background:${GUILDS[gid].color}"></span>`).join('')}</span></div>
@@ -439,15 +448,17 @@ export class Hud {
       const alive = heroes.filter(h => h.alive).length;
       const deaths = heroes.reduce((s, h) => s + h.deaths, 0);
       const tokens = heroes.reduce((s, h) => s + h.tokens.length, 0);
-      const done = gs.missions.map(m => g.s.missions.find(x => x.id === m)?.name ?? m);
+      // só o que já apareceu na tela (o combate que cumpre a Missão ainda pode estar sendo animado)
+      const shown = (this.shownMissions[id] ?? []).filter(m => gs.missions.includes(m));
+      const done = shown.map(m => g.s.missions.find(x => x.id === m)?.name ?? m);
       const titles = g.s.titles?.[id] ?? [];
       const who = this.nameOf(id) ?? (gs.controller === 'ai' ? 'IA' : this.isMine(id) ? 'Você' : 'Jogador');
       // falta 1 Missão para vencer: o placar pega fogo
-      const hot = !g.s.winner && gs.missions.length === g.s.missionsToWin - 1;
+      const hot = !g.s.winner && shown.length === g.s.missionsToWin - 1;
       return `<div class="sc-guild ${id === cur.id && !g.s.winner ? 'cur' : ''} ${g.s.winner === id ? 'win' : ''} ${hot ? 'hot' : ''}" style="--gc:${gs.color}">
         ${hot ? '<div class="sc-hot">🔥 Falta 1 Missão para vencer!</div>' : ''}
         <div class="sc-row"><span class="dot" style="background:${gs.color}"></span><b class="sc-name">${guildShort(id)}</b><small>${who}</small>
-          <span title="Moedas: ${gs.coins} + ${g.wealth(id) - gs.coins} dos Baús de Tesouro">🪙 ${g.wealth(id)}</span><span title="Monstros mortos">💀 ${gs.monsterKills}</span><span title="Missões cumpridas">🏆 ${gs.missions.length}/${g.s.missionsToWin}</span></div>
+          <span title="Moedas: ${gs.coins} + ${g.wealth(id) - gs.coins} dos Baús de Tesouro">🪙 ${g.wealth(id)}</span><span title="Monstros mortos">💀 ${gs.monsterKills}</span><span title="Missões cumpridas">🏆 ${shown.length}/${g.s.missionsToWin}</span></div>
         <div class="sc-detail">
           <span title="Mortes de Heróis da Guilda">☠ ${deaths} mortes</span>
           <span title="Heróis vivos">❤ ${alive}/${heroes.length} vivos</span><span title="Marcadores de Exploração">🎒 ${tokens}</span>
@@ -883,6 +894,8 @@ export class Hud {
       }
       case 'mission':
         play('mission');
+        { const l = (this.shownMissions[e.guild] ??= []); if (!l.includes(e.missionId)) l.push(e.missionId); }
+        this.renderScore();
         this.banner(`Missão cumprida!`, GUILDS[e.guild].color, `${guildShort(e.guild)}: ${e.name}${e.how ? ` — ${e.how}` : ''}${e.first ? ' (+1 moeda de Primeiro Bônus)' : ''}`);
         this.log(`🏆 ${guildShort(e.guild)} cumpriu a Missão "${e.name}"${e.how ? ` (${e.how})` : ''}`, GUILDS[e.guild].color);
         break;

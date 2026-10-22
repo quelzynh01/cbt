@@ -480,3 +480,8 @@
 #restbox .inv-hh canvas { width: 36px; height: 36px; }
 #restbox .inv-ab { font-size: 11px; margin-bottom: 6px; }
 #restbox .rb-body > p { font-size: 12px; margin: 0; }
+/* compra: o que ainda dá para comprar */
+.buy-hint { margin: 8px 0; padding: 8px 12px; border-radius: 10px; font-size: 14px; font-weight: 600; }
+.buy-hint.more { background: rgba(240,194,67,.15); border: 2px solid #f0c243; color: #ffe9a8; animation: actPulse 1.6s ease-in-out infinite; }
+.buy-hint.ok { background: rgba(70,200,90,.12); border: 2px solid #46c85a; color: #c9f5cf; }
+.buy-hint.bad { background: rgba(224,80,58,.15); border: 2px solid #e0503a; color: #ffb3a3; }
