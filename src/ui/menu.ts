@@ -1,8 +1,9 @@
 import type { MapDef } from '../engine/board';
 import { EXTRA_HEROES } from '../engine/extraHeroes';
 import { key } from '../engine/board';
-import { ALL_HEROES, CARDS, HEROES, MONSTERS, TEST_HUMAN_HEROES, distributeStartingGear, EXTRA_HERO_IDS } from '../engine/data';
-import { CAMPAIGN, MAPS, difficultyBadge, getMap, loadMapId, mapDifficulty, saveMapId } from '../engine/maps';
+import { ALL_HEROES, BTG_HEROES, CARDS, HEROES, MONSTERS, TEST_HUMAN_HEROES, distributeStartingGear, EXTRA_HERO_IDS } from '../engine/data';
+import { TOMBSTONES } from '../engine/tombstones';
+import { BTG_MAP_IDS, CAMPAIGN, CAMPAIGN_BTG, MAPS, difficultyBadge, getMap, loadMapId, mapDifficulty, saveMapId } from '../engine/maps';
 import { drawFace, ensureArt } from '../render/chibi';
 import { MAX_SLOTS, TEST_GUILDS, slotsFor, type TestConfig, loadTestConfig, normalizeTestConfig, saveTestConfig } from './testConfig';
 import { GUILDS } from '../engine/data';
@@ -18,6 +19,13 @@ import { attachMapPeek, closeMapPeek, drawMinimap, mapArtUrl, mapSheet, miniCanv
 
 type Tab = 'herois' | 'monstros' | 'itens' | 'marcadores' | 'mapas' | 'regras';
 const TABS: [Tab, string][] = [['herois', '👥 Heróis'], ['monstros', '👹 Monstros'], ['itens', '🃏 Itens'], ['marcadores', '🪙 Marcadores'], ['mapas', '🗺️ Mapas'], ['regras', '📖 Regras']];
+
+/** Edições na Biblioteca: cada aba mostra só o conteúdo do CBT Clássico ou de Beyond the Grave. */
+type LibEd = 'classic' | 'btg';
+const LIB_EDS: [LibEd, string][] = [['classic', '⚔️ CBT Clássico'], ['btg', '💀 Beyond the Grave']];
+const BTG_TITLES = ['orador_mortos', 'mente_mestra', 'purificador', 'casamenteiro', 'coveiro', 'capitao_milicia', 'mestre_morte', 'alquimista'];
+const BTG_MONSTERS = ['esqueleto', 'zumbi_arremessador', 'zumbi_retalhador', 'fantasma', 'necromante', 'ivan', 'frank', 'dr_spider', 'rei_pavoroso'];
+const CLASSIC_MONSTERS = ['goblin', 'orc', 'capitao_orc', 'feral_martelador', 'feral_lanceiro', 'irma_dor', 'irma_prazer', 'troll', 'minotauro', 'lorde_presas'];
 
 const SET_TABS: [string, string][] = [['jogo', '🎮 Jogabilidade'], ['grafico', '🖥️ Gráficos'], ['som', '🔊 Som']];
 
@@ -60,6 +68,8 @@ export class MenuPages {
   private back: (() => void) | null = null;
 
   private tab: Tab | null = null;
+  /** Edição mostrada na Biblioteca. */
+  private libEd: LibEd = 'classic';
   /** Define para onde o botão Voltar leva (usado por cima da partida). */
   setBack(fn: () => void) { this.back = fn; }
   /** Biblioteca aberta de dentro da partida: não muda a Guilda nem o mapa. */
@@ -71,8 +81,21 @@ export class MenuPages {
     this.home.classList.add('hidden');
     this.page.classList.remove('hidden');
     const tabs = this.tab ? `<div class="lib-tabs">${TABS.map(([t, n]) => `<button class="${t === this.tab ? 'on' : ''}" data-tab="${t}">${n}</button>`).join('')}</div>` : '';
-    this.page.innerHTML = `<div class="mp-head"><button class="mp-back">← Voltar</button><h2>${title}</h2>${tabs}</div><div class="mp-body">${body}</div>`;
+    // na aba Heróis: Core, Beyond the Grave e Extra; nas outras, só as duas edições
+    const heroTab = this.tab === 'herois';
+    const edBtn = (e: string, n: string, on: boolean) => `<button class="${on ? 'on' : ''} ed-${e}" data-led="${e}">${n}</button>`;
+    const eds = !this.tab ? '' : `<div class="lib-eds">${heroTab
+      ? edBtn('classic', `⭐ Core Heroes <small>(${ALL_HEROES.length})</small>`, this.heroSet === 'core' && this.libEd === 'classic')
+        + edBtn('btg', `💀 Beyond the Grave <small>(${BTG_HEROES.length})</small>`, this.heroSet === 'core' && this.libEd === 'btg')
+        + edBtn('extra', `✨ Extra Heroes <small>(${EXTRA_HEROES.length})</small>`, this.heroSet === 'extra')
+      : LIB_EDS.map(([e, n]) => edBtn(e, n, e === this.libEd)).join('')}</div>`;
+    this.page.innerHTML = `<div class="mp-head"><button class="mp-back">← Voltar</button><h2>${title}</h2>${tabs}</div><div class="mp-body">${eds}${body}</div>`;
     this.page.querySelectorAll<HTMLElement>('[data-tab]').forEach(b => { b.onclick = () => this.showLibrary(b.dataset.tab as Tab); });
+    this.page.querySelectorAll<HTMLElement>('[data-led]').forEach(b => { b.onclick = () => {
+      if (b.dataset.led === 'extra') this.heroSet = 'extra';
+      else { this.libEd = b.dataset.led as LibEd; this.heroSet = 'core'; }
+      this.showLibrary(this.tab ?? 'herois');
+    }; });
     (this.page.querySelector('.mp-back') as HTMLElement).onclick = () => {
       const b = this.back;
       this.back = null;
@@ -111,10 +134,9 @@ export class MenuPages {
     if (onBack) { this.back = onBack; this.tab = null; this.picking = true; }
     else if (this.tab) this.picking = false;
     const extra = !this.picking && this.heroSet === 'extra';
-    const sub = this.picking ? '' : `<div class="lib-filter">
-      <button class="${extra ? '' : 'primary'}" data-hs="core">⭐ Core Heroes <small>(${ALL_HEROES.length})</small></button>
-      <button class="${extra ? 'primary' : ''}" data-hs="extra">✨ Extra Heroes <small>(${EXTRA_HEROES.length})</small></button></div>`;
-    const cards = extra ? EXTRA_HEROES.map(h => extraHeroCard(h)).join('') : ALL_HEROES.map(id => {
+    const btg = !this.picking && !extra && this.libEd === 'btg';
+    const sub = '';
+    const cards = btg ? BTG_HEROES.map(id => heroCard(id, '', `data-hero="${id}"`)).join('') : extra ? EXTRA_HEROES.map(h => extraHeroCard(h)).join('') : ALL_HEROES.map(id => {
       const idx = this.guild.indexOf(id);
       const on = this.picking && idx >= 0;
       return heroCard(id, on ? 'picked' : '', `data-hero="${id}"`, '', on ? `${idx + 1}` : '');
@@ -124,10 +146,9 @@ export class MenuPages {
         <div><b>Sua Guilda</b> (sala online) — clique nos cartões para escolher 3 Heróis.</div>
         <div class="mp-slots">${[0, 1, 2].map(i => `<span class="slot">${i + 1}. ${this.guild[i] ? HEROES[this.guild[i]].name : '—'}</span>`).join('')}</div>
       </div>`}
-      ${sub}${extra ? '<p class="muted">Heróis extras: jogáveis com <b>Permitir Todos os Heróis</b> nas Configurações da partida (no Modo Teste, pela aba Extra Heroes).</p>' : ''}
+      ${sub}${extra ? '<p class="muted">Heróis extras: entram no recrutamento com <b>Permitir Todos os Heróis</b> nas Configurações da partida.</p>' : ''}${btg ? '<p class="muted">Heróis de Beyond the Grave: entram no recrutamento da campanha Beyond the Grave (e em todas com <b>Permitir Todos os Heróis</b>).</p>' : ''}
       <div class="hgrid cards3">${cards}</div>`);
     paintCardArt(this.page);
-    this.page.querySelectorAll<HTMLElement>('[data-hs]').forEach(b => { b.onclick = () => { this.heroSet = b.dataset.hs as 'core' | 'extra'; this.showHeroes(); }; });
     this.page.querySelectorAll<HTMLElement>('[data-hero]').forEach(el => {
       if (this.picking) el.onclick = () => this.toggle(el.dataset.hero!);
     });
@@ -170,7 +191,7 @@ export class MenuPages {
     };
     this.open('Modo Teste', `<div class="ts">
       <section class="ts-sec ts-mapsec"><h3>1. Mapa</h3>
-        <select id="ts-map">${Object.values(MAPS).map(x => `<option value="${x.id}" ${x.id === c.mapId ? 'selected' : ''}>${x.name} — ${x.circle} · ${mapDifficulty(x).label}</option>`).join('')}</select>
+        <select id="ts-map">${Object.values(MAPS).map(x => x).sort((p, q) => Number(BTG_MAP_IDS.has(p.id)) - Number(BTG_MAP_IDS.has(q.id))).map(x => `<option value="${x.id}" ${x.id === c.mapId ? 'selected' : ''}>${BTG_MAP_IDS.has(x.id) ? '💀 ' : ''}${x.name} — ${x.circle} · ${mapDifficulty(x).label}</option>`).join('')}</select>
         <div class="ts-mappick" data-peek="${m.id}"><img src="${mapArtUrl(m.id)}" alt=""/>${miniCanvas(m, 360, 'id="ts-mini"')}</div>
         <small>${difficultyBadge(m)} Monstros Nível ${m.level ?? '1'} · ${m.startAreas.length} Áreas Iniciais · 🔍 abre a ficha</small></section>
       <section class="ts-sec"><h3>2. Times</h3>
@@ -260,30 +281,39 @@ export class MenuPages {
   // ------------------------------------------------------------------
   private monLevel = '';
   showMonsters() {
-    const bases = ['goblin', 'orc', 'capitao_orc', 'feral_martelador', 'feral_lanceiro', 'irma_dor', 'irma_prazer', 'troll', 'minotauro', 'lorde_presas'];
+    const btg = this.libEd === 'btg';
+    const bases = btg ? BTG_MONSTERS : CLASSIC_MONSTERS;
     const lv = this.monLevel;
     const cards = bases.map(b => MONSTERS[b + lv]).filter(Boolean).map(m => monsterCard(m.id)).join('');
     const lvBtn = (v: string, n: string) => `<button class="${lv === v ? 'primary' : ''}" data-lv="${v}" style="border-color:${MONSTER_LEVEL[n]}"><span class="lvdot" style="background:${MONSTER_LEVEL[n]}"></span>Nível ${n}</button>`;
     this.open('Biblioteca', `<div class="lib-filter">${lvBtn('', '1')}${lvBtn('2', '2-3')}${lvBtn('4', '4-5')}${lvBtn('6', '6')}</div><div class="hgrid cards-m">${cards}</div>
-      <p class="muted">Lacaios voltam pelo Cemitério (Entrada de Monstros). Vilões: todas as Guildas que tentarem feri-los ganham a recompensa.</p>`);
+      <p class="muted">${btg ? 'Mortos-vivos de Beyond the Grave: Fantasmas atravessam paredes, o Necromante ergue os mortos e o Rei Pavoroso ocupa o Espaço inteiro.' : 'Lacaios voltam pelo Cemitério (Entrada de Monstros). Vilões: todas as Guildas que tentarem feri-los ganham a recompensa.'}</p>`);
     paintCardArt(this.page);
     this.page.querySelectorAll<HTMLElement>('[data-lv]').forEach(b => { b.onclick = () => { this.monLevel = b.dataset.lv!; this.showMonsters(); }; });
   }
 
   private itemLevel = 'I';
   showItems() {
-    const lv = this.itemLevel;
-    const list = Object.values(ALL_CARDS).filter(c => c.level === lv);
+    const btg = this.libEd === 'btg';
+    // Beyond the Grave só traz cartas de Recompensa (dos seus cenários) e Títulos novos
+    const btgScen = new Set(CAMPAIGN_BTG.map(c => c.name));
+    const lv = btg && !['R', 'M'].includes(this.itemLevel) ? 'R' : this.itemLevel;
+    const list = Object.values(ALL_CARDS).filter(c => c.level === lv && (lv !== 'R' || btg === btgScen.has(c.scenario ?? '')));
+    const titles = Object.keys(TITLES).filter(t => btg === BTG_TITLES.includes(t));
     const body = lv === 'M'
-      ? `<div class="cp-cards">${Object.keys(CURSES).map(id => curseCard(id)).join('')}</div>
-         <h3 class="mp-sub">Títulos</h3><div class="mapinfo">${Object.keys(TITLES).map(t => `<div><b>🏅 ${TITLES[t]}</b> — ${TITLE_TEXT[t]}</div>`).join('')}</div>`
+      ? `${btg ? '' : `<div class="cp-cards">${Object.keys(CURSES).map(id => curseCard(id)).join('')}</div>`}
+         <h3 class="mp-sub">Títulos</h3><div class="mapinfo">${titles.map(t => `<div><b>🏅 ${TITLES[t]}</b> — ${TITLE_TEXT[t]}</div>`).join('')}</div>`
       : `<div class="cp-cards">${list.map(c => itemCard(c.id, '', '', true)).join('')}</div>`;
     const b = (v: string, n: string) => `<button class="${lv === v ? 'primary' : ''}" data-il="${v}">${ITEM_LEVEL[v] ? `<span class="lvdot" style="background:${ITEM_LEVEL[v].color}"></span>` : ''}${n}</button>`;
-    this.open('Biblioteca', `<div class="lib-filter">${b('I', 'Iniciais')}${b('1', 'Nível 1')}${b('2', 'Nível 2')}${b('3', 'Nível 3')}${b('4', 'Nível 4')}${b('5', 'Nível 5')}${b('R', 'Recompensas')}${b('M', 'Maldições e Títulos')}</div>${body}`);
+    const levels = btg ? b('R', 'Recompensas') + b('M', 'Títulos')
+      : `${b('I', 'Iniciais')}${b('1', 'Nível 1')}${b('2', 'Nível 2')}${b('3', 'Nível 3')}${b('4', 'Nível 4')}${b('5', 'Nível 5')}${b('R', 'Recompensas')}${b('M', 'Maldições e Títulos')}`;
+    const note = btg ? '<p class="muted">Beyond the Grave usa as mesmas cartas de Melhoria do CBT Clássico; as cartas novas são as Recompensas dos seus cenários.</p>' : '';
+    this.open('Biblioteca', `<div class="lib-filter">${levels}</div>${body}${note}`);
     this.page.querySelectorAll<HTMLElement>('[data-il]').forEach(x => { x.onclick = () => { this.itemLevel = x.dataset.il!; this.showItems(); }; });
   }
 
   showTokens() {
+    if (this.libEd === 'btg') return this.showTombs();
     const qty = (type: string, value?: number) => EXPLORATION_BAG.filter(t => t.type === type && (value === undefined || t.value === value)).length;
     const tok = (img: string, name: string, text: string, extra = '') => `<div class="tk-card"><img src="${tokenUrl(img)}"/><b>${name}</b>${extra ? `<small>${extra}</small>` : ''}<p>${text}</p></div>`;
     this.open('Biblioteca', `
@@ -305,8 +335,18 @@ export class MenuPages {
       <div class="tk-grid">${['azul', 'vermelho', 'verde', 'laranja'].map(c => tok(`missao_${c}`, `Missão ${c[0].toUpperCase()}${c.slice(1)}`, 'Marcador de Missão.')).join('')}</div>`);
   }
 
+  /** Marcadores de Beyond the Grave: o marcador de Morte e as cartas de Lápide. */
+  private showTombs() {
+    this.open('Biblioteca', `
+      <h3 class="mp-sub">Marcador de Morte</h3>
+      <div class="tk-grid"><div class="tk-card"><img src="${tokenUrl('missao_morte')}"/><b>Morte</b><p>Marcador de Missão de Beyond the Grave (O Cemitério e outros cenários).</p></div></div>
+      <h3 class="mp-sub">Cartas de Lápide 🪦</h3>
+      <p class="muted">Ficam em pé em Espaços do mapa. Um Herói no Espaço gasta 1 Ponto de Movimento para revelar (mesmo com Inimigo, sem Reação de Alerta) e o efeito acontece na hora.</p>
+      <div class="tk-grid">${TOMBSTONES.map(t => `<div class="tk-card tomb ${t.good ? '' : 'bad'}"><span class="tomb-ic">🪦</span><b>${t.name}</b><p>${t.text}</p></div>`).join('')}</div>`);
+  }
+
   showRules() {
-    this.open('Biblioteca', RULES_HTML);
+    this.open('Biblioteca', this.libEd === 'btg' ? RULES_BTG_HTML : RULES_HTML);
   }
 
   // ------------------------------------------------------------------
@@ -390,9 +430,11 @@ export class MenuPages {
   }
 
   showMaps(selected = loadMapId()) {
-    const m = getMap(selected);
-    const circles = [...new Set(CAMPAIGN.map(c => c.circle))];
-    const list = circles.map(circle => `<div class="mc-group">${circle}</div>` + CAMPAIGN.filter(c => c.circle === circle).map(c => {
+    // as duas campanhas: CBT Clássico e Beyond the Grave (o mapa mostrado é da edição da aba)
+    const camp = (this.tab ? this.libEd === 'btg' : BTG_MAP_IDS.has(getMap(selected).id)) ? CAMPAIGN_BTG : CAMPAIGN;
+    const m = camp.some(c => c.map?.id === selected) ? getMap(selected) : camp.find(c => c.map)!.map!;
+    const groups = [...new Set(camp.map(c => c.circle))].map(circle => ({ head: circle, list: camp.filter(c => c.circle === circle) }));
+    const list = groups.map(({ head, list: items }) => `<div class="mc-group">${head}</div>` + items.map(c => {
       const sel = c.map?.id === m.id;
       return `<div class="mapcard ${c.map ? 'playable' : 'locked'} ${sel ? 'sel' : ''}" ${c.map ? `data-map="${c.map.id}"` : ''}>
         ${c.map ? `<img class="mc-thumb" src="${mapArtUrl(c.map.id)}" alt="" loading="lazy"/>` : ''}<div class="mc-name">${c.name}${c.map ? ` ${difficultyBadge(c.map)}` : ''}</div>
@@ -409,6 +451,16 @@ export class MenuPages {
 }
 
 export { drawMinimap } from './mapInfo';
+
+const RULES_BTG_HTML = `<div class="rules">
+  <section><h3>Beyond the Grave</h3><p>O Rei Pavoroso se ergueu! Campanha de 9 cenários: 5 no Círculo Exterior, 3 no Interior e o Confronto Final no Mausoléu Profano. Valem todas as regras do CBT Clássico, mais as abaixo.</p></section>
+  <section><h3>Cartas de Lápide 🪦</h3><p>Ficam em pé em Espaços do mapa. Um Herói no Espaço gasta <b>1 Ponto de Movimento</b> para revelar — mesmo com Inimigos no Espaço e sem provocar Reação de Alerta. O efeito acontece na hora (moedas, cura, movimento, ativar um Monstro…).</p></section>
+  <section><h3>Banimento</h3><p>Personagem banido vai para o <b>Tabuleiro de Entrada</b> com os seus Ferimentos e marcadores. Monstros voltam pela Entrada de Monstros; Heróis voltam quando a Guilda Descansa.</p></section>
+  <section><h3>Fantasma</h3><p>Atravessa paredes e portas fechadas, e está <b>Perto</b> dos Espaços vizinhos mesmo através delas.</p></section>
+  <section><h3>Enorme</h3><p>O <b>Rei Pavoroso</b> ocupa o Espaço inteiro (conta como 2 personagens) e empurra quem estiver no caminho.</p></section>
+  <section><h3>Necromante</h3><p>Antes de atacar, traz de volta um Monstro do Tabuleiro de Entrada para Perto dele.</p></section>
+  <section><h3>Heróis novos</h3><p><b>Chaz</b>: +2 dados em ataques Próximos enquanto não estiver ferido. <b>Darryn</b>: +1 dado contra alvos sem Ferimentos.</p></section>
+</div>`;
 
 const RULES_HTML = `<div class="rules">
   <section><h3>Objetivo</h3><p>Cumprir Missões antes das outras Guildas. Com 2 jogadores vence quem cumprir <b>2 Missões</b>; com 3-4, <b>3 Missões</b> com pelo menos <b>1 contra o Jogo</b>. Na campanha, 6 cenários: 3 do Círculo Exterior, 2 do Interior e o Confronto Final.</p></section>

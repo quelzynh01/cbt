@@ -193,6 +193,15 @@ perm('coroa_sangue', 'Coroa de Sangue', 'R-RD', 'R', 1, 0, 'Joia', { scenario: '
 perm('saco_ossos', 'Saco de Ossos', 'R-S1', 'R', 1, 0, 'Equipamento', { scenario: 'A Mansão', fx: { sackBones: true }, text: 'Cura 2 Ferimentos sempre que este Herói mata um Inimigo.' });
 atk('machado_schmetterling', 'Machado de Schmetterling', 'R-S2', 'R', 1, 0, 'melee', 'Machado', 4, { scenario: 'A Mansão', fx: { critExtra: 1 }, text: 'Cada ✷ causa 1 acerto adicional (e cura 1 Ferimento).' });
 perm('coracao_anjos', 'Coração de Anjos', 'R-TM', 'R', 2, 0, 'Joia', { scenario: 'A Mansão', fx: { angelHeart: true }, text: 'Quando este Herói sofre Ferimentos, cura 1 de todos os Aliados.' });
+// Beyond the Grave (as cartas não vêm no livro: efeitos no padrão das Recompensas da caixa básica)
+atk('espinha_dorsal', 'Espinha Dorsal', 'R-HB', 'R', 2, 0, 'melee', 'Machado', 4, { scenario: 'Quartel Assombrado', rerolls: 1, text: 'Uma espinha arrancada que serve de chicote.' });
+atk('corrente_flamejante', 'Corrente Flamejante', 'R-SH', 'R', 2, 0, 'melee', 'Exótica', 3, { scenario: 'Abatedouro', fx: { allClose: true }, text: 'Também atinge todos os Inimigos Perto do alvo.' });
+perm('pedra_alma', 'Pedra da Alma', 'R-CR', 'R', 2, 0, 'Joia', { scenario: 'Criptas', fx: { sackBones: true }, text: 'Cura 2 Ferimentos sempre que este Herói mata um Inimigo.' });
+perm('arreio_poder', 'Arreio de Força', 'R-BD', 'R', 1, 0, 'Equipamento', { scenario: 'Ponte dos Condenados', hpBonus: 2, fx: { rawr: 1 }, text: '+1 dado em todos os ataques.' });
+perm('escudo_lapide', 'Escudo de Lápide', 'R-GY', 'R', 1, 0, 'Escudo', { scenario: 'O Cemitério', defBonus: 2, text: 'Uma lápide inteira como escudo.' });
+perm('agua_benta', 'Água Benta', 'R-BS', 'R', 2, 0, 'Joia', { scenario: 'Santuário Negro', fx: { genesis: 1 }, text: 'No começo do turno da sua Guilda, este Herói cura 1 Ferimento.' });
+perm('elmo_cranio', 'Elmo de Crânio', 'R-MS', 'R', 2, 0, 'Elmo', { scenario: 'Moinho das Almas', defBonus: 1, hpBonus: 1 });
+perm('soro_colossal', 'Soro Colossal', 'R-SL', 'R', 2, 0, 'Poção', { scenario: 'Laboratório Secreto', hpBonus: 1, fx: { rawr: 1 }, text: '+1 dado em todos os ataques.' });
 atk('lanca_feral', 'Lança do Feral', 'R-TR', 'R', 2, 0, 'melee', 'Lança', 3, { scenario: 'O Viveiro das Águias', fx: { diagonal: true }, text: 'O primeiro Espaço na diagonal conta como Perto.' });
 perm('tomo_iluminacao', 'Tomo da Iluminação', 'R-UP', 'R', 2, 0, 'Equipamento', { scenario: 'O Pátio da Universidade', rerolls: 2, fx: { magicSlots: 2 }, text: '+2 espaços de inventário para cartas de Ataque Mágicas.' });
 

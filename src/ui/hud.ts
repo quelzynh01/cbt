@@ -26,6 +26,8 @@ export interface HudActions {
   useCard(heroId: string, cardUid: string): void;
   /** Habilidade do Herói usada como ação (Heróis extras). */
   usePower(heroId: string): void;
+  /** Revelar a Lápide do Espaço do Herói ativo (Beyond the Grave). */
+  revealTomb(): void;
   endTurn(): void;
   rest(): void;
   inspect(unitId: string | null): void;
@@ -147,6 +149,7 @@ export class Hud {
       <div id="dice" class="hidden"></div>
       <div id="banner" class="hidden"></div>
       <div id="toasts"></div>
+      <div id="tomb-pop" class="hidden"></div>
       <div id="tooltip" class="hidden"></div>
       <div id="hint"></div>
     `;
@@ -652,7 +655,10 @@ export class Hud {
     const slots = [0, 1, 2, 3, 4].map(i => {
       const id = this.cem[i];
       if (!id) return `<div class="cem-slot empty">${i + 1}</div>`;
-      const md = MONSTERS[g.unit(id).defId];
+      const u = g.unit(id);
+      // Herói banido (Beyond the Grave) também espera aqui
+      if (u.kind === 'hero') return `<div class="cem-slot hero" title="${g.name(u)} (banido)"><img src="${this.portrait(u.defId, GUILDS[u.guild!].color)}"/><span>${HEROES[u.defId].name.slice(0, 2).toUpperCase()}</span></div>`;
+      const md = MONSTERS[u.defId];
       return `<div class="cem-slot" title="${md.name}"><img src="${this.portrait(md.id, '#4a3a5a')}"/><span>${md.abbr}</span></div>`;
     }).join('');
     const full = this.cem.length >= 5;
@@ -667,7 +673,7 @@ export class Hud {
     const box = $('#spawnbox', this.root);
     clearTimeout(this.spawnHideTimer);
     box.innerHTML = `<div class="panel-h">☠ Entrada de Monstros!</div><div class="sp-sub">Role 2 dados por monstro e compare com os bueiros (Marcadores de Entrada).</div>
-      ${ids.map(id => `<div class="sp-row" data-sp="${id}"><img src="${this.portrait(g.unit(id).defId, '#4a3a5a')}"/><span class="sp-name">${MONSTERS[g.unit(id).defId].name}</span><span class="sp-dice"></span><span class="sp-res muted">aguardando…</span></div>`).join('')}`;
+      ${ids.map(id => `<div class="sp-row" data-sp="${id}"><img src="${this.portrait(g.unit(id).defId, '#4a3a5a')}"/><span class="sp-name">${g.name(g.unit(id))}</span><span class="sp-dice"></span><span class="sp-res muted">aguardando…</span></div>`).join('')}`;
     box.classList.remove('hidden');
   }
 
@@ -797,6 +803,9 @@ export class Hud {
       </div>
       <div class="ability ${u.curse === 'amnesia' ? 'off' : ''}"><b>${hd.abilityName}</b> — ${richText(hd.abilityText)}</div>
       ${(() => { const p = mine ? g.heroPower(u) : null; return p ? `<button class="hb-power ${p.ok ? '' : 'off'}" id="hb-power" title="${p.label}${p.why ? ` — ${p.why}` : ''}">⚡ ${hd.abilityName}<small>${p.ok ? p.label : p.why}</small></button>` : ''; })()}
+      ${mine && isActive && g.canRevealTomb() ? `<button class="hb-power hb-tomb" id="hb-tomb" title="Gasta 1 Ponto de Movimento; não aciona Reação de Alerta">🪦 Revelar a Lápide<small>1 PM — o efeito acontece na hora</small></button>` : ''}
+      ${g.s.shroud?.includes(u.id) ? '<div class="tag rr">🪦 Mortalha: +2 dados de Defesa até o próximo turno da Guilda</div>' : ''}
+      ${u.banished ? '<div class="tag dead">👻 Banido — está no Tabuleiro de Entrada (volta na Entrada de Monstros ou ao Descansar)</div>' : ''}
       ${g.s.copied?.heroId === u.id ? `<div class="tag rr">🐒 Copiou: <b>${Object.values(HEROES).find(x => x.ability === g.s.copied!.ability)?.abilityName ?? ''}</b> (até o fim do turno)</div>` : ''}
       ${u.petrified ? `<div class="tag stun">🗿 Petrificado: −${u.petrified} de Movimento até Descansar</div>` : ''}
       ${u.curse ? `<div class="ability curse-ab" title="${CURSES[u.curse]?.text ?? ''}"><b>☠ ${CURSES[u.curse]?.name}</b> — ${CURSES[u.curse]?.text}</div>` : ''}
@@ -813,6 +822,8 @@ export class Hud {
     box.querySelectorAll<HTMLElement>('[data-card]').forEach(el => {
       el.onclick = () => { if (mine && isActive && usableIds.has(el.dataset.card!)) this.actions.selectCard(el.dataset.card!); };
     });
+    const tb = box.querySelector<HTMLElement>('#hb-tomb');
+    if (tb) tb.onclick = e => { e.stopPropagation(); this.actions.revealTomb(); };
     const pw = box.querySelector<HTMLElement>('#hb-power');
     if (pw) pw.onclick = e => { e.stopPropagation(); if (!pw.classList.contains('off')) this.actions.usePower(u.id); };
     box.querySelectorAll<HTMLElement>('[data-useact]').forEach(b => {
@@ -919,9 +930,23 @@ export class Hud {
         break;
       }
       case 'useToken': this.log(`${g.name(g.unit(e.heroId))} usou: ${TOKEN_INFO[e.token.type].name}`); break;
+      case 'tomb': {
+        const h = g.unit(e.heroId);
+        const col = h.guild ? GUILDS[h.guild].color : '#b892ff';
+        const el = $('#tomb-pop', this.root);
+        el.innerHTML = `<div class="tp-card ${e.good ? '' : 'bad'}"><div class="tp-ic">🪦</div><small>Lápide revelada por <b style="color:${col}">${g.name(h)}</b></small><h3>${e.name}</h3><p>${e.text}</p></div>`;
+        el.classList.remove('hidden', 'anim');
+        void el.offsetWidth;
+        el.classList.add('anim');
+        clearTimeout(this.tombT);
+        this.tombT = window.setTimeout(() => el.classList.add('hidden'), 3400);
+        play('skill-spike');
+        this.log(`🪦 ${g.name(h)} revelou a Lápide "${e.name}": ${e.text}`, col);
+        break;
+      }
       case 'skill': play(e.skill === 'furtivo' ? 'skill-wisp' : 'skill-spike'); this.toast(`✨ ${g.name(g.unit(e.id))}: ${e.name}!`, '#9fe8ff'); break;
       case 'door': this.log(`${g.name(g.unit(e.by))} ${e.open ? 'abriu' : 'fechou'} uma porta.`); break;
-      case 'spawn': this.log(`${MONSTERS[g.unit(e.id).defId].name} entrou no tabuleiro.`); break;
+      case 'spawn': this.log(`${g.name(g.unit(e.id))} entrou no tabuleiro.`); break;
       case 'reaction': this.log(`${MONSTERS[g.unit(e.monsterId).defId].name}: Reação de ${e.kind === 'alerta' ? 'Alerta' : 'Vingança'}!`); break;
       default: break;
     }
@@ -936,6 +961,7 @@ export class Hud {
     while (log.children.length > 120) log.lastChild!.remove();
   }
 
+  private tombT = 0;
   toast(text: string, color: string) {
     const el = document.createElement('div');
     el.className = 'toast';
@@ -970,7 +996,7 @@ export class Hud {
     const sp = Math.max(1, this.speed);
     const wait = (ms: number) => new Promise<void>(r => this.centerTimers.push(window.setTimeout(r, ms / sp)));
     const atk = g.unit(e.attackerId);
-    const reason = { heroi: 'Ataque', alerta: 'Reação de Alerta', vinganca: 'Reação de Vingança', armadilha: 'Armadilha' }[e.reason];
+    const reason = { heroi: 'Ataque', alerta: 'Reação de Alerta', vinganca: 'Reação de Vingança', armadilha: 'Armadilha', lapide: 'Lápide' }[e.reason];
     const ok = (f: DieFace, s: string) => f === 'crit' || f === s;
     const mineHero = (u: Unit) => u.kind === 'hero' && !!u.guild && this.isMine(u.guild);
     // Reação de Monstro: quem controla os Monstros rola o ataque dele (botões de Rolar e de ✷)
@@ -1312,7 +1338,7 @@ export class Hud {
   private showDice(e: Extract<GameEvent, { t: 'attack' }>) {
     const g = this.game;
     const atk = g.unit(e.attackerId);
-    const reason = { heroi: '', alerta: 'Reação de Alerta', vinganca: 'Reação de Vingança', armadilha: 'Armadilha' }[e.reason];
+    const reason = { heroi: '', alerta: 'Reação de Alerta', vinganca: 'Reação de Vingança', armadilha: 'Armadilha', lapide: 'Lápide' }[e.reason];
     const succ = (f: DieFace, type: string) => f === 'crit' || f === type;
     const dice = (faces: DieFace[], type: string, cls: string) => faces.map((f, i) =>
       `<span class="die ${cls} ${succ(f, type) ? 'hit' : ''} ${f === 'crit' ? 'crit' : ''}" style="animation-delay:${i * 60}ms">${dieImg(f, cls === 'black')}</span>`).join('') || '<span class="muted">sem dados</span>';

@@ -4,7 +4,7 @@ import { buyHint, buySummaryHtml, curseRevealHtml, curseSummaryHtml } from './up
 import { draftRounds, picksPerRound } from '../campaign/campaign';
 import { gameConfirm } from './dialog';
 import { Game } from '../engine/game';
-import { MAPS, getMap } from '../engine/maps';
+import { EDITIONS, MAPS, getMap, type Edition } from '../engine/maps';
 import type { GameState, GuildId } from '../engine/types';
 import { drawFace } from '../render/chibi';
 import { ClientSession, HostSession, type Lobby, type Session, type SessionEvents, type SetupMsg, savedName, saveName } from '../net/net';
@@ -38,6 +38,8 @@ export class OnlineLobby {
   private diceCap = true;
   private pickOne = true;
   private allHeroes = false;
+  /** Campanha online: CBT Clássico ou Beyond the Grave. */
+  private edition: Edition = 'classic';
   private lastTick = -1;
   /** Campanha online (anfitrião): a preparação guardada enquanto um cenário é jogado. */
   private stash: OnlineSetup | null = null;
@@ -168,7 +170,7 @@ export class OnlineLobby {
           <button id="lb-copy">📋 Copiar link</button><small>${esc(link)}</small></div>
         <div class="lb-seats">${slots}</div>
         <div class="lb-actions">
-          ${host ? `<span class="lb-sum">${this.mode === 'campaign' ? '🏰 Campanha (6 cenários)' : '⚔ Partida única'} · IA ${getSettings().ai === 'hard' ? 'Difícil' : 'Normal'}${this.diceCap ? ' · Limite de dados' : ''}${this.mode === 'campaign' && this.pickOne ? ' · Pegar 1 carta' : ''} · ${this.allHeroes ? 'Todos os Heróis' : 'Apenas Core Heroes'}</span>
+          ${host ? `<span class="lb-sum">${this.mode === 'campaign' ? `🏰 Campanha ${this.edition === 'btg' ? 'Beyond the Grave' : 'CBT Clássico'} (6 cenários)` : '⚔ Partida única'} · IA ${getSettings().ai === 'hard' ? 'Difícil' : 'Normal'}${this.diceCap ? ' · Limite de dados' : ''}${this.mode === 'campaign' && this.pickOne ? ' · Pegar 1 carta' : ''} · ${this.allHeroes ? 'Todos os Heróis' : 'Apenas Core Heroes'}</span>
             <button id="lb-cfg">⚙️ Configurações da partida</button>
             <button class="primary" id="lb-start" ${canStart ? '' : 'disabled'}>▶ Ir para a mesa</button>` : '<span class="lb-wait">Aguardando o anfitrião levar todos para a mesa…</span>'}
         </div>
@@ -201,6 +203,7 @@ export class OnlineLobby {
         <label class="mcf-row">Dificuldade da IA <select id="mc-ai"><option value="normal">Normal</option><option value="hard" ${getSettings().ai === 'hard' ? 'selected' : ''}>Difícil</option></select></label>
         <label class="mcf-row">Heróis <select id="mc-heroes"><option value="core">⭐ Apenas Core Heroes</option><option value="all" ${this.allHeroes ? 'selected' : ''}>🌟 Permitir Todos os Heróis</option></select></label>
         <label class="set-opt"><input type="checkbox" id="mc-cap" ${this.diceCap ? 'checked' : ''}/> <b>Limite de dados</b> — no máximo 8 dados de ataque e 6 de defesa por rolagem. Sem marcar, ilimitado.</label>
+        ${this.mode === 'campaign' ? `<label class="mcf-row">Campanha <select id="mc-ed">${EDITIONS.map(e => `<option value="${e.id}" ${this.edition === e.id ? 'selected' : ''}>${e.id === 'btg' ? '💀' : '⚔️'} ${e.name}</option>`).join('')}</select></label>` : ''}
         ${this.mode === 'campaign' ? `<label class="set-opt"><input type="checkbox" id="mc-one" ${this.pickOne ? 'checked' : ''}/> <b>Pegar 1 carta</b> — na Fase de Melhorias cada um pega 1 carta por rodada e passa o resto (em vez de 2).</label>` : ''}
         <div class="gd-btns"><button class="primary" id="mc-ok">✔ Pronto</button></div>
       </div>`;
@@ -208,6 +211,8 @@ export class OnlineLobby {
       (el.querySelector('#mc-ai') as HTMLSelectElement).onchange = e => saveSettings({ ...getSettings(), ai: (e.target as HTMLSelectElement).value as 'normal' | 'hard' });
       (el.querySelector('#mc-cap') as HTMLInputElement).onchange = e => { this.diceCap = (e.target as HTMLInputElement).checked; };
       (el.querySelector('#mc-heroes') as HTMLSelectElement).onchange = e => { this.allHeroes = (e.target as HTMLSelectElement).value === 'all'; };
+      const ed = el.querySelector('#mc-ed') as HTMLSelectElement | null;
+      if (ed) ed.onchange = () => { this.edition = ed.value as Edition; };
       const one = el.querySelector('#mc-one') as HTMLInputElement | null;
       if (one) one.onchange = () => { this.pickOne = one.checked; };
       (el.querySelector('#mc-ok') as HTMLElement).onclick = () => { el.remove(); this.renderRoom(); };
@@ -221,7 +226,7 @@ export class OnlineLobby {
   private startSetup() {
     const host = this.session as HostSession;
     const l = host.lobby;
-    l.setup = newSetup(l.seats.map(s => ({ guild: s.guild, ai: s.ai })), getSettings().ai, Math.random, this.mode, this.diceCap, this.mode === 'campaign' && this.pickOne, this.allHeroes);
+    l.setup = newSetup(l.seats.map(s => ({ guild: s.guild, ai: s.ai })), getSettings().ai, Math.random, this.mode, this.diceCap, this.mode === 'campaign' && this.pickOne, this.allHeroes, this.edition);
     this.hostAdvance();
   }
 

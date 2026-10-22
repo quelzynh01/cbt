@@ -136,8 +136,7 @@
 .ac-img.icon.art-adaga_aparadora { max-width: 70%; max-height: 88px; }
 .ac-img.icon.art-anel_lua { max-width: 66%; max-height: 82px; }
 /* Heróis extras (Biblioteca): carta mais escura, com o retrato */
-.acard.hero.extra { filter: brightness(.78) saturate(.8); --lv: #4a3f5e; }
-.acard.hero.extra:hover { filter: brightness(.95) saturate(.95); }
+.acard.hero.extra { --lv: #4a3f5e; }
 .acard.hero.extra .xh-img { width: 120px; height: 120px; object-fit: cover; border-radius: 12px; align-self: center; border: 2px solid rgba(255,255,255,.35); }
 .acard.hero.extra .xh-none { height: 120px; display: grid; place-items: center; font-size: 34px; font-weight: 900; color: #fff; background: rgba(0,0,0,.35); border-radius: 12px; align-self: center; }
 
@@ -185,3 +184,8 @@
 /* arte do personagem ainda carregando */
 canvas[data-art] { transition: opacity .25s; }
 canvas[data-art].art-wait { opacity: 0; }
+
+/* rating do Herói (canto da carta) */
+.acard.hero { position: relative; }
+.hc-rating { position: absolute; top: 6px; right: 8px; z-index: 3; padding: 1px 7px; border-radius: 10px; font: 800 12px 'Baloo 2', system-ui, sans-serif;
+  color: #3a2200; background: linear-gradient(#ffe48a, #e9a83a); border: 1px solid #fff2c4; box-shadow: 0 2px 4px rgba(0,0,0,.45); }

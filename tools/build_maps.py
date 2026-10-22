@@ -21,6 +21,11 @@ NAMES = {  # nome do cenário (sem acento, minúsculo) -> id do mapa
     'covil dos orcs': 'covil-dos-orcs', 'distrito do alquimista': 'distrito-do-alquimista',
     'praca da aurora vermelha': 'praca-da-aurora-vermelha', 'o patio da universidade': 'patio-da-universidade',
     'distrito sempressombrio': 'distrito-sempressombrio', 'o templo do amanhecer crepuscular': 'templo-do-amanhecer-crepuscular',
+    # Beyond the Grave (arquivos com o nome em inglês)
+    'haunted barracks': 'quartel-assombrado', 'slaughter house': 'abatedouro', 'crypts': 'criptas',
+    'bridge ofthe damned': 'ponte-dos-condenados', 'bridge of the damned': 'ponte-dos-condenados', 'the graveyard': 'o-cemiterio',
+    'black shrine': 'santuario-negro', 'mill of souls': 'moinho-das-almas', 'secret laboratory': 'laboratorio-secreto',
+    'the unholy mausoleum': 'mausoleu-profano',
 }
 PRETTY = {
     'distrito-dos-martelos': 'Distrito dos Martelos', 'arena-do-sol-brilhante': 'Arena do Sol Brilhante',

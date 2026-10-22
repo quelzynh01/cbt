@@ -1,5 +1,5 @@
 import { HEROES, distributeStartingGear, heroPool } from '../engine/data';
-import { MAPS } from '../engine/maps';
+import { MAPS, campaignList, type Edition } from '../engine/maps';
 import type { Game } from '../engine/game';
 import { CARDS } from '../engine/cards';
 import {
@@ -31,6 +31,8 @@ export interface OnlineSetup {
   pickOne?: boolean;
   /** Configurações da partida: "Permitir Todos os Heróis" (os extras entram no recrutamento). */
   allHeroes?: boolean;
+  /** Campanha: CBT Clássico ou Beyond the Grave. */
+  edition?: Edition;
   /** Telas de "todos veem" (resumo das Maldições, resumo das compras): quem já clicou em Continuar. */
   upOk?: Partial<Record<GuildId, boolean>>;
   /** Campanha online (estado completo, como no modo campanha). */
@@ -65,13 +67,13 @@ function shuffle<T>(a: T[], rnd: () => number): T[] {
   return r;
 }
 
-export function newSetup(seats: SeatInfo[], aiLevel: AILevel, rnd: () => number = Math.random, mode: 'single' | 'campaign' = 'single', diceCap = true, pickOne = true, allHeroes = false): OnlineSetup {
+export function newSetup(seats: SeatInfo[], aiLevel: AILevel, rnd: () => number = Math.random, mode: 'single' | 'campaign' = 'single', diceCap = true, pickOne = true, allHeroes = false, edition: Edition = 'classic'): OnlineSetup {
   const order = seats.map(s => s.guild);
   const size = order.length <= 3 ? 4 : 3;
-  const pool = shuffle(heroPool(allHeroes), rnd);
+  const pool = shuffle(heroPool(allHeroes, mode === 'campaign' ? edition : 'classic'), rnd);
   const st: OnlineSetup = {
     step: 'draft', round: 0, order, hands: {}, choice: {}, picks: {}, votes: {}, equip: {}, tick: 0, aiLevel,
-    mode, diceCap, upPick: {}, upBuy: {}, upArr: {}, ...(pickOne ? { pickOne } : {}), ...(allHeroes ? { allHeroes } : {}),
+    mode, diceCap, upPick: {}, upBuy: {}, upArr: {}, ...(pickOne ? { pickOne } : {}), ...(allHeroes ? { allHeroes } : {}), ...(mode === 'campaign' && edition !== 'classic' ? { edition } : {}),
   };
   for (const g of order) { st.hands[g] = pool.splice(0, size); st.choice[g] = null; st.picks[g] = []; }
   return st;
@@ -86,7 +88,7 @@ export function chooseHero(st: OnlineSetup, g: GuildId, hero: string): boolean {
 
 /** Mapas que podem ser votados (na campanha, só os do Círculo Exterior). */
 export function votableMaps(st: OnlineSetup): string[] {
-  return st.mode === 'campaign' ? Object.values(MAPS).filter(m => m.circle === 'Círculo Exterior').map(m => m.id) : Object.keys(MAPS);
+  return st.mode === 'campaign' ? campaignList(st.edition).filter(s => s.map && s.circle === 'Círculo Exterior').map(s => s.map!.id) : Object.keys(MAPS);
 }
 
 export function voteMap(st: OnlineSetup, g: GuildId, map: string): boolean {
@@ -176,7 +178,7 @@ export function advance(st: OnlineSetup, seats: SeatInfo[], rnd: () => number = 
 export function startCampaign(st: OnlineSetup, seats: (SeatInfo & { team?: string })[]) {
   const c: CampaignState = {
     version: 1, guilds: [], played: [], chooser: st.order[0], phase: 'choose', seed: (Date.now() ^ (Math.random() * 1e9)) | 0,
-    elapsed: 0, aiLevel: st.aiLevel, diceCap: st.diceCap, voted: st.map, ...(st.pickOne ? { pickOne: true } : {}), ...(st.allHeroes ? { allHeroes: true } : {}),
+    elapsed: 0, aiLevel: st.aiLevel, diceCap: st.diceCap, voted: st.map, ...(st.pickOne ? { pickOne: true } : {}), ...(st.allHeroes ? { allHeroes: true } : {}), ...(st.edition ? { edition: st.edition } : {}),
   };
   for (const g of st.order) {
     const s = seats.find(x => x.guild === g);

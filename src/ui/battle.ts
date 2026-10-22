@@ -235,7 +235,7 @@ export class BattlePanel {
     // Reação de Monstro: quem rola é o jogador que controla os Monstros (com o botão de ✷, igual ao Herói)
     const humanAtk = atk.kind === 'hero' ? this.deps.isHuman(atk) : !!e.ctl && this.deps.isMineGuild(e.ctl);
     const humanInvolved = humanAtk || e.targets.some(t => { const u = g.unit(t.id); return u.kind === 'hero' && this.deps.isHuman(u); });
-    const reason = { heroi: 'Ataque', alerta: 'Reação de Alerta!', vinganca: 'Reação de Vingança!', armadilha: 'Armadilha' }[e.reason];
+    const reason = { heroi: 'Ataque', alerta: 'Reação de Alerta!', vinganca: 'Reação de Vingança!', armadilha: 'Armadilha', lapide: 'Lápide: Monstro ativado!' }[e.reason];
     const before = new Map(e.targets.map(t => [t.id, this.deps.viewWounds(t.id)]));
     const atkWounds = this.deps.viewWounds(atk.id);
 

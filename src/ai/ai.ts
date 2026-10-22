@@ -1,4 +1,4 @@
-import { key, sameCell } from '../engine/board';
+import { key, parseKey, sameCell } from '../engine/board';
 import { CARDS, HEROES, MONSTERS } from '../engine/data';
 import type { Game, RestOptions } from '../engine/game';
 import type { CardInst, Cell, GuildId, MissionDef, Token, Unit } from '../engine/types';
@@ -11,13 +11,42 @@ import type { CardInst, Cell, GuildId, MissionDef, Token, Unit } from '../engine
 
 export type AILevel = 'normal' | 'hard';
 
+/** Pesos da IA. Os valores padrão vêm de simulações (IA x IA em todos os mapas): menos rodadas por partida
+ *  sem deixar a IA mais fraca no confronto direto. */
+export interface AIParams {
+  /** Matar um Herói de Guilda cuja Missão "Matar" já foi cumprida: bônus máximo da morte. */
+  pvpDoneKill: number;
+  /** ... e peso do dano nele. */
+  pvpDoneDmg: number;
+  /** Heróis dessa Guilda continuam atraindo a IA como objetivo? */
+  pvpDoneAttract: boolean;
+  /** Peso da distância até os objetivos. */
+  posW: number;
+  /** Valor de pegar um marcador de Missão. */
+  missionTok: number;
+  /** Turnos sem progresso a mais antes de ficar agressiva. */
+  idleStart: number;
+  /** Bônus por matar um Monstro que guarda (está Perto de) um marcador de Missão desejado. */
+  guardKill: number;
+  /** Peso da chance de um marcador virado ser uma Missão escondida. */
+  hiddenW: number;
+  /** Atrapalhar Missões dos adversários (ficar no Espaço do objetivo, derrubar quem está quase cumprindo). */
+  denyW: number;
+  /** Só atrapalha quem está a 1 Missão de vencer. */
+  denyUrgentOnly: boolean;
+}
+export const AI_PARAMS: AIParams = { pvpDoneKill: 1, pvpDoneDmg: 0.7, pvpDoneAttract: false, posW: 0.6, missionTok: 9, idleStart: 0, guardKill: 2, hiddenW: 3, denyW: 1, denyUrgentOnly: false };
+
 export type AIAction =
   | { type: 'activate'; heroId: string }
   | { type: 'move'; cell: Cell }
+  /** Abrir uma porta ao lado (sem atravessar): revela quem está do outro lado para atacar. */
+  | { type: 'door'; doorId: string }
   | { type: 'attack'; cardUid: string; targetId: string; boosts?: string[]; sacrifice?: boolean }
   | { type: 'token'; tokenId: string }
   /** Habilidade do Herói usada como ação (Heróis extras). */
   | { type: 'power'; heroId: string; target?: string; cell?: Cell }
+  | { type: 'tomb' }
   | { type: 'rest'; opts?: RestOptions }
   | { type: 'end' };
 
@@ -73,7 +102,11 @@ export class SimpleAI {
   /** 0 = cautelosa … 1 = tudo ou nada (evita partidas travadas). */
   private aggr = 0;
 
-  constructor(readonly level: AILevel = 'normal', private rnd: () => number = Math.random) {}
+  /** Pesos da IA (ajustados por simulação: tools/sim — ver AI_PARAMS). */
+  readonly p: AIParams;
+  constructor(readonly level: AILevel = 'normal', private rnd: () => number = Math.random, params: Partial<AIParams> = {}) {
+    this.p = { ...AI_PARAMS, ...params };
+  }
 
   private get hard() { return this.level === 'hard'; }
   /** Acaso do nível Normal (o Difícil sempre escolhe o melhor). */
@@ -96,6 +129,8 @@ export class SimpleAI {
     }
     // habilidades dos Heróis extras (Relâmpago, Ataque Mental) antes do que foi planejado
     if (h) { const pw = this.powerToUse(g, h); if (pw) return pw; }
+    // Lápide no Espaço: revela (a maioria das cartas ajuda), se não for gastar o último PM de um movimento importante
+    if (h && g.canRevealTomb() && (g.maxHp(h) - h.wounds >= 2) && (g.s.activation!.mp >= 2 || !this.queue.some(x => x.type === 'move'))) return { type: 'tomb' };
     const a = this.queue.shift();
     if (!a) {
       // Bênção de Hobsbawm / Grito de Guerra / Mente Brilhante -> ativa outro Aliado
@@ -121,6 +156,10 @@ export class SimpleAI {
       if (!g.canMove() || !h?.cell) return this.next(g);
       const nd = g.reachable(h, g.s.activation!.mp, h.cell, true).get(key(a.cell));
       if (!nd || !nd.canEnd) return this.next(g);
+    }
+    if (a.type === 'door') {
+      const d = g.s.doors.find(x => x.id === a.doorId);
+      if (!d || d.open || !g.doorsAdjacentToActive().includes(a.doorId)) return this.next(g);
     }
     if (a.type === 'attack') {
       const t = g.unit(a.targetId);
@@ -177,7 +216,7 @@ export class SimpleAI {
     const carried = heroes.reduce((n, h) => n + h.tokens.filter(t => t.type === 'missao').length, 0);
     const score = (coinsMatter ? g.wealth(guild.id) : 0) + carried * 2 + guild.missions.length * 5 + (g.s.missions.some(m => m.rule === 'kill_count' && !guild.missions.includes(m.id)) ? guild.monsterKills : 0) + villainHits + (g.s.arena?.[guild.id]?.length ?? 0) * 2;
     if (score > this.lastScore) { this.idle = 0; this.lastScore = score; } else this.idle++;
-    this.aggr = Math.min(1, Math.max(0, (this.idle - (this.hard ? 3 : 5)) / 6));
+    this.aggr = Math.min(1, Math.max(0, (this.idle - (this.hard ? 3 : 5) - this.p.idleStart) / 6));
     const dead = heroes.filter(h => !h.alive).length;
     let best: Plan | null = null;
     for (const h of heroes) {
@@ -200,7 +239,8 @@ export class SimpleAI {
 
   /** `moveOnly`: ativação só para o Movimento (Mente Brilhante). */
   private planHero(g: Game, h: Unit, goals: Map<string, number>, moveOnly = false): Plan | null {
-    const nodes = g.reachable(h, g.startMp(h), h.cell!, true);
+    const mp0 = g.startMp(h);
+    const nodes = g.reachable(h, mp0, h.cell!, true);
     const hp = g.maxHp(h) - h.wounds;
     let best: Plan | null = null;
     const consider = (value: number, steps: AIAction[]) => {
@@ -229,6 +269,17 @@ export class SimpleAI {
       const atk = moveOnly ? null : this.bestAttack(g, h, n.cell);
       if (atk) consider(gain + atk.value + pos * 0.3 + finish - riskPenalty - threat, [...moveSteps, this.attackStep(g, h, atk)]);
       consider(gain + pos - startPos + finish - riskPenalty - threat + (moveSteps.length ? 0 : -0.2), moveSteps);
+      // Abrir uma porta ao lado e atacar quem está atrás (Monstros numa sala fechada bloqueiam a passagem)
+      if (!moveOnly && n.mp < mp0) {
+        for (const d of g.s.doors) {
+          if (d.open || d.locked || !(sameCell(d.a, n.cell) || sameCell(d.b, n.cell))) continue;
+          d.open = true;
+          try {
+            const atkD = this.bestAttack(g, h, n.cell);
+            if (atkD) consider(gain + atkD.value + pos * 0.3 + finish - riskPenalty - threat - 0.3, [...moveSteps, { type: 'door', doorId: d.id }, this.attackStep(g, h, atkD)]);
+          } finally { d.open = false; }
+        }
+      }
     }
     // Atacar primeiro e depois mover
     const atk0 = moveOnly ? null : this.bestAttack(g, h, startCell);
@@ -263,9 +314,11 @@ export class SimpleAI {
 
   /** Bônus por terminar a ativação neste Espaço (Arena, entrega da escolta). */
   private endBonus(g: Game, h: Unit, c: Cell): number {
+    // ficar no Espaço de um objetivo do adversário impede que ele cumpra a Missão ali ("sem Inimigos no Espaço")
+    const deny = this.denyW() * (this.threats(g, h.guild!).cells.get(key(c)) ?? 0);
     const enemyHere = g.unitsAt(c).some(u => u.id !== h.id && g.isEnemy(h, u));
-    if (enemyHere) return 0;
-    let v = 0;
+    if (enemyHere) return deny;
+    let v = deny;
     const arena = g.s.missions.find(m => m.rule === 'arena');
     if (arena && !this.done(g, h.guild!, arena) && (g.s.floor[key(c)] ?? []).some(t => t.type === 'missao')) {
       const mine = g.s.arena?.[h.guild!] ?? [];
@@ -349,6 +402,7 @@ export class SimpleAI {
           let killP = Math.max(0, Math.min(1, (exp - rem + 1.2) / 2));
           if (this.hard) ({ killP, exp } = exactAttack(dice, def.attackType!, pierce ? 0 : tdef, rem));
           let killBonus = 0;
+          let pvpDone = false;
           let retaliation = 0;
           let progress = 0;
           if (t.kind === 'monster') {
@@ -363,6 +417,8 @@ export class SimpleAI {
             if (md.category.startsWith('Vilão')) killBonus += Math.min(exp, rem) * 0.4;
             // Monstro em cima de um marcador de Missão que a Guilda quer: matá-lo libera o caminho
             if (g.floorAt(t.cell!).some(x => x.type === 'missao' && (g.missionTokenWanted(guild.id, x) || g.tokenMission(x)?.rule === 'arena'))) killBonus += 4;
+            // guarda um marcador de Missão (está Perto dele): matá-lo abre o caminho
+            else if (this.p.guardKill && near(g, t.cell!).some(c => g.floorAt(c).some(x => x.type === 'missao' && x.faceUp && g.missionTokenWanted(guild.id, x)))) killBonus += this.p.guardKill;
             // ferir o Monstro-alvo da Missão já é progresso (Lorde Presas tem muita Vida)
             if (wantType) progress = Math.min(exp, rem) * (rem > 6 ? 2.2 : 1.2);
             if (exp < md.exterm) retaliation += Math.max(0, md.dice * ATK_EXP(md.attackType) - g.defenseDice(h) * DEF_EXP) * 0.8;
@@ -371,7 +427,13 @@ export class SimpleAI {
             const pvpOpen = g.s.missions.some(m => m.id === pvp) && !guild.missions.includes(pvp);
             killBonus = (g.map.pvp === false ? 1 : 2) + (pvpOpen ? 5 : 0);
             // quem carrega marcador de Missão: matá-lo atrapalha o adversário (e rouba o marcador)
-            if (this.hard && t.tokens.some(x => x.type === 'missao')) killBonus += 4;
+            const carrier = t.tokens.some(x => x.type === 'missao');
+            if (this.hard && carrier) killBonus += 4;
+            // Missão contra essa Guilda já cumprida: matar de novo vale pouco
+            if (!pvpOpen && !carrier) { pvpDone = true; killBonus = Math.min(killBonus, this.p.pvpDoneKill); }
+            // está quase cumprindo uma Missão (Arena, escolta, Tomos, marcador): derrubá-lo atrapalha
+            const thr = this.denyW() * (this.threats(g, h.guild!).heroes.get(t.id) ?? 0);
+            if (thr) { killBonus += thr; progress += Math.min(exp, rem) * thr * 0.25; }
           }
           const targetsCloseMonster = t.kind === 'monster' && g.board.isClose(t.cell!, from);
           if (!targetsCloseMonster) retaliation += this.alertRisk(g, h, from);
@@ -380,7 +442,7 @@ export class SimpleAI {
           retaliation *= 1 - 0.5 * this.aggr;
           killBonus *= 1 + this.aggr;
           // sem Missões contra Jogador (Templo): brigar com Heróis só vale para abrir caminho
-          const dmgWeight = t.kind === 'hero' && g.map.pvp === false ? 0.3 : 1;
+          const dmgWeight = (t.kind === 'hero' && g.map.pvp === false ? 0.3 : 1) * (pvpDone ? this.p.pvpDoneDmg : 1);
           const ab = g.ab(h);
           const selfHeal = def.fx.drain || (ab === 'ritual_sangue' && def.magic) || (ab === 'lamina_sugadora' && ['Espada', 'Machado', 'Lança'].includes(def.group))
             || (ab === 'devorar' && killP > 0.3);
@@ -405,28 +467,105 @@ export class SimpleAI {
   }
 
   private pickupValue(g: Game, h: Unit, c: Cell): number {
+    // Lápide: vale passar por ela para revelar depois
+    const tomb = g.tombAt(c) && g.maxHp(h) - h.wounds >= 2 ? 1.6 : 0;
     const toks = g.floorAt(c);
-    if (!toks.length) return 0;
+    if (!toks.length) return tomb;
     if (g.unitsAt(c).some(u => g.isEnemy(h, u))) return 0;
     const deadly = g.map.deadlyTokens && !(g.map.fireProtectTitle && g.hasTitle(h.guild!, g.map.fireProtectTitle));
     let v = 0;
     for (const t of toks) {
-      if (t.type === 'missao') {
+      if (t.type === 'missao' && t.faceUp) {
         if (!g.missionTokenWanted(h.guild!, t)) continue;
         const m = g.tokenMission(t);
         if (m?.rule === 'summon') { v += g.maxHp(h) - h.wounds >= 3 ? 5 : 1; continue; }
-        v += 9;
+        v += this.p.missionTok;
       } else if (!t.faceUp && deadly) v -= this.hard ? 8 : 2; // Templo: Armadilha mata
-      else v += 1.3;
+      else v += 1.3 + (t.faceUp ? 0 : this.hiddenChance(g) * this.p.missionTok * this.p.hiddenW);
     }
     return v;
   }
 
-  /** Quanto mais perto de objetivos, melhor. */
+  /** Força da defesa: cai quando a Guilda passa muitos turnos sem progresso (duas IAs se bloqueando não travam a partida). */
+  private denyW(): number { return this.p.denyW * (this.idle > 10 ? 0.15 : this.idle > 6 ? 0.5 : 1); }
+
+  /** Radar de ameaças: onde e quem dos adversários está perto de cumprir uma Missão.
+   *  cells: Espaços onde a presença de um Herói desta Guilda impede a Missão; heroes: quem derrubar.
+   *  Vale o dobro contra quem está a 1 Missão da vitória. Calculado uma vez por situação do tabuleiro. */
+  private thrCache: { k: string; v: { cells: Map<string, number>; heroes: Map<string, number> } } | null = null;
+  threats(g: Game, me: GuildId): { cells: Map<string, number>; heroes: Map<string, number> } {
+    const k = `${me}|${g.s.turn}|${g.s.current}|${g.onBoard().filter(u => u.kind === 'hero').map(u => `${u.id}${u.cell!.c},${u.cell!.r}${u.tokens.length}`).join(';')}|${Object.keys(g.s.floor).length}|${JSON.stringify(g.s.arena ?? {})}`;
+    if (this.thrCache?.k === k) return this.thrCache.v;
+    const cells = new Map<string, number>(), heroes = new Map<string, number>();
+    const add = (m: Map<string, number>, id: string, v: number) => m.set(id, Math.max(m.get(id) ?? 0, v));
+    const dist = (a: Cell, b: Cell) => Math.abs(a.c - b.c) + Math.abs(a.r - b.r);
+    for (const eg of g.guilds()) {
+      if (eg.id === me) continue;
+      // urgente: o adversário está a 1 Missão de vencer (aí vale atrapalhar qualquer Missão dele)
+      const close = eg.missions.length >= g.s.missionsToWin - 1 ? 2 : 1;
+      const urgent = close === 2;
+      if (!urgent && this.p.denyUrgentOnly) continue;
+      const foes = g.heroesOf(eg.id).filter(f => f.alive && f.cell);
+      const near = (c: Cell, n: number) => foes.filter(f => dist(f.cell!, c) <= n);
+      for (const m of g.s.missions) {
+        if (m.kind !== 'pve' || this.done(g, eg.id, m)) continue;
+        if (m.rule === 'arena') {
+          const list = g.s.arena?.[eg.id] ?? [];
+          const total = g.map.missionMarkers.length;
+          const prog = Math.max(list.length / 5, new Set(list).size / Math.max(1, total));
+          for (const mm of g.map.missionMarkers) {
+            const nf = near(mm.cell, 3);
+            if (!nf.length) continue;
+            // Arena no começo não preocupa; perto de completar (ou adversário a 1 Missão da vitória), sim
+            if (!urgent && prog < 0.5) continue;
+            const fresh = !list.includes(key(mm.cell));
+            const v = (2 + prog * 9) * close * (fresh || list.length >= 3 ? 1 : 0.6);
+            add(cells, key(mm.cell), v);
+            for (const f of nf) if (sameCell(f.cell, mm.cell)) add(heroes, f.id, v);
+          }
+        } else if (m.rule === 'escort') {
+          for (const f of foes) if (f.tokens.some(t => t.type === 'missao' && g.tokenMission(t)?.id === m.id)) {
+            const dests = g.escortTargets(m, eg.id).filter(c => dist(f.cell!, c) <= (urgent ? 6 : 3));
+            if (!dests.length && !urgent) continue;
+            add(heroes, f.id, 6 * close);
+            for (const c of dests) add(cells, key(c), 6 * close);
+          }
+        } else if (m.rule === 'carry') {
+          // Tomos: quem já tem 1 está a um passo
+          for (const f of foes) { const n = f.tokens.filter(t => t.type === 'missao').length; if (n && (urgent || n + 1 >= (m.count ?? 2))) add(heroes, f.id, (3 + 3 * n) * close); }
+        } else if (m.rule === 'collect_any' || m.rule === 'collect_own' || m.rule === 'step_on') {
+          for (const [kc, toks] of Object.entries(g.s.floor)) for (const t of toks) {
+            if (t.type !== 'missao' || !t.faceUp || g.tokenMission(t)?.id !== m.id || !g.missionTokenWanted(eg.id, t)) continue;
+            const c = parseKey(kc);
+            const nf = near(c, urgent ? 3 : 2);
+            if (!nf.length) continue;
+            add(cells, kc, 5 * close);
+            for (const f of nf) add(heroes, f.id, 2.5 * close);
+          }
+        }
+      }
+    }
+    const v = { cells, heroes };
+    this.thrCache = { k, v };
+    return v;
+  }
+
+  /** Chance de um marcador virado ser uma Missão escondida (Pátio da Universidade), contando só o que se vê. */
+  private hiddenChance(g: Game): number {
+    const hidden = g.map.hiddenMissions?.length ?? 0;
+    if (!hidden) return 0;
+    const all = Object.values(g.s.floor).flat();
+    const down = all.filter(t => !t.faceUp).length;
+    const found = all.filter(t => t.type === 'missao' && t.faceUp && g.map.hiddenMissions!.includes(t.color ?? '')).length
+      + g.units().reduce((n, u) => n + u.tokens.filter(t => t.type === 'missao' && g.map.hiddenMissions!.includes(t.color ?? '')).length, 0);
+    return down ? Math.max(0, hidden - found) / down : 0;
+  }
+
+    /** Quanto mais perto de objetivos, melhor. */
   private positionValue(g: Game, h: Unit, c: Cell, goals: Map<string, number>): number {
     const d = goals.get(key(c));
     const hp = g.maxHp(h) - h.wounds;
-    let v = d === undefined ? -6 : -d * 0.45;
+    let v = d === undefined ? -6 : -d * this.p.posW;
     const danger = this.alertRisk(g, h, c);
     if (danger >= hp) v -= this.hard ? 3 : 2;
     return v;
@@ -452,7 +591,8 @@ export class SimpleAI {
       for (const [k, toks] of Object.entries(g.s.floor)) {
         const [c, r] = k.split(',').map(Number);
         for (const t of toks) {
-          if (t.type === 'missao') {
+          // marcador virado para baixo: a IA não sabe o que é (como um jogador)
+          if (t.type === 'missao' && t.faceUp) {
             const m = g.tokenMission(t);
             if (m?.rule === 'arena') {
               if (this.done(g, guildId, m)) continue;
@@ -470,9 +610,12 @@ export class SimpleAI {
           }
           const deadly = g.map.deadlyTokens && !(g.map.fireProtectTitle && g.hasTitle(guildId, g.map.fireProtectTitle));
           if (deadly && !t.faceUp) continue;
-          push({ c, r }, 0);
+          // marcador virado num mapa com Missões escondidas: atrai conforme a chance de ser uma
+          push({ c, r }, t.faceUp ? 0 : -3 * this.p.hiddenW * this.hiddenChance(g));
         }
       }
+      // atrapalhar: os Espaços onde um adversário está quase cumprindo uma Missão atraem a Guilda
+      if (this.p.denyW) for (const [k, v] of this.threats(g, guildId).cells) push(parseKey(k), -Math.min(8, v * this.denyW() * 0.6));
       // Esconderijo do Troll (só quem tem o Título)
       if (g.map.hideout && g.map.lockTitle && !g.s.hideoutTaken && g.hasTitle(guildId, g.map.lockTitle)) for (const c of g.map.hideout.cells) push(c, -3);
       // Monstros-alvo de Missão puxam a Guilda com força
@@ -486,6 +629,9 @@ export class SimpleAI {
         if (u.kind === 'monster') for (const n of near(g, u.cell!)) push(n, barrierClosed ? -1.5 : 0.5);
         if (u.kind === 'hero' && u.guild !== guildId) {
           const weak = g.maxHp(u) - u.wounds <= 2 || u.tokens.some(t => t.type === 'missao');
+          // Missão contra essa Guilda já cumprida: os Heróis dela só atraem se carregam marcador de Missão
+          const pvpOpen = g.s.missions.some(m => m.id === `matar_${u.guild}`) && !g.guild(guildId).missions.includes(`matar_${u.guild}`);
+          if (!pvpOpen && !u.tokens.some(t => t.type === 'missao') && !this.p.pvpDoneAttract) continue;
           for (const n of near(g, u.cell!)) push(n, this.hard && weak ? -1 : 0.3);
         }
       }
@@ -574,7 +720,8 @@ const TANK = new Set(['diva', 'grom', 'espetado', 'johan', 'escarlate', 'x_aeric
 /** Escolha de Herói no recrutamento: força + equilíbrio da Guilda (alcance e resistência). */
 export function pickHero(hand: string[], have: string[], level: AILevel, rnd: () => number): string {
   const score = (h: string) => {
-    let s = (HERO_TIER[h] ?? 6) + (HEROES[h].implemented === false ? -3 : 0);
+    // força: o rating da comunidade (ref/wiki/rating-heroes.csv), ou a estimativa da IA
+    let s = (HEROES[h].rating ?? HERO_TIER[h] ?? 6) + (HEROES[h].implemented === false ? -3 : 0);
     if (!have.some(x => RANGED.has(x)) && RANGED.has(h)) s += level === 'hard' ? 1.5 : 0.8;
     if (!have.some(x => TANK.has(x)) && TANK.has(h)) s += level === 'hard' ? 1.2 : 0.6;
     if (have.filter(x => RANGED.has(x)).length >= 2 && RANGED.has(h)) s -= 1;

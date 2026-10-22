@@ -57,7 +57,13 @@ export type Msg =
   | SetupMsg
   | { t: 'view'; guild?: GuildId; c: [number, number, number]; m: [number, number] | null; sel?: string | null }
   /** Marcação no tabuleiro (Ctrl + clique): todos veem a seta na cor de quem marcou. */
-  | { t: 'ping'; guild?: GuildId; cell: { c: number; r: number } };
+  | { t: 'ping'; guild?: GuildId; cell: { c: number; r: number } }
+  /** Batimento: mostra que a conexão continua viva (anfitrião <-> jogadores). */
+  | { t: 'hb' };
+
+/** A cada quantos ms o anfitrião manda o batimento; sem notícia por DEAD_MS, a conexão é dada como morta e refeita. */
+const HB_MS = 4000;
+const DEAD_MS = 16000;
 
 export function clientId(): string {
   try {
@@ -101,6 +107,29 @@ export interface SessionEvents {
 }
 
 // ---------------------------------------------------------------------------
+// Tela acesa durante o online: o celular não dorme (e não derruba a conexão) enquanto há sala aberta.
+// ---------------------------------------------------------------------------
+type WakeSentinel = { release(): Promise<void> };
+let wakeUsers = 0;
+let wakeLock: WakeSentinel | null = null;
+async function grabWake() {
+  if (!wakeUsers || document.hidden || wakeLock) return;
+  try {
+    const nav = navigator as Navigator & { wakeLock?: { request(t: 'screen'): Promise<WakeSentinel & { addEventListener(e: string, f: () => void): void }> } };
+    const w = await nav.wakeLock?.request('screen');
+    if (!w) return;
+    wakeLock = w;
+    w.addEventListener('release', () => { wakeLock = null; });
+  } catch { /* sem suporte ou recusado */ }
+}
+document.addEventListener('visibilitychange', () => { void grabWake(); });
+function keepAwake(on: boolean) {
+  wakeUsers = Math.max(0, wakeUsers + (on ? 1 : -1));
+  if (wakeUsers) void grabWake();
+  else if (wakeLock) { void wakeLock.release(); wakeLock = null; }
+}
+
+// ---------------------------------------------------------------------------
 // ANFITRIÃO
 // ---------------------------------------------------------------------------
 export class HostSession {
@@ -122,6 +151,7 @@ export class HostSession {
     this.ev = ev;
     this.lobby = { code: '', started: false, mapId: loadMapId(), seats: [{ clientId: this.me, name, team: name.trim().slice(0, 20) || undefined, heroes, guild: 'azul', ai: false, connected: true, host: true }] };
     this.open();
+    keepAwake(true);
   }
 
   private open(tries = 0) {
@@ -139,15 +169,38 @@ export class HostSession {
       if (type === 'unavailable-id' && tries < 5) { peer.destroy(); this.open(tries + 1); return; }
       this.ev.status(`Erro de conexão (${type ?? err.message}).`, 'error');
     });
-    peer.on('disconnected', () => { if (!peer.destroyed) peer.reconnect(); });
+    // perdeu o servidor de sinalização (ex.: rede trocou): tenta de novo até voltar, senão ninguém consegue reconectar
+    peer.on('disconnected', () => this.resignal(peer));
     peer.on('connection', conn => this.accept(conn));
+    clearInterval(this.hbTimer);
+    this.hbTimer = window.setInterval(() => this.heartbeat(), HB_MS);
+  }
+
+  private hbTimer = 0;
+  /** Última mensagem recebida de cada jogador. */
+  private seen = new Map<string, number>();
+  private heartbeat() {
+    const now = Date.now();
+    for (const [id, c] of [...this.conns]) {
+      if (c.open) { try { c.send({ t: 'hb' } satisfies Msg); } catch { /* fecha abaixo */ } }
+      // jogador mudo há muito tempo (celular dormiu, rede caiu sem avisar): fecha para ele poder voltar limpo
+      if (now - (this.seen.get(id) ?? now) > DEAD_MS || !c.open) { this.seen.delete(id); try { c.close(); } catch { /* */ } this.dropped(id, c); }
+    }
+    if (this.peer.disconnected && !this.peer.destroyed) this.resignal(this.peer);
+  }
+  private resignal(peer: Peer) {
+    if (peer.destroyed || !peer.disconnected) return;
+    try { peer.reconnect(); } catch { /* tenta no próximo batimento */ }
   }
 
   private accept(conn: DataConnection) {
     let cid: string | null = null;
     conn.on('data', raw => {
       const m = raw as Msg;
+      if (cid) this.seen.set(cid, Date.now());
+      if (m.t === 'hb') return;
       if (m.t === 'hello') {
+        this.seen.set(m.clientId, Date.now());
         cid = m.clientId;
         let seat = this.lobby.seats.find(s => s.clientId === m.clientId);
         if (!seat) {
@@ -199,17 +252,21 @@ export class HostSession {
         this.ev.view?.(seat.guild, m.c, m.m, m.sel);
       }
     });
-    conn.on('close', () => {
-      if (!cid || this.conns.get(cid) !== conn) return;
-      this.conns.delete(cid);
-      const seat = this.lobby.seats.find(s => s.clientId === cid);
-      if (!seat) return;
-      if (!this.lobby.started && !this.lobby.setup) this.lobby.seats = this.lobby.seats.filter(s => s !== seat);
-      else { seat.connected = false; seat.lostAt = Date.now(); }
-      this.chatAll('Sistema', `${seat.name} desconectou.`);
-      this.pushLobby();
-      this.onSeatsChanged();
-    });
+    conn.on('close', () => { if (cid) this.dropped(cid, conn); });
+    conn.on('error', () => { if (cid) this.dropped(cid, conn); });
+  }
+
+  /** A conexão de um jogador caiu: a vaga fica esperando ele voltar (na partida ou na mesa). */
+  private dropped(cid: string, conn: DataConnection) {
+    if (this.conns.get(cid) !== conn) return;
+    this.conns.delete(cid);
+    const seat = this.lobby.seats.find(s => s.clientId === cid);
+    if (!seat) return;
+    if (!this.lobby.started && !this.lobby.setup) this.lobby.seats = this.lobby.seats.filter(s => s !== seat);
+    else { seat.connected = false; seat.lostAt = Date.now(); }
+    this.chatAll('Sistema', `${seat.name} desconectou — esperando voltar…`);
+    this.pushLobby();
+    this.onSeatsChanged();
   }
 
   send(to: string, m: Msg) { const c = this.conns.get(to); if (c?.open) c.send(m); }
@@ -286,7 +343,7 @@ export class HostSession {
   }
   sendPing(cell: { c: number; r: number }) { this.broadcast({ t: 'ping', guild: this.lobby.seats[0].guild, cell }); }
 
-  close() { try { this.broadcast({ t: 'kicked', reason: 'O anfitrião encerrou a sala.' }); } catch { /* */ } setTimeout(() => this.peer?.destroy(), 300); }
+  close() { keepAwake(false); clearInterval(this.hbTimer); try { this.broadcast({ t: 'kicked', reason: 'O anfitrião encerrou a sala.' }); } catch { /* */ } setTimeout(() => this.peer?.destroy(), 300); }
 }
 
 // ---------------------------------------------------------------------------
@@ -311,27 +368,76 @@ export class ClientSession {
     this.heroes = heroes;
     this.code = code.trim().toUpperCase();
     this.ev.status('Conectando…');
-    this.peer = new Peer({ config: iceConfig(), debug: 1 });
-    this.peer.on('open', () => this.connect());
-    this.peer.on('error', err => {
+    this.peer = this.makePeer();
+    keepAwake(true);
+    // a tela voltou (celular acordou, aba voltou) ou a rede voltou: reconecta na hora
+    this.wake = () => { if (!document.hidden && !this.closed && !this.conn?.open) this.retryNow(); };
+    document.addEventListener('visibilitychange', this.wake);
+    window.addEventListener('online', this.wake);
+    this.watch = window.setInterval(() => this.watchdog(), 3000);
+  }
+
+  private wake: () => void;
+  private watch = 0;
+  private retryTimer = 0;
+  private lastMsg = Date.now();
+  /** Já esteve na sala (numa reconexão, erro não é o fim: continua tentando). */
+  private joined = false;
+
+  private makePeer(): Peer {
+    const peer = new Peer({ config: iceConfig(), debug: 1 });
+    peer.on('open', () => this.connect());
+    peer.on('error', err => {
       const type = (err as { type?: string }).type;
+      if (this.joined) { this.ev.status('Conexão instável — tentando voltar…', 'warn'); this.scheduleRetry(); return; }
       if (type === 'peer-unavailable') this.ev.status('Sala não encontrada. Confira o código (o anfitrião precisa estar com o jogo aberto).', 'error');
       else this.ev.status(`Erro de conexão (${type ?? err.message}).`, 'error');
     });
-    this.peer.on('disconnected', () => { if (!this.closed && !this.peer.destroyed) this.peer.reconnect(); });
+    peer.on('disconnected', () => { if (!this.closed && !peer.destroyed) { try { peer.reconnect(); } catch { /* watchdog */ } } });
+    return peer;
+  }
+
+  /** Sem notícia do anfitrião há muito tempo: a conexão morreu sem avisar — refaz. */
+  private watchdog() {
+    if (this.closed || !this.joined) return;
+    if (this.conn?.open && Date.now() - this.lastMsg > DEAD_MS) { this.ev.status('Conexão parada — reconectando…', 'warn'); try { this.conn.close(); } catch { /* */ } this.retryNow(); }
+    else if (!this.conn?.open) this.scheduleRetry();
+  }
+
+  private scheduleRetry() {
+    if (this.closed || this.retryTimer) return;
+    // tenta sempre (sem desistir), cada vez um pouco mais espaçado, até 10 s
+    const wait = Math.min(10000, 1500 + this.retries * 1000);
+    this.retries++;
+    this.retryTimer = window.setTimeout(() => { this.retryTimer = 0; this.retryNow(); }, wait);
+  }
+
+  private retryNow() {
+    if (this.closed) return;
+    clearTimeout(this.retryTimer);
+    this.retryTimer = 0;
+    // o Peer perdeu o servidor ou foi destruído: cria outro (o clientId continua o mesmo, então a vaga volta)
+    if (this.peer.destroyed) { this.peer = this.makePeer(); return; }
+    if (this.peer.disconnected) { try { this.peer.reconnect(); } catch { this.peer.destroy(); this.peer = this.makePeer(); } return; }
+    this.connect();
   }
 
   private connect() {
     if (this.closed) return;
+    if (this.conn?.open) return;
     const conn = this.peer.connect(PREFIX + this.code, { reliable: true });
     this.conn = conn;
     conn.on('open', () => {
       this.retries = 0;
-      this.ev.status('Conectado à sala!', 'ok');
+      this.lastMsg = Date.now();
+      this.ev.status(this.joined ? 'Reconectado!' : 'Conectado à sala!', 'ok');
+      this.joined = true;
       conn.send({ t: 'hello', clientId: this.me, name: this.name, heroes: this.heroes } satisfies Msg);
     });
     conn.on('data', raw => {
       const m = raw as Msg;
+      this.lastMsg = Date.now();
+      if (m.t === 'hb') { if (conn.open) conn.send({ t: 'hb' } satisfies Msg); return; }
       switch (m.t) {
         case 'lobby': this.lobby = m.lobby; this.ev.lobby(m.lobby); break;
         case 'start': this.lobby = m.lobby; this.ev.start(m.state, m.lobby); break;
@@ -340,15 +446,15 @@ export class ClientSession {
         case 'chat': this.ev.chat(m.from, m.text, m.color); break;
         case 'view': if (m.guild) this.ev.view?.(m.guild, m.c, m.m, m.sel); break;
         case 'ping': if (m.guild) this.ev.ping?.(m.guild, m.cell); break;
-        case 'kicked': this.closed = true; this.ev.status(m.reason, 'error'); this.peer.destroy(); break;
+        case 'kicked': this.shutdown(); this.ev.status(m.reason, 'error'); break;
       }
     });
     conn.on('close', () => {
-      if (this.closed) return;
+      if (this.closed || this.conn !== conn) return;
       this.ev.status('Conexão perdida — tentando reconectar…', 'warn');
-      if (this.retries++ < 20) setTimeout(() => this.connect(), 2500);
-      else this.ev.status('Não foi possível reconectar.', 'error');
+      this.scheduleRetry();
     });
+    conn.on('error', () => { if (!this.closed && this.conn === conn) this.scheduleRetry(); });
   }
 
   private send(m: Msg) { if (this.conn?.open) this.conn.send(m); }
@@ -362,7 +468,16 @@ export class ClientSession {
     this.send({ t: 'pick', ...p });
   }
   chat(text: string) { this.send({ t: 'chat', from: this.name, text }); }
-  close() { this.closed = true; this.peer.destroy(); }
+  close() { this.shutdown(); }
+  private shutdown() {
+    if (!this.closed) keepAwake(false);
+    this.closed = true;
+    clearInterval(this.watch);
+    clearTimeout(this.retryTimer);
+    document.removeEventListener('visibilitychange', this.wake);
+    window.removeEventListener('online', this.wake);
+    this.peer.destroy();
+  }
 }
 
 export type Session = HostSession | ClientSession;

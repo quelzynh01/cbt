@@ -54,6 +54,26 @@ export interface MapDef {
   hideout?: { cells: Cell[]; cards: string[] };
   /** Monstros fora do tabuleiro no início (invocados por regras do cenário). */
   reserve?: string[];
+  /** Monstros que começam no Tabuleiro de Entrada (Beyond the Grave). */
+  entryStart?: string[];
+  /** Monstros (id base) que ignoram o Banimento neste cenário. */
+  noBanish?: string[];
+  /** Espaços das cartas de Lápide (Beyond the Grave). */
+  tombstones?: Cell[];
+  /** Emboscada por cor: o marcador escondido desta cor vira este Monstro (O Cemitério). */
+  ambushBy?: Record<string, string>;
+  /** Moinho das Almas: a porta fica aberta enquanto um Herói da Guilda da Área Inicial `area` está em `token`. */
+  tokenDoors?: { area: number; token: Cell; door: number }[];
+  /** Os Heróis começam com o marcador de Missão da cor da Guilda (Criptas). */
+  startWithToken?: boolean;
+  /** Títulos de Beyond the Grave que valem neste cenário. */
+  speakerTitle?: string;
+  /** Título "Mente Mestra": as Reações que a Guilda provoca atacam outro Herói Perto do Monstro. */
+  mastermindTitle?: string;
+  /** Cores de marcadores de Missão que começam virados (e embaralhados entre si) — O Cemitério. */
+  hiddenMarkers?: string[];
+  alchemistTitle?: string;
+  masterDeathTitle?: string;
   /** Marcadores de Missão escondidos destas cores viram uma emboscada deste Monstro. */
   ambush?: { colors: string[]; monster: string };
   /** Título "Líder Rebelde": a Resistência mata 2 Orcs perto da Área Inicial de quem o tem. */

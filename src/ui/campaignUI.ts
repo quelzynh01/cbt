@@ -9,7 +9,7 @@ import {
 } from '../campaign/campaign';
 import { CARDS, CURSES } from '../engine/cards';
 import { GUILDS, HEROES } from '../engine/data';
-import { CAMPAIGN, MAPS, difficultyBadge } from '../engine/maps';
+import { MAPS, campaignList, difficultyBadge, type Edition } from '../engine/maps';
 import { TITLES, TITLE_TEXT } from '../engine/titles';
 import { drawFace } from '../render/chibi';
 import { curseCard, heroCard, itemCard, paintCardArt } from './cardview';
@@ -81,16 +81,17 @@ export class CampaignUI {
   }
 
   // ---------------------------------------------------------------- criação
-  /** Escolha da edição da campanha (só a Clássica existe por enquanto). */
+  /** Escolha da edição da campanha: Clássica e Beyond the Grave (Inferno em breve). */
+  private edition: Edition = 'classic';
   private editions() {
     const eds = [
       { id: 'classic', name: 'CBT', sub: 'Clássico', icon: '⚔️', text: 'A campanha original: 11 cenários pela cidade de Arcadia, do Círculo Exterior ao Templo do Amanhecer Crepuscular.', ok: true },
+      { id: 'btg', name: 'CBT Beyond the Grave', sub: 'Além do Túmulo', icon: '💀', text: 'O Rei Pavoroso se ergueu! 9 cenários novos, mortos-vivos, cartas de Lápide, Fantasmas que atravessam paredes e os Heróis Chaz e Darryn.', ok: true },
       { id: 'inferno', name: 'CBT Inferno', sub: 'Em breve', icon: '🔥', text: 'Nova campanha com novos cenários. Em desenvolvimento.', ok: false },
-      { id: 'grave', name: 'CBT Beyond the Grave', sub: 'Em breve', icon: '💀', text: 'Nova campanha com novos cenários. Em desenvolvimento.', ok: false },
     ];
     this.show('Nova Campanha', `<div class="ed-list">${eds.map(e => `<button class="ed-card ed-${e.id} ${e.ok ? '' : 'soon'}" data-ed="${e.id}" ${e.ok ? '' : 'disabled'}>
         <span class="ed-icon">${e.icon}</span><b>${e.name}</b><span class="ed-sub">${e.ok ? e.sub : '🔒 Em breve'}</span><small>${e.text}</small></button>`).join('')}</div>`);
-    this.page.querySelectorAll<HTMLElement>('[data-ed="classic"]').forEach(b => { b.onclick = () => this.setup(); });
+    this.page.querySelectorAll<HTMLElement>('[data-ed="classic"], [data-ed="btg"]').forEach(b => { b.onclick = () => { this.edition = b.dataset.ed as Edition; this.setup(); }; });
   }
 
   private setup() {
@@ -116,7 +117,7 @@ export class CampaignUI {
     (this.page.querySelector('#cp-cfg') as HTMLElement).onclick = () => this.matchSettings(sum);
     (this.page.querySelector('#cp-start') as HTMLElement).onclick = () => {
       const n = Number((this.page.querySelector('#cp-opp') as HTMLSelectElement).value);
-      this.c = newCampaign(n, (this.page.querySelector('#cp-name') as HTMLInputElement).value, (this.page.querySelector('#cp-ai') as HTMLSelectElement).value as 'normal' | 'hard', cfg.diceCap, cfg.pickOne, cfg.allHeroes);
+      this.c = newCampaign(n, (this.page.querySelector('#cp-name') as HTMLInputElement).value, (this.page.querySelector('#cp-ai') as HTMLSelectElement).value as 'normal' | 'hard', cfg.diceCap, cfg.pickOne, cfg.allHeroes, this.edition);
       this.c.chooser = human(this.c).id;
       this.save();
       this.setupFlow();
@@ -264,7 +265,7 @@ export class CampaignUI {
         <div class="hub-heroes">${heroesOf(g)}</div>
       </section>`).join('');
     const circles = CIRCLES.map(ci => {
-      const items = CAMPAIGN.filter(sc => sc.circle === ci).map(sc => {
+      const items = campaignList(this.c!.edition).filter(sc => sc.circle === ci).map(sc => {
         const res = sc.map ? c.played.find(pl => pl.mapId === sc.map!.id) : null;
         const can = sc.map && av.includes(sc.map.id);
         const status = res ? `<span class="cp-done" style="--gc:${GUILDS[res.winner].color}">✓ ${guildName(res.winner)}</span>` : !sc.map ? '<span class="mc-soon">Em breve</span>' : sc.map.id === next ? '<span class="mc-ok">▶ Próximo</span>' : can ? '<span class="mc-ok">Disponível</span>' : '<span class="mc-soon">—</span>';

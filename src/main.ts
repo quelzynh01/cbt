@@ -67,6 +67,7 @@ function enterGame() {
 }
 
 const lobby = new OnlineLobby(menu, pages);
+(window as unknown as { cbtLobby: OnlineLobby }).cbtLobby = lobby; // depuração pelo console
 lobby.onStart = (state, l, session) => {
   enterGame();
   const ctl = getController();

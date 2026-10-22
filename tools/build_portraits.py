@@ -56,6 +56,9 @@ def main():
             sq.save(os.path.join(OUT, cid + '.webp'), 'WEBP', quality=88, method=6)
             done.append(cid)
             print(sheet, '->', cid)
+    # Beyond the Grave: retratos feitos por tools/build_btg_art.py (do Livro de Campanha)
+    from build_btg_art import ART as BTG
+    done += [c for c in BTG if c not in done and os.path.exists(os.path.join(OUT, c + '.webp'))]
     with open(TS, 'w', encoding='utf-8') as f:
         f.write('// Gerado por tools/build_portraits.py — personagens com retrato próprio (public/portraits/<id>.webp).\n')
         f.write('export const PORTRAITS: string[] = [' + ', '.join(f"'{x}'" for x in done) + '];\n')

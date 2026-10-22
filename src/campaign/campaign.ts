@@ -1,7 +1,7 @@
 import { CARDS, CURSES, curseDeck, upgradeDeck } from '../engine/cards';
 import { HEROES, distributeStartingGear, heroPool, levelForScenario, setGuildNames, teamName } from '../engine/data';
 import type { Game } from '../engine/game';
-import { CAMPAIGN, MAPS } from '../engine/maps';
+import { MAPS, campaignList, type Edition } from '../engine/maps';
 import type { GuildId } from '../engine/types';
 import { cardFit, pickHero, type AILevel } from '../ai/ai';
 
@@ -93,6 +93,8 @@ export interface CampaignState {
   diceCap?: boolean;
   /** Configurações da partida: "Permitir Todos os Heróis" (os extras entram no recrutamento). Sem isso, só os Core Heroes. */
   allHeroes?: boolean;
+  /** Edição da campanha: CBT Clássico ou Beyond the Grave. */
+  edition?: Edition;
 }
 
 // ------------------------------------------------------------------ persistência
@@ -117,14 +119,14 @@ function shuffled<T>(c: CampaignState, a: T[]): T[] {
 }
 
 // ------------------------------------------------------------------ criação
-export function newCampaign(opponents: number, name?: string, aiLevel: AILevel = 'normal', diceCap = true, pickOne = true, allHeroes = false): CampaignState {
+export function newCampaign(opponents: number, name?: string, aiLevel: AILevel = 'normal', diceCap = true, pickOne = true, allHeroes = false, edition: Edition = 'classic'): CampaignState {
   const ids: GuildId[] = ['azul', 'vermelho', 'verde', 'laranja'];
-  const c: CampaignState = { version: 1, guilds: [], played: [], chooser: 'azul', phase: 'setup', seed: (Date.now() ^ (Math.random() * 1e9)) | 0, elapsed: 0, aiLevel, diceCap, ...(pickOne ? { pickOne } : {}), ...(allHeroes ? { allHeroes } : {}) };
+  const c: CampaignState = { version: 1, guilds: [], played: [], chooser: 'azul', phase: 'setup', seed: (Date.now() ^ (Math.random() * 1e9)) | 0, elapsed: 0, aiLevel, diceCap, ...(pickOne ? { pickOne } : {}), ...(allHeroes ? { allHeroes } : {}), ...(edition !== 'classic' ? { edition } : {}) };
   for (let i = 0; i <= opponents; i++) c.guilds.push({ id: ids[i], controller: i === 0 ? 'human' : 'ai', heroes: [], inventory: {}, saved: 0, titles: [], curses: {}, ...(i === 0 && name?.trim() ? { name: name.trim().slice(0, 20) } : {}) });
   useCampaignNames(c);
   // Recrutamento de Heróis (p.7): cada jogador recebe uma mão, escolhe 1 e passa o resto para a esquerda.
   const size = c.guilds.length <= 3 ? 4 : 3;
-  const pool = shuffled(c, heroPool(allHeroes));
+  const pool = shuffled(c, heroPool(allHeroes, edition));
   c.setup = { step: 'draft', round: 0, hands: Object.fromEntries(c.guilds.map(g => [g.id, pool.splice(0, size)])) };
   return c;
 }
@@ -204,7 +206,7 @@ export function currentCircle(c: CampaignState): string | null {
 export function availableScenarios(c: CampaignState): string[] {
   const circle = currentCircle(c);
   if (!circle) return [];
-  return CAMPAIGN.filter(s => s.circle === circle && s.map && !c.played.some(p => p.mapId === s.map!.id)).map(s => s.map!.id);
+  return campaignList(c.edition).filter(s => s.circle === circle && s.map && !c.played.some(p => p.mapId === s.map!.id)).map(s => s.map!.id);
 }
 
 export function scenarioNumber(c: CampaignState) { return c.played.length + 1; }

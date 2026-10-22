@@ -10,6 +10,7 @@ import { VIVEIRO_DAS_AGUIAS } from './viveiroDasAguias';
 import { MANSAO } from './mansao';
 import { PRACA_AURORA } from './pracaAurora';
 import { SEMPRESSOMBRIO } from './sempressombrio';
+import { BTG_MAPS } from './beyondTheGrave';
 
 /** Mapas jogáveis. */
 export const MAPS: Record<string, MapDef> = {
@@ -24,6 +25,7 @@ export const MAPS: Record<string, MapDef> = {
   [PATIO_DA_UNIVERSIDADE.id]: PATIO_DA_UNIVERSIDADE,
   [SEMPRESSOMBRIO.id]: SEMPRESSOMBRIO,
   [TEMPLO_DO_AMANHECER.id]: TEMPLO_DO_AMANHECER,
+  ...Object.fromEntries(BTG_MAPS.map(m => [m.id, m])),
 };
 
 /** Cenários do Livro de Campanha. Sem `map` = em breve. */
@@ -40,6 +42,20 @@ export const CAMPAIGN: { name: string; circle: string; map?: MapDef }[] = [
   { name: 'Distrito Sempressombrio', circle: 'Círculo Interior', map: SEMPRESSOMBRIO },
   { name: 'O Templo do Amanhecer Crepuscular', circle: 'Confronto Final', map: TEMPLO_DO_AMANHECER },
 ];
+
+/** Beyond the Grave (expansão): 5 cenários no Círculo Exterior, 3 no Interior e o Confronto Final. */
+export const CAMPAIGN_BTG: { name: string; circle: string; map?: MapDef }[] = BTG_MAPS.map(m => ({ name: m.name, circle: m.circle, map: m }));
+
+/** Edições de campanha. */
+export type Edition = 'classic' | 'btg';
+export const EDITIONS: { id: Edition; name: string; sub: string }[] = [
+  { id: 'classic', name: 'CBT Clássico', sub: 'Clássico' },
+  { id: 'btg', name: 'CBT Beyond the Grave', sub: 'Além do Túmulo' },
+];
+/** Cenários da campanha desta edição. */
+export function campaignList(e: Edition | undefined): { name: string; circle: string; map?: MapDef }[] { return e === 'btg' ? CAMPAIGN_BTG : CAMPAIGN; }
+/** Ids dos mapas de Beyond the Grave. */
+export const BTG_MAP_IDS = new Set(BTG_MAPS.map(m => m.id));
 
 export const DEFAULT_MAP = DISTRITO_DOS_MARTELOS.id;
 

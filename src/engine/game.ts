@@ -5,6 +5,7 @@ import {
 import { nextRandom, randInt, shuffle } from './rng';
 import { CURSES, type CardFx } from './cards';
 import { TITLES } from './titles';
+import { TOMB, TOMBSTONES } from './tombstones';
 import type {
   MonsterDef, RerollInfo,
   Activation, AttackType, CardDef, CardInst, Cell, DiceMode, DieFace, GameEvent, GameState, GuildId, GuildState, MissionDef, Token, Unit,
@@ -234,12 +235,30 @@ export class Game {
       const t = bag[i];
       g.addFloor(cell, { id: `x${i}`, type: t.type, value: t.value, color: t.color, faceUp: false });
     });
-    map.missionMarkers.forEach((mm, i) => g.addFloor(mm.cell, { id: `mm${i}`, type: 'missao', color: mm.color, faceUp: true }));
+    // marcadores virados (O Cemitério): as cores escondidas são embaralhadas entre os Espaços delas
+    const hid = map.hiddenMarkers ?? [];
+    const hidColors = shuffle(s, map.missionMarkers.filter(mm => hid.includes(mm.color)).map(mm => mm.color));
+    map.missionMarkers.forEach((mm, i) => {
+      const hidden = hid.includes(mm.color);
+      g.addFloor(mm.cell, { id: `mm${i}`, type: 'missao', color: hidden ? hidColors.shift()! : mm.color, faceUp: !hidden });
+    });
     // marcador da cor de cada Guilda na ponta oposta à sua Área Inicial
     if (map.missionMarkersByArea) for (const p of players) {
       const cell = map.missionMarkersByArea[p.area];
       if (cell) g.addFloor(cell, { id: `mg-${p.guild}`, type: 'missao', color: p.guild, faceUp: true });
     }
+
+    // Lápides (Beyond the Grave): embaralha as 14 e põe uma virada em cada Espaço marcado
+    if (map.tombstones?.length) {
+      const deck = shuffle(s, TOMBSTONES.map(t => t.id));
+      s.tombs = map.tombstones.map((cell, i) => ({ id: `tb${i}`, cell: { ...cell }, card: deck[i % deck.length] }));
+    }
+    // Monstros que começam no Tabuleiro de Entrada (alguns cenários de Beyond the Grave)
+    (map.entryStart ?? []).forEach((type, i) => {
+      const id = `e${i + 1}`;
+      s.units[id] = { id, kind: 'monster', defId: baseId(type) + suffix, guild: null, cell: null, wounds: 0, alive: false, stunned: false, cards: [], tokens: [], deaths: 0, num: 0 };
+      s.entryBoard.push(id);
+    });
 
     // Marcadores de Entrada de Monstro: 5 embaralhados, 4 usados.
     const pairs = shuffle(s, ENTRY_PAIRS);
@@ -254,6 +273,22 @@ export class Game {
       });
     }
     for (const m of s.missions) s.missionDone[m.id] = [];
+    // Criptas: cada Guilda começa com o seu marcador de Missão num Herói
+    if (map.startWithToken) for (const p of players) {
+      const h = s.units[`${p.guild}-${p.heroes![0]}`];
+      if (h) h.tokens.push({ id: `mo-${p.guild}`, type: 'missao', color: p.guild, faceUp: true });
+    }
+    // Abatedouro: as Reservas de Comida são objetos atacáveis no lugar dos marcadores
+    if (map.missions.pve.some(m => m.rule === 'destroy')) map.missionMarkers.forEach((mm, i) => {
+      const id = `rc${i + 1}`;
+      s.units[id] = { id, kind: 'monster', defId: 'reserva' + suffix, guild: null, cell: { ...mm.cell }, wounds: 0, alive: true, stunned: false, cards: [], tokens: [], deaths: 0, num: 0 };
+      for (const k of Object.keys(s.floor)) { s.floor[k] = s.floor[k].filter(t => t.id !== `mm${i}`); if (!s.floor[k].length) delete s.floor[k]; }
+    });
+    // Título "Alquimista": começa com Poção de Cura, Revigorante e de Turno Adicional
+    if (map.alchemistTitle) for (const p of players) if (s.titles?.[p.guild]?.includes(map.alchemistTitle)) {
+      const h = s.units[`${p.guild}-${p.heroes![0]}`];
+      if (h) for (const type of ['cura', 'revigorante', 'turno'] as const) h.tokens.push({ id: `al-${p.guild}-${type}`, type, faceUp: true });
+    }
     // posição inicial padrão: os 2 Heróis com mais cartas no Espaço da porta, o 3º no Espaço seguinte
     for (const gid of s.guildOrder) g.defaultPlacement(gid);
     // todas as Guildas posicionam (a IA posiciona sozinha na hora: 2 Heróis no Espaço da porta)
@@ -296,6 +331,7 @@ export class Game {
 
   isEnemy(a: Unit, b: Unit): boolean {
     if (a.id === b.id) return false;
+    if (this.isObject(a) || this.isObject(b)) return false;
     if (a.kind === 'monster' && b.kind === 'monster') return false;
     if (a.kind === 'hero' && b.kind === 'hero') return a.guild !== b.guild;
     return true;
@@ -303,9 +339,26 @@ export class Game {
 
   /** Livre / Ocupado (2 personagens, algum Aliado) / Bloqueado (2 Inimigos) para quem se move. */
   status(mover: Unit, c: Cell): 'free' | 'occupied' | 'blocked' {
-    const others = this.unitsAt(c).filter(u => u.id !== mover.id);
-    if (others.length < 2) return 'free';
-    return others.every(o => this.isEnemy(mover, o)) ? 'blocked' : 'occupied';
+    const others = this.unitsAt(c).filter(u => u.id !== mover.id && !this.isObject(u));
+    // Empurrão (Rei Pavoroso): nunca é bloqueado por outros personagens
+    if (others.length && this.monAbility(mover, 'shove')) return 'free';
+    if (this.cellLoad(c, mover) + this.weight(mover) <= 2) return 'free';
+    // um Enorme Inimigo bloqueia; um Enorme Aliado enche o Espaço
+    if (others.some(o => this.monAbility(o, 'huge'))) return others.some(o => this.monAbility(o, 'huge') && this.isEnemy(mover, o)) ? 'blocked' : 'occupied';
+    return others.length >= 2 && others.every(o => this.isEnemy(mover, o)) ? 'blocked' : 'occupied';
+  }
+
+  /** Quanto o personagem ocupa no Espaço: Enorme = 2 (o Espaço inteiro). */
+  weight(u: Unit): number { return this.monAbility(u, 'huge') ? 2 : this.isObject(u) ? 0 : 1; }
+  /** Ocupação do Espaço (máximo 2), sem contar `except`. */
+  cellLoad(c: Cell, except?: Unit): number { return this.unitsAt(c).reduce((n, u) => n + (u === except ? 0 : this.weight(u)), 0); }
+  /** O Monstro tem esta habilidade (Fantasma, Enorme, Empurrão, Banimento, Erguer os Mortos)? */
+  monAbility(u: Unit | null | undefined, a: string): boolean { return !!u && u.kind === 'monster' && !!MONSTERS[u.defId]?.abilities?.includes(a); }
+
+  /** Perto para este personagem: o Fantasma considera Perto todo Espaço ao lado, mesmo com parede (p.7). */
+  closeFor(u: Unit, a: Cell, b: Cell): boolean {
+    if (this.monAbility(u, 'ghost')) return sameCell(a, b) || (Math.abs(a.c - b.c) + Math.abs(a.r - b.r) === 1 && this.board.playable(b));
+    return this.board.isClose(a, b);
   }
 
   cellBlocksFor(attacker: Unit) {
@@ -316,8 +369,11 @@ export class Game {
     return this.board.hasLOS(from, to, this.cellBlocksFor(attacker));
   }
 
-  monstersCloseTo(c: Cell): Unit[] {
-    return this.monstersOnBoard().filter(m => this.board.isClose(m.cell!, c));
+  /** Monstros Perto de `c`. `ghostReach`: conta o Fantasma atrás da parede (sair de perto dele aciona a Reação de Alerta);
+   *  false = só quem está Perto do ponto de vista do Herói (atacar outro alvo não aciona o Fantasma atrás da parede). */
+  monstersCloseTo(c: Cell | null, ghostReach = true): Unit[] {
+    if (!c) return []; // ex.: Herói banido (fora do tabuleiro)
+    return this.monstersOnBoard().filter(m => !this.isObject(m) && (ghostReach ? this.closeFor(m, m.cell!, c) : this.board.isClose(m.cell!, c)));
   }
 
   // =========================================================================
@@ -361,7 +417,8 @@ export class Game {
   /** Conjunto de Rerrolagem do Herói (p.27): soma das cartas, exaustadas ou não. */
   rerollsOf(h: Unit): number {
     if (h.kind !== 'hero') return MONSTERS[h.defId].rerolls;
-    return h.cards.reduce((s, c) => s + (this.cardDef(c).rerolls ?? 0), 0) + (this.ab(h) === 'feitico_trapaceiro' ? 1 : 0);
+    const speaker = this.map.speakerTitle && this.hasTitle(h.guild!, this.map.speakerTitle) ? this.s.entryBoard.length : 0;
+    return h.cards.reduce((s, c) => s + (this.cardDef(c).rerolls ?? 0), 0) + (this.ab(h) === 'feitico_trapaceiro' ? 1 : 0) + speaker;
   }
 
   isOrcLike(u: Unit): boolean { return u.kind === 'monster' && ['orc', 'goblin', 'capitao_orc'].includes(baseId(u.defId)); }
@@ -419,6 +476,7 @@ export class Game {
       if (ab === 'lobo_solitario' && this.alone(u)) d += 1;
       if (ab === 'resistencia_panda' && type === 'ranged') d += 2;
       if (this.hasPerm(u, 'lastStand')) d += u.wounds;
+      if (this.s.shroud?.includes(u.id)) d += 2;
       if (this.hasPerm(u, 'moonShield')) d *= 2;
     }
     if (attacker && this.presenceVs(u, attacker)) d = Math.max(0, d - 2);
@@ -431,9 +489,17 @@ export class Game {
     return this.onBoard().some(u => u.id !== attacker.id && u.id !== target.id && this.isEnemy(target, u) && this.board.isClose(u.cell!, target.cell!));
   }
 
+  /** Objeto atacável (Reserva de Comida): marcador de Missão no tabuleiro. */
+  isObject(u: Unit | null | undefined): boolean { return this.monAbility(u, 'object'); }
+
   canAttackFrom(attacker: Unit, from: Cell, type: AttackType, target: Unit): boolean {
-    if (!target.alive || !target.cell || !this.isEnemy(attacker, target)) return false;
-    if (type === 'melee') return this.board.isClose(from, target.cell);
+    if (!target.alive || !target.cell) return false;
+    if (this.isObject(target)) {
+      // só Heróis atacam, e só quem ainda não destruiu uma
+      const m = this.s.missions.find(x => x.rule === 'destroy');
+      if (attacker.kind !== 'hero' || !m || (this.s.missionDone[m.id] ?? []).includes(attacker.guild!)) return false;
+    } else if (!this.isEnemy(attacker, target)) return false;
+    if (type === 'melee') return this.closeFor(attacker, from, target.cell);
     return this.hasLOS(attacker, from, target.cell);
   }
 
@@ -511,6 +577,9 @@ export class Game {
     // Heróis extras
     const meleeNM = def.attackType === 'melee' && !def.magic;
     if (ab === 'cheiro_sangue' && target.wounds > 0) { n++; notes.push('Cheiro de Sangue +1 (alvo ferido)'); }
+    // Beyond the Grave
+    if (ab === 'nao_no_rosto' && def.attackType === 'melee' && h.wounds === 0) { n += 2; notes.push('No Rosto Não! +2 (sem Ferimentos)'); }
+    if (ab === 'brigao' && target.wounds === 0) { n++; notes.push('Brigão +1 (alvo sem Ferimentos)'); }
     if (ab === 'cobica' && target.kind === 'hero' && target.tokens.some(t => t.type !== 'missao')) { n += 2; notes.push('Cobiça +2 (alvo com marcador)'); }
     if (ab === 'frenesi' && meleeNM && h.cell) { const k = this.enemiesClose(h).length; if (k) { n += k; notes.push(`Frenesi +${k}`); } }
     if (ab === 'paria' && target.kind === 'monster') { n++; notes.push('Pária +1 (Monstro)'); }
@@ -539,6 +608,8 @@ export class Game {
       if (d.fx.rage && h.wounds) { n += h.wounds; notes.push(`${d.name} +${h.wounds}`); }
       if (d.fx.grrr) { n += d.fx.grrr; notes.push(`${d.name} +${d.fx.grrr}`); }
     }
+    const fury = this.s.activation?.heroId === h.id ? this.s.activation.bonusDice ?? 0 : 0;
+    if (fury) { n += fury; notes.push(`Fúria dos Mortos +${fury}`); }
     if (this.s.diceCap && n > 8) { notes.push(`Limite de dados: ${n} → 8`); n = 8; }
     return { dice: n, notes };
   }
@@ -555,6 +626,7 @@ export class Game {
     const done = new Set<string>();
     const isHero = u.kind === 'hero';
     const acro = isHero && this.ab(u) === 'acrobata';
+    const ghost = this.monAbility(u, 'ghost');
     while (open.length) {
       open.sort((a, b) => a.cost - b.cost);
       const n = open.shift()!;
@@ -564,7 +636,9 @@ export class Game {
       // Penalidade por sair de um Espaço protegido por Monstro (só desempate; não muda o custo em PM).
       const alertPenalty = isHero && this.ab(u) !== 'furtivo' ? this.monstersCloseTo(n.cell).length * 0.01 : 0;
       const relax = (to: Cell, mpCost: number, extra: Partial<PathNode>, penalty: number) => {
-        const st = this.status(u, to);
+        let st = this.status(u, to);
+        // o Fantasma passa por Espaços bloqueados (mas não termina neles)
+        if (st === 'blocked' && ghost) st = 'occupied';
         if (st === 'blocked') return;
         if (acro && !extra.portal && this.unitsAt(to).some(x => x.kind === 'hero' && x.id !== u.id)) mpCost = Math.max(0, mpCost - 1);
         const nmp = n.mp + mpCost;
@@ -578,7 +652,7 @@ export class Game {
         open.push(node);
       };
       for (const nb of this.board.neighbors(n.cell)) {
-        const e = this.board.edge(n.cell, nb);
+        const e = ghost ? 'open' : this.board.edge(n.cell, nb);
         if (e === 'open') relax(nb, 1, {}, alertPenalty);
         else if (e === 'door') {
           const d = this.board.doorBetween(n.cell, nb)!;
@@ -790,6 +864,8 @@ export class Game {
     // ao ser ativado, pega o que ficou no seu Espaço (ex.: o Inimigo que estava ali morreu)
     this.pickup(h);
     this.checkEscort(h);
+    // a Armadilha do Templo pode matá-lo na hora: o turno termina
+    this.checkActiveDeath();
     this.applyFree();
     return true;
   }
@@ -865,7 +941,7 @@ export class Game {
     const card = h?.cards.find(c => c.uid === cardUid);
     if (!h?.cell || !t || !card || this.cardDef(card).fx.astral) return [];
     if (t.kind === 'monster' && t.cell && this.board.isClose(t.cell, h.cell)) return [];
-    return this.monstersCloseTo(h.cell).filter(m => m.id !== t.id && this.monsterCanAttack(m, h));
+    return this.monstersCloseTo(h.cell, false).filter(m => m.id !== t.id && this.monsterCanAttack(m, h));
   }
 
   moveTo(target: Cell, openDoors = false): boolean {
@@ -880,7 +956,7 @@ export class Game {
     a.moved = true;
     if (this.s.blessing?.heroId === h.id) this.s.blessing = null;
     for (const st of steps) {
-      if (!h.alive) break;
+      if (!h.alive || !h.cell) break; // morreu ou foi banido no caminho
       if (st.door) {
         const d = this.s.doors.find(x => x.id === st.door)!;
         d.open = true;
@@ -895,24 +971,28 @@ export class Game {
         const alerters = this.ab(h) === 'furtivo' ? [] : near;
         if (this.ab(h) === 'furtivo' && near.length) this.emit({ t: 'skill', id: h.id, skill: 'furtivo', name: 'Furtividade' });
         for (const m of alerters) {
-          if (!h.alive) break;
+          if (!h.alive || !h.cell) break; // morreu ou foi banido no caminho
           this.emit({ t: 'reaction', monsterId: m.id, kind: 'alerta' });
           this.monsterAttack(m, h, 'alerta');
         }
-        if (!h.alive) break;
+        if (!h.alive || !h.cell) break; // morreu ou foi banido no caminho
       }
+      // algo apareceu no caminho durante uma Reação (ex.: Necromante ergueu um Monstro): o Movimento para aqui
+      if (this.status(h, st.cell) === 'blocked' || (st === steps[steps.length - 1] && this.cellLoad(st.cell, h) + this.weight(h) > 2)) break;
       a.mp -= 1;
       h.cell = { ...st.cell };
       this.emit({ t: 'move', id: h.id, from, to: st.cell, portal: st.portal });
       this.bloodCrown(h, from);
-      if (!h.alive) break;
+      if (!h.alive || !h.cell) break; // morreu ou foi banido no caminho
       this.triggerMines(h);
       this.pickup(h);
       this.checkEscort(h);
       this.checkHideout(h);
     }
-    if (h.alive) this.assassinCloak(h);
-    if (h.alive) this.trickOrTreat(h);
+    // o Movimento foi interrompido num Espaço de passagem cheio: vai para o Espaço Perto livre mais próximo
+    if (h.alive && h.cell && this.cellLoad(h.cell) > 2) { const spot = this.placeCells(h, h.cell)[0]; if (spot) this.place(h, spot); }
+    if (h.alive && h.cell) this.assassinCloak(h);
+    if (h.alive && h.cell) this.trickOrTreat(h);
     if (a.mp < 0) a.mp = 0;
     this.checkActiveDeath();
     this.applyFree();
@@ -1051,6 +1131,7 @@ export class Game {
     let rrAtk = this.rerollsOf(h);
     if (ab === 'feitico_trapaceiro' && def.magic) rrAtk = this.heroesOf(h.guild!).filter(x => x.alive).reduce((s, x) => s + this.rerollsOf(x), 0);
     if (this.ab(target) === 'encantado') { rrAtk = 0; notes.push('Encantado: sem Rerrolagem'); }
+    a.bonusDice = 0; // Fúria dos Mortos vale só para este ataque
     let atk = this.heroRoll(h, n, ATTACK_DIE, def.attackType!, this.s.debug.attackDice, 'attack', rrAtk);
     if (this.knightShield(target, atk.successes)) { atk = this.roll(n, ATTACK_DIE, def.attackType!, 'normal'); notes.push(`Escudo de Cavaleiro: ataque rolado de novo`); }
     // Sorte de Apostador (Tomrick): exaustar o Herói para trocar um dado que falhou por ✷
@@ -1082,6 +1163,7 @@ export class Game {
     let cleaved = false;
     if (cleaveOk && cleave.includes('all')) for (const u of enemiesCloseTo(h.cell!, targets)) { targets.push(u); notes.push(`Fender: atinge também ${this.name(u)}`); cleaved = true; }
 
+    if (this.isObject(target)) return this.smashObject(h, target, atk, def.name, n, notes);
     const targetCells = new Map(targets.map(t => [t.id, { ...t.cell! }]));
     const pierce = this.piercing(h, card) || (fx.critNoDefense && atk.crits > 0);
     if (fx.critNoDefense && atk.crits > 0) notes.push(`${def.name}: alvo não rola Defesa`);
@@ -1160,7 +1242,7 @@ export class Game {
         } else {
           if (t.wounds >= md.hp) dying.push(t);
           else if (fx.daze && r.wounds > 0) dazeList.push(t);
-          if (!vengeful) vengeful = t;
+          if (!vengeful && !this.isObject(t)) vengeful = t;
         }
       }
     }
@@ -1257,7 +1339,7 @@ export class Game {
     // Reação de Alerta acionada por Ataque: o ataque não teve como alvo um Monstro Perto.
     const targetedCloseMonster = !h.cell || targets.some(t => t.kind === 'monster' && this.board.isClose(targetCells.get(t.id)!, h.cell!));
     if (!targetedCloseMonster && h.alive && !fx.astral) {
-      for (const m of this.monstersCloseTo(h.cell!)) {
+      for (const m of this.monstersCloseTo(h.cell!, false)) {
         if (!h.alive) break;
         if (dying.includes(m)) continue;
         this.emit({ t: 'reaction', monsterId: m.id, kind: 'alerta' });
@@ -1277,6 +1359,23 @@ export class Game {
       this.vengeance(vengeful, h);
     }
     this.finishAttack(dying.map(d => d.id), h);
+    return true;
+  }
+
+  /** Ataque a um objeto (Reserva de Comida): se rolar algum ✷, é destruído e cumpre a Missão (sem Defesa, sem Reações). */
+  private smashObject(h: Unit, o: Unit, atk: RollResult, card: string, base: number, notes: string[]): boolean {
+    const ok = atk.crits > 0;
+    notes.push(ok ? '✷: a Reserva foi destruída!' : 'Sem ✷: a Reserva aguenta');
+    this.emit({ t: 'attack', attackerId: h.id, reason: 'heroi', cardName: card, attackType: this.curCard?.type === 'ranged' ? 'ranged' : 'melee', baseDice: base,
+      dice: atk.faces, hits: atk.successes, crits: atk.crits, notes, rr: atk.rr, targets: [{ id: o.id, defense: [], blocks: 0, wounds: ok ? 1 : 0, stunnedNoDefense: false }] });
+    if (ok) {
+      o.alive = false;
+      o.cell = null;
+      this.emit({ t: 'death', id: o.id, exterminated: true });
+      const m = this.s.missions.find(x => x.rule === 'destroy');
+      if (m) this.completeMission(h.guild!, m.id, h);
+    }
+    this.finishAttack([], h);
     return true;
   }
 
@@ -1354,11 +1453,55 @@ export class Game {
         this.emit({ t: 'door', doorId: d.id, open: true, by: m.id });
       }
       const from = m.cell!;
+      if (!this.monAbility(m, 'shove') && this.cellLoad(st.cell, m) + this.weight(m) > 2 && sameCell(st.cell, dest)) break;
       m.cell = { ...st.cell };
       this.emit({ t: 'move', id: m.id, from, to: st.cell, portal: st.portal });
+      if (this.monAbility(m, 'shove')) this.shove(m, from);
       this.bloodCrown(m, from);
       if (!m.alive) return;
     }
+  }
+
+  /** Empurrão (p.6): quem está no Espaço em que o Monstro entrou vai para um Espaço Perto (sem Reação de Alerta). */
+  private shove(m: Unit, vacated: Cell) {
+    for (const u of this.unitsAt(m.cell!).filter(x => x.id !== m.id)) {
+      const cells = [vacated, ...this.board.neighbors(m.cell!).filter(c => this.board.isClose(m.cell!, c))]
+        .filter(c => !sameCell(c, m.cell) && this.board.playable(c) && this.cellLoad(c) + this.weight(u) <= 2);
+      // longe de quem empurra, se der (o jogo decide por quem controla os Monstros)
+      const cell = cells.sort((a, b) => (sameCell(a, vacated) ? 1 : 0) - (sameCell(b, vacated) ? 1 : 0))[0];
+      if (!cell) continue;
+      const from = u.cell!;
+      u.cell = { ...cell };
+      this.emit({ t: 'move', id: u.id, from, to: { ...cell }, push: true });
+      this.log(`${this.name(m)} empurra ${this.name(u)}.`);
+      if (u.kind === 'hero') { this.triggerMines(u); this.pickup(u); }
+    }
+  }
+
+  /** Banimento (p.7): o personagem vai para o Tabuleiro de Entrada, vivo, com Ferimentos e marcadores.
+   *  Tabuleiro cheio: um Herói volta na hora para a Área Inicial (ou Perto de um Aliado). */
+  banish(u: Unit, by?: Unit): boolean {
+    if (!u.alive || !u.cell) return false;
+    if (u.kind === 'monster' && this.map.noBanish?.includes(baseId(u.defId))) return false;
+    const from = { ...u.cell };
+    u.stunned = false;
+    u.petrified = 0;
+    if (this.s.entryBoard.length >= 5) {
+      if (u.kind !== 'hero') return false;
+      this.emit({ t: 'death', id: u.id, banish: true });
+      u.cell = null;
+      this.resurrect(u, undefined, true);
+      this.log(`${this.name(u)} foi banido, mas o Tabuleiro de Entrada está cheio: volta para a Área Inicial.`);
+      return true;
+    }
+    u.cell = null;
+    if (u.kind === 'hero') u.banished = true; else { u.alive = false; u.wounds = u.wounds; }
+    this.s.entryBoard.push(u.id);
+    this.emit({ t: 'death', id: u.id, banish: true });
+    this.emit({ t: 'cemetery', id: u.id, count: this.s.entryBoard.length, full: this.s.entryBoard.length >= 5 });
+    this.log(`${this.name(u)} foi banido${by ? ` por ${this.name(by)}` : ''} para o Tabuleiro de Entrada.`);
+    void from;
+    return true;
   }
 
   /** Descansar a Guilda (p.18): restaurar cartas, recuperar atordoados, ressuscitar. Encerra o turno. */
@@ -1390,7 +1533,7 @@ export class Game {
 
   /** Ferimentos causados por um efeito de carta (sem rolagem). */
   private hurt(u: Unit, n: number, by: Unit) {
-    if (!u.alive || n <= 0) return;
+    if (!u.alive || !u.cell || n <= 0) return;
     if (u.kind === 'hero') { this.damageHero(u, n, { kind: by.kind === 'hero' ? 'hero' : 'monster', id: by.id }); return; }
     const md = MONSTERS[u.defId];
     if (by.kind === 'hero' && md.category.startsWith('Vilão')) u.hitBy = [...new Set([...(u.hitBy ?? []), by.guild!])];
@@ -1462,7 +1605,7 @@ export class Game {
     for (const [k, nd] of nodes) {
       if (!nd.canEnd || nd.prev === null || nd.portal) continue;
       const c = parseKey(k);
-      if (this.unitsAt(c).length >= 2) continue;
+      if (this.cellLoad(c) >= 2) continue;
       cells.push(c);
     }
     if (!cells.length) return;
@@ -1512,7 +1655,7 @@ export class Game {
   /** Espaços Perto de `c` (e ele mesmo) onde `u` pode ser colocado. */
   private placeCells(u: Unit, c: Cell): Cell[] {
     return [c, ...this.board.neighbors(c).filter(nb => this.board.isClose(c, nb))]
-      .filter(x => this.board.playable(x) && !sameCell(x, u.cell) && this.unitsAt(x).filter(o => o.id !== u.id).length < 2 && this.status(u, x) !== 'blocked');
+      .filter(x => this.board.playable(x) && !sameCell(x, u.cell) && this.cellLoad(x, u) + this.weight(u) <= 2 && this.status(u, x) !== 'blocked');
   }
 
   /** Coloca um personagem num Espaço (sem Movimento: não aciona Reações). */
@@ -1712,7 +1855,9 @@ export class Game {
 
   /** Enxame da Morte: até N Monstros do Cemitério voltam ao tabuleiro perto de Heróis Inimigos. */
   private swarm(h: Unit, n: number) {
-    const ids = this.s.entryBoard.splice(0, n);
+    // só Monstros (Heróis banidos continuam no Tabuleiro de Entrada)
+    const ids = this.s.entryBoard.filter(x => this.unit(x).kind === 'monster').slice(0, n);
+    this.s.entryBoard = this.s.entryBoard.filter(x => !ids.includes(x));
     if (!ids.length) return;
     const foes = this.onBoard().filter(u => u.kind === 'hero' && u.guild !== h.guild);
     const spots = foes.flatMap(f => [f.cell!, ...this.board.neighbors(f.cell!).filter(c => this.board.isClose(c, f.cell!))]);
@@ -1720,7 +1865,7 @@ export class Game {
     this.emit({ t: 'skill', id: h.id, skill: 'enxame', name: 'Enxame da Morte' });
     for (const id of ids) {
       const m = this.unit(id);
-      const cell = pool.find(c => this.board.playable(c) && this.unitsAt(c).length < 2);
+      const cell = pool.find(c => this.board.playable(c) && this.cellLoad(c) < 2);
       if (!cell) { this.s.entryBoard.push(id); continue; }
       m.alive = true;
       m.wounds = 0;
@@ -1855,6 +2000,7 @@ export class Game {
       this.emit({ t: 'move', id: ally.id, from: cb, to: ca, portal: true });
       this.log(`Manto do Deslocamento: ${this.name(h)} troca de lugar com ${this.name(ally)}.`);
       for (const u of [h, ally]) { this.pickup(u); this.checkEscort(u); }
+      this.checkActiveDeath();
       return true;
     }
     if (fx.bootMove) {
@@ -1867,7 +2013,7 @@ export class Game {
       if (this.s.activation) this.s.activation.committed = true;
       if (!(this.s.activatedThisTurn ?? []).includes(h.id)) this.s.activatedThisTurn = [...(this.s.activatedThisTurn ?? []), h.id];
       for (const st of this.pathTo(nodes, cell)) {
-        if (!h.alive) break;
+        if (!h.alive || !h.cell) break;
         const from = h.cell!;
         // o movimento das Botas não aciona Reação de Alerta
         h.cell = { ...st.cell };
@@ -1915,7 +2061,7 @@ export class Game {
         if (!this.resurrectCells(h).some(x => sameCell(x, c))) return `${HEROES[h.defId].name} não pode ressuscitar nesse Espaço.`;
         const k = key(c);
         count.set(k, (count.get(k) ?? 0) + 1);
-        if (this.unitsAt(c).length + count.get(k)! > 2) return 'Máximo de 2 personagens por Espaço.';
+        if (this.cellLoad(c) + count.get(k)! > 2) return 'Máximo de 2 personagens por Espaço.';
       }
     }
     return null;
@@ -1944,6 +2090,7 @@ export class Game {
       h.spent = false;
       h.petrified = 0;
       if (!h.alive) this.resurrect(h, o.resurrect?.[h.id]);
+      else if (h.banished) { this.s.entryBoard = this.s.entryBoard.filter(x => x !== h.id); this.resurrect(h, o.resurrect?.[h.id], true); this.log(`${this.name(h)} volta do Tabuleiro de Entrada.`); }
       // Hora do Lanche (Pigsy): cura todos os Ferimentos
       if (h.alive && h.wounds && this.ab(h) === 'hora_lanche') {
         const x = h.wounds;
@@ -1967,16 +2114,17 @@ export class Game {
       cells.push(ally.cell, ...this.board.neighbors(ally.cell).filter(n => this.board.isClose(n, ally.cell!)));
     }
     const seen = new Set<string>();
-    return cells.filter(c => { const k = key(c); if (seen.has(k)) return false; seen.add(k); return this.board.playable(c) && this.unitsAt(c).length < 2; });
+    return cells.filter(c => { const k = key(c); if (seen.has(k)) return false; seen.add(k); return this.board.playable(c) && this.cellLoad(c) < 2; });
   }
 
-  private resurrect(h: Unit, want?: Cell) {
+  private resurrect(h: Unit, want?: Cell, keepWounds = false) {
     const cells = this.resurrectCells(h);
     const area = this.map.startAreas[this.guild(h.guild!).startArea];
     const c = (want && cells.find(x => sameCell(x, want))) ?? cells.find(x => area.some(a => sameCell(a, x))) ?? cells[0];
     if (!c) return;
     h.alive = true;
-    h.wounds = 0;
+    h.banished = false;
+    if (!keepWounds) h.wounds = 0;
     h.stunned = false;
     h.cell = { ...c };
     this.emit({ t: 'respawn', id: h.id, cell: c });
@@ -2058,6 +2206,7 @@ export class Game {
     this.s.warCry = null;
     this.s.turnUsed = [];
     this.clearTurnFx();
+    if (this.s.shroud?.length) this.s.shroud = this.s.shroud.filter(id => this.unit(id).guild !== this.currentGuild().id);
     this.emit({ t: 'turn', guild: this.currentGuild().id, turn: this.s.turn });
     for (const h of this.heroesOf(this.currentGuild().id)) {
       const g = this.permFx(h, 'genesis').reduce((a: number, b) => a + (b ?? 0), 0);
@@ -2072,6 +2221,120 @@ export class Game {
   // =========================================================================
   private killScore(u: Unit) { return this.maxHp(u) - u.wounds; }
 
+  // =========================================================================
+  // Lápides (Beyond the Grave)
+  // =========================================================================
+  tombAt(c: Cell | null | undefined) { return c ? this.s.tombs?.find(t => sameCell(t.cell, c)) : undefined; }
+
+  /** O Herói ativo pode revelar a Lápide do seu Espaço? (durante o Movimento, 1 PM) */
+  canRevealTomb(): boolean {
+    const a = this.s.activation;
+    if (!this.canAct() || !a || a.moveLocked || a.mp < 1) return false;
+    const h = this.unit(a.heroId);
+    return !!h.alive && !!this.tombAt(h.cell);
+  }
+
+  /** Revela a Lápide: 1 PM, sem Reação de Alerta; o efeito acontece na hora. */
+  revealTomb(): boolean {
+    if (!this.canRevealTomb()) return false;
+    const a = this.s.activation!;
+    const h = this.unit(a.heroId);
+    const t = this.tombAt(h.cell)!;
+    this.s.tombs = this.s.tombs!.filter(x => x !== t);
+    a.mp -= 1;
+    a.moved = true;
+    a.committed = true;
+    const card = TOMB[t.card];
+    this.emit({ t: 'tomb', heroId: h.id, name: card.name, text: card.text, good: card.good });
+    this.log(`${this.name(h)} revelou a Lápide "${card.name}": ${card.text}`);
+    this.tombEffect(h, card.effect, card.name);
+    this.checkActiveDeath();
+    this.applyFree();
+    return true;
+  }
+
+  private tombEffect(h: Unit, effect: string, source: string) {
+    const a = this.s.activation!;
+    const los = (u: Unit) => !!u.cell && !!h.cell && this.hasLOS(h, h.cell, u.cell);
+    const pickUnit = (units: Unit[], text: string, auto: (u: Unit) => number): Unit | null => {
+      if (!units.length) return null;
+      const i = this.choiceHook && h.guild && units.length > 1 ? this.choiceHook({ choice: 'extra', guild: h.guild, heroId: h.id, source, units: units.map(u => u.id), text }) : 'auto';
+      if (i === 'auto') return units.slice().sort((p, q) => auto(q) - auto(p))[0];
+      return units[i] ?? null;
+    };
+    switch (effect) {
+      case 'tesouro': this.gainCoins(h.guild!, 2, 'Lápide: Tesouro Enterrado'); break;
+      case 'pocao': {
+        const tok = { id: `tp${Object.keys(this.s.units).length}-${this.s.turn}-${h.tokens.length}`, type: 'cura' as const, faceUp: true };
+        h.tokens.push(tok);
+        this.emit({ t: 'pickup', heroId: h.id, token: tok });
+        break;
+      }
+      case 'cura': if (h.wounds) { const x = h.wounds; h.wounds = 0; this.emit({ t: 'heal', id: h.id, amount: x, wounds: 0 }); } break;
+      case 'restaura': for (const c of h.cards) { c.exhausted = false; c.uses = 0; } break;
+      case 'passos': a.mp += 2; a.moveLocked = false; break;
+      case 'furia': a.bonusDice = (a.bonusDice ?? 0) + 2; break;
+      case 'mortalha': this.s.shroud = [...new Set([...(this.s.shroud ?? []), h.id])]; break;
+      case 'maldicao': this.damageHero(h, 1, { kind: 'trap' }); break;
+      case 'mao': {
+        const id = this.s.entryBoard.find(x => this.unit(x).kind === 'monster');
+        if (!id || !h.cell) break;
+        const mon = this.unit(id);
+        const cell = [h.cell, ...this.board.neighbors(h.cell).filter(c => this.board.isClose(h.cell!, c))].find(c => this.cellLoad(c) + this.weight(mon) <= 2 && !sameCell(c, h.cell));
+        if (!cell) break;
+        this.s.entryBoard = this.s.entryBoard.filter(x => x !== id);
+        mon.alive = true; mon.wounds = 0; mon.cell = { ...cell };
+        this.emit({ t: 'spawn', id: mon.id, cell: { ...cell } });
+        break;
+      }
+      case 'exorcismo': {
+        const list = this.monstersOnBoard().filter(m => los(m) && !MONSTERS[m.defId].category.startsWith('Vilão') && !this.map.noBanish?.includes(baseId(m.defId)));
+        const m = pickUnit(list, 'Exorcismo: qual Monstro vai para o Tabuleiro de Entrada?', u => -Math.abs(u.cell!.c - h.cell!.c) - Math.abs(u.cell!.r - h.cell!.r));
+        if (m) this.banish(m, h);
+        break;
+      }
+      case 'banir_heroi': {
+        const list = this.onBoard().filter(u => u.kind === 'hero' && this.isEnemy(h, u) && los(u));
+        const v = pickUnit(list, 'Portal do Além: qual Herói Inimigo vai para o Tabuleiro de Entrada?', u => u.tokens.filter(t => t.type === 'missao').length * 5 + this.guild(u.guild!).missions.length);
+        if (v) this.banish(v, h);
+        break;
+      }
+      case 'ativar_menor': case 'ativar_maior': case 'ativar_vilao': {
+        const cat = effect === 'ativar_menor' ? 'Lacaio Menor' : effect === 'ativar_maior' ? 'Lacaio Maior' : 'Vilão Menor';
+        const mons = this.monstersOnBoard().filter(m => MONSTERS[m.defId].category === cat);
+        // o Monstro pode atacar qualquer Herói (até da própria Guilda): a IA escolhe um Inimigo que ele alcance
+        const reach = (m: Unit) => this.heroesInReach(m).filter(x => this.isEnemy(h, x));
+        const m = pickUnit(mons, `${source}: qual ${cat} você ativa?`, u => reach(u).length ? 10 - this.killScore(reach(u)[0]) : -99);
+        if (!m) break;
+        const targets = this.heroesInReach(m);
+        if (!targets.length) { this.log(`${this.name(m)} não alcança nenhum Herói.`); break; }
+        const foes = targets.filter(x => this.isEnemy(h, x));
+        const t = pickUnit(targets, `${source}: ${this.name(m)} ataca quem?`, u => (this.isEnemy(h, u) ? 10 : -10) - this.killScore(u) + (foes.includes(u) ? 0 : 0));
+        if (t) this.puppet(m, t);
+        break;
+      }
+    }
+  }
+
+  /** Heróis que o Monstro consegue atacar depois de se mover. */
+  heroesInReach(m: Unit): Unit[] {
+    if (!m.cell) return [];
+    const nodes = this.reachable(m, this.monMove(m));
+    return this.onBoard().filter(u => u.kind === 'hero' && [...nodes.values()].some(n => n.canEnd && this.monsterCanAttack(m, u, n.cell)));
+  }
+
+  /** Monstro ativado por um jogador (Lápide): move até poder atacar e ataca o alvo. As mortes são crédito do jogo. */
+  private puppet(m: Unit, t: Unit) {
+    if (!this.monsterCanAttack(m, t)) {
+      const nodes = this.reachable(m, this.monMove(m));
+      let best: PathNode | null = null;
+      for (const n of nodes.values()) if (n.canEnd && n.prev !== null && this.monsterCanAttack(m, t, n.cell) && (!best || n.cost < best.cost)) best = n;
+      if (!best) return;
+      this.walkMonster(m, nodes, best.cell);
+    }
+    if (m.alive && t.alive) this.monsterAttack(m, t, 'lapide');
+  }
+
   /** Efeitos que duram até o fim do turno (Heróis extras). */
   private clearTurnFx() {
     this.s.brightMind = null;
@@ -2081,6 +2344,15 @@ export class Game {
   }
 
   /** Devorar (Nibbles): matou um Inimigo -> cura todos os Ferimentos. */
+  /** Título "Mestre da Morte" (Mausoléu Profano): cada Inimigo morto revela uma Lápide para quem matou. */
+  private masterOfDeath(killer: Unit) {
+    const t = this.map.masterDeathTitle;
+    if (!t || killer.kind !== 'hero' || !killer.alive || !this.hasTitle(killer.guild!, t) || this.s.activation?.heroId !== killer.id) return;
+    const card = TOMBSTONES[randInt(this.s, TOMBSTONES.length)];
+    this.log(`Mestre da Morte: ${this.name(killer)} revela "${card.name}".`);
+    this.tombEffect(killer, card.effect, card.name);
+  }
+
   private devour(killer: Unit) {
     if (killer.kind !== 'hero' || !killer.alive || !killer.wounds || this.ab(killer) !== 'devorar') return;
     const x = killer.wounds;
@@ -2096,14 +2368,14 @@ export class Game {
 
   private checkActiveDeath() {
     const a = this.s.activation;
-    if (a && !this.unit(a.heroId).alive) {
-      this.log('O Herói ativo morreu — o turno termina.');
+    if (a && (!this.unit(a.heroId).alive || !this.unit(a.heroId).cell)) {
+      this.log(this.unit(a.heroId).alive ? 'O Herói ativo foi banido — o turno termina.' : 'O Herói ativo morreu — o turno termina.');
       this.endTurn();
     }
   }
 
   damageHero(h: Unit, n: number, src: DamageSource) {
-    if (!h.alive) return;
+    if (!h.alive || !h.cell) return; // banido (fora do tabuleiro): nada o atinge
     if (this.s.debug.heroesImmortal) n = Math.min(n, this.maxHp(h) - 1 - h.wounds);
     if (n <= 0) return;
     h.wounds += n;
@@ -2124,6 +2396,7 @@ export class Game {
     h.stunned = false;
     h.petrified = 0;
     h.cell = null;
+    if (h.banished) { h.banished = false; this.s.entryBoard = this.s.entryBoard.filter(x => x !== h.id); }
     this.emit({ t: 'death', id: h.id });
     this.log(`${this.name(h)} morreu!`);
     const dropped = h.tokens.splice(0);
@@ -2131,9 +2404,10 @@ export class Game {
       const killer = this.unit(src.id);
       const kg = killer.guild!;
       this.gainCoins(kg, 1, 'matou um Herói Inimigo');
-      if (kg !== h.guild) { (this.s.heroKills ??= {})[killer.id] = (this.s.heroKills[killer.id] ?? 0) + 1; this.devour(killer); }
-      if (dropped.length && killer.alive) {
-        const pick = dropped.sort((p, q) => (q.value ?? 1) - (p.value ?? 1))[0];
+      if (kg !== h.guild) { (this.s.heroKills ??= {})[killer.id] = (this.s.heroKills[killer.id] ?? 0) + 1; this.devour(killer); this.masterOfDeath(killer); }
+      const stealable = dropped.filter(t => { const m = t.type === 'missao' ? this.tokenMission(t) : null; return !(m?.ownOnly && t.color !== kg); });
+      if (stealable.length && killer.alive) {
+        const pick = stealable.sort((p, q) => (q.value ?? 1) - (p.value ?? 1))[0];
         dropped.splice(dropped.indexOf(pick), 1);
         pick.faceUp = true;
         killer.tokens.push(pick);
@@ -2157,6 +2431,7 @@ export class Game {
     m.petrified = 0;
     this.emit({ t: 'death', id: m.id, exterminated });
     this.devour(killer);
+    this.masterOfDeath(killer);
     this.log(`${this.name(killer)} matou ${md.name}.`);
     const g = this.guild(killer.guild!);
     if (md.category.startsWith('Vilão')) {
@@ -2215,6 +2490,7 @@ export class Game {
   /** Missão associada aos marcadores de Missão deste cenário. */
   tokenMission(t?: Token) {
     const rules = ['collect_any', 'collect_own', 'carry', 'step_on', 'escort', 'arena', 'summon'];
+    // (enemy_start e destroy não usam marcadores no chão)
     return this.s.missions.find(x => x.rule && rules.includes(x.rule) && (!t || !x.colors || x.colors.includes(t.color ?? '')));
   }
 
@@ -2233,14 +2509,48 @@ export class Game {
   /** Escolta: Herói com o marcador num Espaço de destino, sem Inimigos nele, completa a Missão. */
   private checkEscort(h: Unit) {
     if (!h.alive || !h.cell) return;
+    this.checkEnemyStart(h);
+    this.updateTokenDoors();
     const i = h.tokens.findIndex(t => t.type === 'missao' && this.tokenMission(t)?.rule === 'escort');
     if (i < 0) return;
     const m = this.tokenMission(h.tokens[i])!;
     if (!this.escortTargets(m, h.guild!).some(c => sameCell(c, h.cell))) return;
     if (this.unitsAt(h.cell).some(u => this.isEnemy(h, u))) return;
-    const [t] = h.tokens.splice(i, 1);
-    this.log(`${this.name(h)} escoltou o marcador ${t.color ?? ''} até o destino!`);
+    // Laboratório Secreto: precisa levar 2 marcadores juntos
+    const need = m.count ?? 1;
+    const mine = h.tokens.filter(t => t.type === 'missao' && this.tokenMission(t)?.id === m.id);
+    if (mine.length < need) return;
+    if ((this.s.missionDone[m.id] ?? []).includes(h.guild!)) return;
+    for (const t of mine.slice(0, need)) h.tokens.splice(h.tokens.indexOf(t), 1);
+    this.log(`${this.name(h)} levou ${need > 1 ? `${need} marcadores` : `o marcador ${mine[0].color ?? ''}`} até o destino!`);
     this.completeMission(h.guild!, m.id, h);
+  }
+
+  /** Quartel Assombrado: um Herói na Área Inicial de outra Guilda, sem Inimigos em nenhum Espaço dela. */
+  private checkEnemyStart(h: Unit) {
+    const m = this.s.missions.find(x => x.rule === 'enemy_start');
+    if (!m || !h.cell || h.kind !== 'hero' || (this.s.missionDone[m.id] ?? []).includes(h.guild!)) return;
+    for (const g of this.guilds()) {
+      if (g.id === h.guild) continue;
+      const area = this.map.startAreas[g.startArea];
+      if (!area.some(c => sameCell(c, h.cell))) continue;
+      if (area.some(c => this.unitsAt(c).some(u => this.isEnemy(h, u)))) continue;
+      this.log(`${this.name(h)} investigou os alojamentos da ${g.name}!`);
+      this.completeMission(h.guild!, m.id, h);
+      return;
+    }
+  }
+
+  /** Moinho das Almas: cada porta dos Esqueletos fica aberta só enquanto um Herói da Guilda está no marcador dela. */
+  private updateTokenDoors() {
+    for (const td of this.map.tokenDoors ?? []) {
+      const g = this.s.guildOrder.find(x => this.guild(x).startArea === td.area);
+      const d = this.s.doors[td.door];
+      if (!d) continue;
+      const open = !!g && this.unitsAt(td.token).some(u => u.kind === 'hero' && u.guild === g);
+      if (d.open !== open) { d.open = open; this.emit({ t: 'door', doorId: d.id, open, by: this.unitsAt(td.token)[0]?.id ?? this.heroesOf(this.s.guildOrder[0])[0].id }); }
+      d.locked = !open;
+    }
   }
 
   /** Arena: ao terminar a ativação num marcador de Missão sem Inimigos, coloca um marcador da Guilda. */
@@ -2265,7 +2575,7 @@ export class Game {
     if (!mon) { this.log('O Monstro invocado já está em jogo.'); return; }
     const r = this.roll(2, ATTACK_DIE, 'melee', 'normal', false).faces;
     const match = this.s.entryMarkers.find(em => { const p = em.pair.slice(); return r.every(f => { const i = p.indexOf(f); if (i < 0) return false; p.splice(i, 1); return true; }); });
-    if (match && this.unitsAt(match.cell).length < 2) {
+    if (match && this.cellLoad(match.cell) < 2) {
       mon.alive = true; mon.wounds = 0; mon.stunned = false; mon.cell = { ...match.cell };
       this.log(`${this.name(h)} invocou a Sombra: ${MONSTERS[mon.defId].name} surge em (${match.cell.c},${match.cell.r})!`);
       this.emit({ t: 'spawn', id: mon.id, cell: { ...match.cell } });
@@ -2273,10 +2583,14 @@ export class Game {
   }
 
   /** Emboscada: o marcador escondido vira um Monstro que ataca quem o encontrou. */
-  private ambush(h: Unit, cell: Cell) {
-    const type = this.map.ambush!.monster;
+  private ambush(h: Unit, cell: Cell, color?: string) {
+    const type = (color && this.map.ambushBy?.[color]) || this.map.ambush!.monster;
     const mon = this.units().find(u => u.kind === 'monster' && baseId(u.defId) === type && !u.alive && !this.s.entryBoard.includes(u.id));
     if (!mon) return;
+    // o Monstro aparece no Espaço do Herói; se não couber, no Espaço Perto mais próximo com lugar
+    const spot = [cell, ...this.board.neighbors(cell).filter(c => this.board.isClose(cell, c))].find(c => this.cellLoad(c) + this.weight(mon) <= 2);
+    if (!spot) return;
+    cell = spot;
     mon.alive = true; mon.wounds = 0; mon.stunned = false; mon.cell = { ...cell };
     this.log(`Emboscada! O marcador era uma ${MONSTERS[mon.defId].name}!`);
     this.emit({ t: 'spawn', id: mon.id, cell: { ...cell } });
@@ -2306,7 +2620,9 @@ export class Game {
     if (m.rule === 'summon') return true;
     if (m.rule === 'escort') {
       const done = this.s.missionDone[m.id] ?? [];
-      return !done.includes(g) && !(m.maxCompletions && done.length >= m.maxCompletions) && !this.escortToken(g);
+      if (m.ownOnly && t.color !== g) return false;
+      const carrying = this.heroesOf(g).reduce((n, h) => n + h.tokens.filter(x => x.type === 'missao' && this.tokenMission(x)?.id === m.id).length, 0);
+      return !done.includes(g) && !(m.maxCompletions && done.length >= m.maxCompletions) && carrying < (m.count ?? 1);
     }
     if (m.rule === 'collect_own' && t.color !== g) return false;
     if (m.rule === 'step_on' && !m.colors?.includes(t.color ?? '')) return false;
@@ -2406,10 +2722,10 @@ export class Game {
       const wasDown = !t.faceUp;
       if (!h.alive) { keep.push(t); continue; }
       if (t.type === 'missao') {
-        if (!t.faceUp && this.map.ambush?.colors.includes(t.color ?? '')) {
+        if (!t.faceUp && (this.map.ambush?.colors.includes(t.color ?? '') || this.map.ambushBy?.[t.color ?? ''])) {
           // marcador escondido que é uma emboscada (sai do jogo)
           t.faceUp = true;
-          this.ambush(h, h.cell!);
+          this.ambush(h, h.cell!, t.color);
           continue;
         }
         const m = this.tokenMission(t);
@@ -2538,11 +2854,19 @@ export class Game {
     return this.canAttackFrom(m, from, MONSTERS[m.defId].attackType, h);
   }
 
-  private monsterAttack(m: Unit, h: Unit, reason: 'alerta' | 'vinganca') {
+  private monsterAttack(m: Unit, h: Unit, reason: 'alerta' | 'vinganca' | 'lapide') {
     if (!m.alive || !h.alive || !this.monsterCanAttack(m, h)) return;
+    // Título "Mente Mestra": a Reação provocada por este Herói ataca outro Herói (Inimigo) Perto do Monstro
+    const mm = this.map.mastermindTitle;
+    if (mm && reason !== 'lapide' && h.kind === 'hero' && this.hasTitle(h.guild!, mm)) {
+      const alt = this.onBoard().filter(u => u.kind === 'hero' && u.guild !== h.guild && this.monsterCanAttack(m, u)).sort((p, q) => this.killScore(p) - this.killScore(q))[0];
+      if (alt) { this.log(`Mente Mestra: ${this.name(m)} ataca ${this.name(alt)} no lugar de ${this.name(h)}!`); h = alt; }
+    }
     const md = this.monDef(m, h);
     const ab = md.abilities ?? [];
     const notes: string[] = [];
+    // Erguer os Mortos (Necromante): o primeiro Monstro do Tabuleiro de Entrada volta Perto dele
+    if (ab.includes('raise')) this.raiseDead(m);
     let dice = md.dice;
     if (ab.includes('packBonus') && this.monstersOnBoard().some(o => o.id !== m.id && this.board.isClose(o.cell!, m.cell!))) { dice++; notes.push('+1 dado (Perto de outro Monstro)'); }
     if (md !== MONSTERS[m.defId]) notes.push('Destruidor da Pedra Sangrenta: Orc mais fraco');
@@ -2570,6 +2894,7 @@ export class Game {
     for (const r of res) {
       if (r.wounds > 0) this.damageHero(r.t, r.wounds, { kind: 'monster', id: m.id });
       if (r.wounds > 0 && ab.includes('daze') && r.t.alive && !r.t.stunned) this.setStun(r.t, true);
+      if (r.wounds > 0 && ab.includes('banish') && r.t.alive && r.t.cell) this.banish(r.t, m);
       if (ab.includes('critExhaust') && atk.crits && r.t.alive) {
         const ready = r.t.cards.filter(c => !c.exhausted && this.isAttackCard(c)).slice(0, atk.crits);
         for (const c of ready) c.exhausted = true;
@@ -2582,6 +2907,21 @@ export class Game {
       m.wounds -= x;
       this.emit({ t: 'heal', id: m.id, amount: x, wounds: m.wounds });
     }
+  }
+
+  /** Erguer os Mortos: o primeiro Monstro do Tabuleiro de Entrada volta num Espaço Perto do Necromante. */
+  private raiseDead(nec: Unit) {
+    const id = this.s.entryBoard.find(x => this.unit(x).kind === 'monster');
+    if (!id || !nec.cell) return;
+    const mon = this.unit(id);
+    const cell = [nec.cell, ...this.board.neighbors(nec.cell).filter(c => this.board.isClose(nec.cell!, c))].find(c => this.cellLoad(c) + this.weight(mon) <= 2);
+    if (!cell) return;
+    this.s.entryBoard = this.s.entryBoard.filter(x => x !== id);
+    mon.alive = true;
+    mon.cell = { ...cell };
+    this.emit({ t: 'skill', id: nec.id, skill: 'erguer_mortos', name: 'Erguer os Mortos' });
+    this.emit({ t: 'spawn', id: mon.id, cell: { ...cell } });
+    this.log(`${this.name(nec)} ergue ${this.name(mon)} do Tabuleiro de Entrada!`);
   }
 
   /** Reação de Vingança (p.20): o Monstro pode se mover até seu Movimento e então atacar o atacante. */
@@ -2611,6 +2951,22 @@ export class Game {
     this.monsterAttack(m, h, 'vinganca');
   }
 
+  /** Herói banido na Entrada de Monstros: vai para a Entrada sorteada se estiver livre; senão, Área Inicial / Perto de Aliado (p.7). */
+  private returnBanished(h: Unit, faces: DieFace[]) {
+    if (!h.alive || !h.banished) { h.banished = false; return; }
+    const match = this.s.entryMarkers.find(em => { const p = em.pair.slice(); return faces.every(f => { const i = p.indexOf(f); if (i < 0) return false; p.splice(i, 1); return true; }); });
+    h.banished = false;
+    if (match && this.cellLoad(match.cell) < 2 && !this.unitsAt(match.cell).some(u => this.isEnemy(h, u))) {
+      h.cell = { ...match.cell };
+      this.emit({ t: 'spawnRoll', id: h.id, faces, cell: { ...match.cell }, reason: 'Volta do além na Entrada de Monstro!' });
+      this.emit({ t: 'spawn', id: h.id, cell: { ...match.cell } });
+    } else {
+      this.emit({ t: 'spawnRoll', id: h.id, faces, cell: null, reason: 'Volta para a Área Inicial (com os Ferimentos)' });
+      this.resurrect(h, undefined, true);
+    }
+    this.log(`${this.name(h)} voltou do Tabuleiro de Entrada.`);
+  }
+
   /** Entrada de Monstros (p.23): 2 dados por miniatura, compara com os marcadores. */
   spawnMonsters() {
     if (!this.s.entryBoard.length) return;
@@ -2627,6 +2983,7 @@ export class Game {
     for (const id of this.s.entryBoard) {
       const m = this.unit(id);
       const r = this.roll(2, ATTACK_DIE, 'melee', 'normal', false).faces;
+      if (m.kind === 'hero') { this.returnBanished(m, r); continue; }
       const match = this.s.entryMarkers.find(em => {
         const p = em.pair.slice();
         return r.every(f => {
@@ -2636,7 +2993,7 @@ export class Game {
           return true;
         });
       });
-      if (match && this.unitsAt(match.cell).length < 2) {
+      if (match && this.cellLoad(match.cell) < 2) {
         m.alive = true;
         m.wounds = 0;
         m.cell = { ...match.cell };

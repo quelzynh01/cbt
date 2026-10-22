@@ -497,3 +497,13 @@
 .lb-stack .lb-box { justify-items: center; text-align: center; }
 .lb-stack .lb-box button { min-width: 220px; }
 .lb-stack .lb-code-in { width: min(260px, 100%); }
+
+/* Biblioteca: abas das edições (CBT Clássico / Beyond the Grave) */
+.lib-eds { display: flex; gap: 8px; margin: 0 0 12px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.lib-eds button { flex: 1 1 0; max-width: 260px; font-weight: 800; }
+.lib-eds button.on.ed-classic { background: linear-gradient(#e9a83a, #b9761b); border-color: #ffd98a; color: #2a1606; }
+.lib-eds button.on.ed-extra { background: linear-gradient(#3a8fb0, #1f5a78); border-color: #9fe8ff; color: #fff; }
+.lib-eds button small { opacity: .8; font-weight: 600; }
+.lib-eds button.on.ed-btg { background: linear-gradient(#7a5aa8, #3e2a66); border-color: #c9a8ff; color: #fff; }
+.tk-card.tomb .tomb-ic { font-size: 54px; line-height: 1.1; filter: drop-shadow(0 4px 6px rgba(0,0,0,.5)); }
+.tk-card.tomb.bad { border-color: #8a3a3a; }

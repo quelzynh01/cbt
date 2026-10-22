@@ -1137,3 +1137,19 @@ body:has(#roulette, #gamemenu:not(.hidden), #gamedialog) :is(#activebar, #banner
   .ml-missions span { display: none; }
   .ml-tip { display: none; }
 }
+
+/* Lápide (Beyond the Grave) */
+.hb-power.hb-tomb { background: linear-gradient(180deg, #5d6b78, #37424d); border-color: #c9d4dc; }
+.cem-slot.hero img { border-radius: 50%; box-shadow: 0 0 0 2px #b892ff; }
+
+/* Lápide revelada: carta no meio da tela para todos os jogadores */
+#tomb-pop { position: absolute; left: 0; right: 0; top: 22%; display: flex; justify-content: center; pointer-events: none; z-index: 40; }
+#tomb-pop.anim .tp-card { animation: tombIn 3.4s ease-out both; }
+.tp-card { width: min(340px, calc(100vw - 32px)); text-align: center; padding: 14px 18px 16px; border-radius: 16px; color: #f1ecff;
+  background: linear-gradient(#3b2f55, #1d1630); border: 3px solid #b892ff; box-shadow: 0 10px 34px rgba(0,0,0,.6), 0 0 24px rgba(184,146,255,.35); }
+.tp-card.bad { border-color: #e06a5a; box-shadow: 0 10px 34px rgba(0,0,0,.6), 0 0 24px rgba(224,106,90,.35); }
+.tp-card .tp-ic { font-size: 44px; line-height: 1; }
+.tp-card small { display: block; opacity: .85; margin-top: 4px; }
+.tp-card h3 { margin: 4px 0 6px; font-size: 22px; color: #ffd98a; }
+.tp-card p { margin: 0; font-size: 15px; line-height: 1.35; }
+@keyframes tombIn { 0% { opacity: 0; transform: translateY(18px) scale(.85); } 8% { opacity: 1; transform: none; } 85% { opacity: 1; } 100% { opacity: 0; transform: translateY(-8px); } }

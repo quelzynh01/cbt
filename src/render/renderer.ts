@@ -70,7 +70,7 @@ const DIE_ICON: Record<string, string> = { crit: '✷', melee: '⚔', ranged: '�
 
 const DUR: Partial<Record<GameEvent['t'], number>> = {
   move: 280, door: 220, attack: 1500, damage: 480, heal: 420, death: 520, stun: 200, pickup: 650, drop: 200,
-  spawn: 420, respawn: 420, spawnRoll: 0, mission: 1500, reaction: 520, turn: 950, rest: 700, card: 800, coins: 0, log: 0, gameover: 0,
+  spawn: 420, respawn: 420, spawnRoll: 0, tomb: 2600, mission: 1500, reaction: 520, turn: 950, rest: 700, card: 800, coins: 0, log: 0, gameover: 0,
 };
 
 /** Espada (lâmina para +x, cabo na origem): Fender girando e Arremesso de Lâmina. */
@@ -393,6 +393,21 @@ export class Renderer {
   }
 
   /** Lugar do marcador de Missão no Espaço (o oposto ao do personagem sozinho). */
+  /** Onde fica cada coisa do chão dentro do Espaço, para não ficarem uma em cima da outra
+   *  (portal, bueiro e placa da Entrada de Monstros, Lápide, marcador de Missão). */
+  private spots(c: Cell): { portal: [number, number]; manhole: [number, number]; plaque: [number, number]; tomb: [number, number] } {
+    const same = (x: Cell) => x.c === c.c && x.r === c.r;
+    const portal = this.game.map.portals.some(p => same(p.cell));
+    const entry = this.game.s.entryMarkers.some(m => same(m.cell));
+    const mission = (this.floor[key(c)] ?? []).some(t => t.type === 'missao');
+    return {
+      portal: [0.78, 0.3],
+      manhole: portal ? [0.26, 0.26] : [0.62, 0.3],
+      plaque: mission ? [0.76, 0.66] : [0.3, 0.62],
+      tomb: portal && entry ? [0.82, 0.78] : portal || entry ? [0.24, 0.24] : [0.78, 0.28],
+    };
+  }
+
   private missionSlot(c: number, r: number) {
     return { gx: c + 0.5 - 0.17 + 0.1, gy: r + 0.5 + 0.17 + 0.1 };
   }
@@ -548,6 +563,7 @@ export class Renderer {
         const u = this.units.get(e.id)!;
         u.fade = { from: 1, to: 0, t0: now, dur: 480 / this.speed };
         if (e.exterminated) this.floatAt(e.id, 'EXTERMINADO!', '#ffd34d', 26, -18);
+        if (e.banish) this.floatAt(e.id, 'BANIDO!', '#b892ff', 26, -18);
         break;
       }
       case 'stun': {
@@ -575,7 +591,8 @@ export class Renderer {
         const u = this.units.get(e.id)!;
         u.cell = { ...e.cell };
         u.alive = true;
-        u.wounds = 0;
+        // quem volta do Tabuleiro de Entrada (banido) mantém os Ferimentos
+        u.wounds = e.t === 'spawn' ? this.game?.unit(e.id)?.wounds ?? 0 : 0;
         u.stunned = false;
         u.fade = { from: 0, to: 1, t0: now, dur: 400 / this.speed };
         u.dir = this.centerDir(e.cell);
@@ -832,6 +849,32 @@ export class Renderer {
   private drawGroundOverlays() {
     const ctx = this.ctx;
     const tt = this.t / 1000;
+    // Lápides (Beyond the Grave): lápide de pedra em pé no canto do Espaço
+    for (const tb of this.game.s.tombs ?? []) {
+      const [tx, ty] = this.spots(tb.cell).tomb;
+      const p = g2s(tb.cell.c + tx, tb.cell.r + ty);
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.fillStyle = 'rgba(0,0,0,0.28)';
+      ctx.beginPath(); ctx.ellipse(0, 4, 30, 10, 0, 0, Math.PI * 2); ctx.fill();
+      const grd = ctx.createLinearGradient(-22, -60, 22, 0);
+      grd.addColorStop(0, '#c9d1d6'); grd.addColorStop(1, '#7d878e');
+      ctx.fillStyle = grd;
+      ctx.strokeStyle = '#3c454c'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(-22, 2); ctx.lineTo(-22, -40); ctx.arc(0, -40, 22, Math.PI, 0); ctx.lineTo(22, 2); ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.strokeStyle = '#4b555c'; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(0, -50); ctx.lineTo(0, -26); ctx.moveTo(-9, -42); ctx.lineTo(9, -42); ctx.stroke();
+      ctx.fillStyle = '#4b555c'; ctx.font = '900 11px "Baloo 2", sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('RIP', 0, -10);
+      // brilho quando o Herói ativo pode revelar
+      const a = this.game.s.activation;
+      const h = a ? this.game.unit(a.heroId) : null;
+      if (h?.cell && h.cell.c === tb.cell.c && h.cell.r === tb.cell.r && this.game.canRevealTomb()) {
+        ctx.strokeStyle = `rgba(184,146,255,${0.55 + 0.45 * Math.sin(tt * 5)})`; ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.moveTo(-26, 4); ctx.lineTo(-26, -42); ctx.arc(0, -42, 26, Math.PI, 0); ctx.lineTo(26, 4); ctx.stroke();
+      }
+      ctx.restore();
+    }
     // Entradas de Monstro: placa no chão com os 2 símbolos de dado que fazem o Monstro surgir ali
     for (const em of this.game.s.entryMarkers) {
       const k = key(em.cell);
@@ -847,7 +890,8 @@ export class Renderer {
       ctx.stroke();
       ctx.setLineDash([]);
       // placa com os símbolos
-      const p = g2s(em.cell.c + 0.3, em.cell.r + 0.62);
+      const [px, py] = this.spots(em.cell).plaque;
+      const p = g2s(em.cell.c + px, em.cell.r + py);
       ctx.save();
       ctx.translate(p.x, p.y);
       const sc = 1 + glow * 0.15;
@@ -907,7 +951,8 @@ export class Renderer {
     }
     // portais
     for (const p of this.game.map.portals) {
-      const c = g2s(p.cell.c + 0.78, p.cell.r + 0.3);
+      const [sx, sy] = this.spots(p.cell).portal;
+      const c = g2s(p.cell.c + sx, p.cell.r + sy);
       ctx.save(); ctx.translate(c.x, c.y); ctx.scale(1.9, 1.9);
       if (p.color === 'magenta' || p.color === 'rosa') ctx.filter = 'hue-rotate(150deg) saturate(1.4)';
       drawPortal(ctx, 0, 0, tt);
@@ -1652,7 +1697,8 @@ export class Renderer {
 
     // Marcadores de Entrada de Monstro (bueiros)
     for (const em of g.s.entryMarkers) {
-      const p = g2s(em.cell.c + 0.62, em.cell.r + 0.3);
+      const [mx, my] = this.spots(em.cell).manhole;
+      const p = g2s(em.cell.c + mx, em.cell.r + my);
       ctx.save(); ctx.translate(p.x, p.y); ctx.scale(1.6, 1.6);
       drawManhole(ctx, 0, 0);
       ctx.restore();

@@ -999,7 +999,10 @@ export function ensureArt(ids: string[], onEach?: () => void, expect?: (n: numbe
     if (!e) continue;
     let p = lazyLoading.get(id);
     if (!p) {
-      const dirs = Array.isArray(e) ? e : e.dirs;
+      // só de frente (esquerda e direita): as poses de costas não são usadas nem carregadas
+      const all = Array.isArray(e) ? e : e.dirs;
+      const front = all.filter(d => d === 'se' || d === 'sw');
+      const dirs = front.length ? front : all;
       const face = !portraits.has(id) && !Array.isArray(e) && !!e.lazy;
       expect?.(dirs.length + (face ? 1 : 0));
       p = Promise.all([
@@ -1051,6 +1054,8 @@ function pickImage(id: string, dir: Dir): { img: HTMLImageElement; mirror: boole
 
 function sprite(id: string, dir: Dir, tint: boolean): Spr {
   id = artId(id);
+  // os personagens só olham para a esquerda ou a direita (sem pose de costas)
+  dir = dir === 'ne' ? 'se' : dir === 'nw' ? 'sw' : dir;
   const k = `${id}|${dir}|${tint}`;
   const hit = cache.get(k);
   if (hit) return hit;
@@ -1098,7 +1103,7 @@ function sprite(id: string, dir: Dir, tint: boolean): Spr {
     const ctx = cv.getContext('2d')!;
     ctx.scale(RES, RES);
     ctx.translate(FX, FY);
-    if (dir === 'sw' || dir === 'nw') ctx.scale(-1, 1);
+    if (dir === 'sw') ctx.scale(-1, 1);
     drawFigure(ctx, ARTS[id] ?? ARTS.orc);
     const hy = ARTS[id]?.head?.y ?? -76;
     spr = { cv, w: SW, h: SH, fx: FX, fy: FY, head: [(FX - 46) * RES, (FY + hy - 52) * RES, 92 * RES, 92 * RES] };

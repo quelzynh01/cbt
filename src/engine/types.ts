@@ -15,6 +15,8 @@ export type HeroAbility =
   | 'duro_na_queda' | 'maestria_arco' | 'bencao' | 'arremesso' | 'autossacrificio'
   | 'apunhalar' | 'magia_perfurante'
   // Heróis extras
+  // Beyond the Grave
+  | 'nao_no_rosto' | 'brigao'
   | 'cheiro_sangue' | 'zas_tras' | 'bate_corre' | 'ataque_mental' | 'olhar_petrificante' | 'feitico_tenaz' | 'suga_mente' | 'cobica' | 'teleporte' | 'ritual_sangue' | 'chamado' | 'lamina_sugadora' | 'trapaceiro' | 'macaco_ve' | 'mestre_espadachim' | 'aura_mistica' | 'hora_lanche' | 'tiro_explosivo' | 'presenca' | 'doces_travessuras' | 'feitico_pressa' | 'feitico_trapaceiro' | 'frenesi' | 'paria' | 'feitico_banshee' | 'ataque_cardiaco' | 'mente_brilhante' | 'sorte_apostador' | 'cacador' | 'resistencia_panda' | 'relampago' | 'efeito_borboleta' | 'contagem_corpos' | 'encantado' | 'lobo_solitario' | 'briga' | 'garras' | 'devorar' | 'arremesso_selvagem' | 'implacavel' | 'acrobata';
 
 export interface HeroDef {
@@ -32,6 +34,10 @@ export interface HeroDef {
   title: string;
   /** Herói extra (fora da caixa básica). */
   extra?: boolean;
+  /** Herói da expansão Beyond the Grave. */
+  btg?: boolean;
+  /** Força do Herói (0-10, ref/wiki/rating-heroes.csv). */
+  rating?: number;
 }
 
 export type MonsterCategory = 'Lacaio Menor' | 'Lacaio Maior' | 'Vilão Menor' | 'Vilão Maior';
@@ -91,6 +97,8 @@ export interface Unit {
   spent?: boolean;
   /** Olhar Petrificante (Elysia): marcadores que tiram 1 Ponto de Movimento cada (Descansar remove). */
   petrified?: number;
+  /** Banido: está no Tabuleiro de Entrada (fora do tabuleiro, mas vivo, com Ferimentos e marcadores). */
+  banished?: boolean;
 }
 
 export interface Door { id: string; a: Cell; b: Cell; open: boolean; small?: boolean; locked?: boolean }
@@ -109,6 +117,8 @@ export interface Activation {
   moveOnly?: boolean;
   /** Habilidade de "uma vez por ativação" já usada (Relâmpago). */
   powerUsed?: boolean;
+  /** Fúria dos Mortos (Lápide): dados a mais no próximo ataque. */
+  bonusDice?: number;
 }
 
 export interface MissionDef {
@@ -119,7 +129,11 @@ export interface MissionDef {
   targetGuild?: GuildId;
   maxCompletions?: number;
   /** Como a Missão é cumprida. */
-  rule?: 'collect_any' | 'collect_own' | 'kill_count' | 'kill_type' | 'carry' | 'step_on' | 'escort' | 'arena' | 'summon';
+  rule?: 'collect_any' | 'collect_own' | 'kill_count' | 'kill_type' | 'carry' | 'step_on' | 'escort' | 'arena' | 'summon'
+    /** Beyond the Grave: estar na Área Inicial de outra Guilda sem Inimigos nela; destruir um objeto (Reservas de Comida). */
+    | 'enemy_start' | 'destroy';
+  /** escort: só a Guilda da cor do marcador pode pegá-lo (e matar quem carrega não rouba). */
+  ownOnly?: boolean;
   /** escort: para onde levar o marcador (Espaços ou a própria Área Inicial). */
   escortTo?: Cell[] | 'own_area';
   /** summon: Monstro (id base) invocado ao pisar no marcador. */
@@ -234,6 +248,10 @@ export interface GameState {
   clawed?: string[];
   /** Doces ou Travessuras: já usada neste turno. */
   beggarUsed?: boolean;
+  /** Cartas de Lápide viradas no tabuleiro (Beyond the Grave). */
+  tombs?: { id: string; cell: Cell; card: string }[];
+  /** Mortalha: Heróis com +2 dados de Defesa até o próximo turno da Guilda deles. */
+  shroud?: string[];
   debug: { attackDice: DiceMode; defenseDice: DiceMode; revealTokens: boolean; heroesImmortal: boolean; freeMode?: boolean };
 }
 
@@ -244,7 +262,7 @@ export type GameEvent =
   | {
       t: 'attack';
       attackerId: string;
-      reason: 'heroi' | 'alerta' | 'vinganca' | 'armadilha';
+      reason: 'heroi' | 'alerta' | 'vinganca' | 'armadilha' | 'lapide';
       cardName: string;
       attackType: AttackType;
       /** Dados de ataque da carta (com bônus), antes dos dados extras de ✷. */
@@ -273,7 +291,7 @@ export type GameEvent =
   | { t: 'strike'; attackerId: string; cardName: string; attackType: AttackType; targets: { id: string }[]; cleave?: boolean; thrown?: boolean; sfx?: string }
   | { t: 'damage'; id: string; amount: number; wounds: number; maxHp: number }
   | { t: 'heal'; id: string; amount: number; wounds: number }
-  | { t: 'death'; id: string; exterminated?: boolean }
+  | { t: 'death'; id: string; exterminated?: boolean; /** foi para o Tabuleiro de Entrada (Banimento) */ banish?: boolean }
   | { t: 'stun'; id: string; on: boolean }
   /** hidden: o marcador estava virado para baixo (é revelado ao pegar). */
   | { t: 'pickup'; heroId: string; token: Token; hidden?: boolean }
@@ -287,6 +305,8 @@ export type GameEvent =
   | { t: 'reward'; heroId: string; cardId: string }
   /** Habilidade Natural ativada (Furtividade do Vapor, Vingança do Espetado…). */
   | { t: 'skill'; id: string; skill: string; name: string }
+  /** Lápide revelada (Beyond the Grave): o texto aparece na tela de todos. */
+  | { t: 'tomb'; heroId: string; name: string; text: string; good: boolean }
   | { t: 'drop'; cell: Cell; tokens: Token[] }
   | { t: 'spawn'; id: string; cell: Cell }
   | { t: 'cemetery'; id: string; count: number; full: boolean }

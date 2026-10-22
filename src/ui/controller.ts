@@ -177,6 +177,7 @@ export class Controller {
       useToken: id => this.act({ type: 'token', tokenId: id }),
       useCard: (heroId, cardUid) => this.useCard(heroId, cardUid),
       usePower: heroId => this.usePower(heroId),
+      revealTomb: () => { if (this.isHumanTurn() && !this.renderer.busy) this.act({ type: 'tomb' }); },
       endTurn: () => this.tryEndTurn(),
       rest: () => this.openRest(),
       inspect: id => { this.hud.inspected = id; this.refresh(); },
@@ -892,6 +893,7 @@ export class Controller {
     if (hl.move.size) parts.push('<span class="k blue">■</span> clique para mover');
     if (hl.attackUnits.size) parts.push('<span class="k red">■</span> clique no inimigo para abrir a <b>Batalha</b>');
     if (hl.doorIcons.length) parts.push('🔑 clique na porta para abrir/fechar (1 PM)');
+    if (this.game.canRevealTomb()) parts.push('🪦 <b>Lápide</b> aqui: revele no quadro do Herói (1 PM)');
     if (a.moved && !a.attacked && !a.moveLocked) parts.push('<i>atacar agora encerra o Movimento</i>');
     if (this.game.s.blessing) parts.push('✨ <b>Bênção</b>: clique em um Aliado em Linha de Visão de Hobsbawm para ativá-lo');
     parts.push('<b>Espaço</b> encerra o turno');

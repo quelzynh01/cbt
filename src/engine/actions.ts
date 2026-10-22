@@ -11,6 +11,8 @@ export type Action =
   | { type: 'card'; heroId: string; cardUid: string; target?: string; cell?: Cell }
   /** Habilidade do Herói usada como ação (Heróis extras). */
   | { type: 'power'; heroId: string; target?: string; cell?: Cell }
+  /** Revelar a carta de Lápide do Espaço do Herói ativo (1 PM). */
+  | { type: 'tomb' }
   | { type: 'rest'; opts?: RestOptions }
   | { type: 'end' }
   | { type: 'vengeance'; dest: Cell | null; attack: boolean }
@@ -39,6 +41,7 @@ export function applyAction(g: Game, by: GuildId, a: Action): boolean {
     case 'token': return g.useToken(a.tokenId);
     case 'card': return g.useCard(a.heroId, a.cardUid, a.target, a.cell);
     case 'power': return g.usePower(a.heroId, a.target, a.cell);
+    case 'tomb': return g.revealTomb();
     case 'rest': return g.rest(a.opts ?? {});
     case 'end': return g.endTurn();
   }

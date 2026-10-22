@@ -1,5 +1,6 @@
 import type { DieFace, GuildId, HeroAbility, HeroDef, MonsterDef, TokenType } from './types';
 import { EXTRA_HEROES } from './extraHeroes';
+import { HERO_RATING } from './ratings';
 
 // ---------------------------------------------------------------------------
 // Heróis (Livro de Regras p.8 — cartas de Grom, Maya e Zazu)
@@ -67,6 +68,20 @@ export const HEROES: Record<string, HeroDef> = {
   },
 };
 
+// Beyond the Grave (ref/wiki/btg-heroes.csv)
+HEROES.chaz = {
+  id: 'chaz', name: 'Chaz', nameEn: 'Chaz', title: 'Irmão Negro', btg: true,
+  defense: 2, hp: 4, ability: 'nao_no_rosto', abilityName: 'No Rosto Não!',
+  abilityText: 'Rola +2 dados nos ataques Próximos enquanto não estiver ferido.',
+};
+HEROES.darryn = {
+  id: 'darryn', name: 'Darryn', nameEn: 'Darryn', title: 'Irmão Negro', btg: true,
+  defense: 2, hp: 4, ability: 'brigao', abilityName: 'Brigão',
+  abilityText: 'Rola +1 dado nos ataques contra alvos sem Ferimentos.',
+};
+/** Heróis da expansão Beyond the Grave. */
+export const BTG_HEROES = ['chaz', 'darryn'];
+
 /** Ordem da galeria de personagens (Core Heroes). */
 export const ALL_HEROES = ['grom', 'maya', 'zazu', 'vapor', 'espetado', 'diva', 'casacaverde', 'hobsbawm', 'johan', 'kanga', 'escarlate', 'seth'];
 export const CORE_HEROES = ALL_HEROES;
@@ -125,8 +140,14 @@ for (const x of EXTRA_HEROES) {
   };
 }
 export const EXTRA_HERO_IDS = EXTRA_HEROES.map(x => `x_${x.id}`);
-/** Heróis que podem ser recrutados (Configurações da partida: só os Core ou todos). */
-export function heroPool(allHeroes = false): string[] { return allHeroes ? [...ALL_HEROES, ...EXTRA_HERO_IDS] : ALL_HEROES.slice(); }
+/** Heróis que podem ser recrutados (Configurações da partida: só os Core ou todos).
+ *  Na campanha Beyond the Grave, Chaz e Darryn entram junto com os Core. */
+export function heroPool(allHeroes = false, edition: string = 'classic'): string[] {
+  const core = edition === 'btg' ? [...ALL_HEROES, ...BTG_HEROES] : ALL_HEROES.slice();
+  return allHeroes ? [...ALL_HEROES, ...BTG_HEROES, ...EXTRA_HERO_IDS] : core;
+}
+// rating de cada Herói (ref/wiki/rating-heroes.csv)
+for (const [id, r] of Object.entries(HERO_RATING)) if (HEROES[id]) HEROES[id].rating = r;
 
 export const HERO_ORDER = ['grom', 'maya', 'zazu'];
 /** Guilda padrão do jogador no Modo Teste (o 1º é selecionado ao começar). */
@@ -170,7 +191,9 @@ export function distributeStartingGear(heroes: string[]): Record<string, string[
 // Monstros por nível (fonte: ref/wiki/monsters.csv). Id = base + sufixo de nível:
 // '' = Nível 1, '2' = Nível 2-3, '4' = Nível 4-5, '6' = Nível 6. Ex.: orc, orc2, orc4, orc6.
 // ---------------------------------------------------------------------------
-export type MonsterAbility = 'daze' | 'packBonus' | 'critExhaust' | 'critHeal' | 'hitsAll' | 'critExtra' | 'splash';
+export type MonsterAbility = 'daze' | 'packBonus' | 'critExhaust' | 'critHeal' | 'hitsAll' | 'critExtra' | 'splash'
+  // Beyond the Grave
+  | 'ghost' | 'huge' | 'shove' | 'banish' | 'raise' | 'object';
 type MonRow = [hp: number, exterm: number, def: number, reward: number, move: number, rerolls: number, dice: number];
 interface MonBase { name: string; abbr: string; category: MonsterDef['category']; attackType: MonsterDef['attackType']; attackName: string; abilities: MonsterAbility[]; abilityText: string; levels: Record<string, MonRow> }
 
@@ -196,6 +219,35 @@ const MON_BASE: Record<string, MonBase> = {
   lorde_presas: { name: 'Lorde Presas', abbr: 'LP', category: 'Vilão Maior', attackType: 'ranged', attackName: 'Banho de Sangue', abilities: ['splash'], abilityText: 'Também pode atingir qualquer número de Inimigos Perto do alvo.',
     levels: { '': [5, 7, 0, 3, 1, 0, 4], '2': [7, 8, 0, 3, 1, 0, 4], '4': [8, 9, 2, 3, 1, 0, 5], '6': [13, 0, 4, 4, 1, 0, 5] } },
 };
+// Beyond the Grave (Livro de Campanha p.29-31). As fichas não vêm no livro: valores no padrão dos Monstros da caixa básica.
+Object.assign(MON_BASE, {
+  esqueleto: { name: 'Esqueleto', abbr: 'ES', category: 'Lacaio Menor', attackType: 'melee', attackName: 'Osso Afiado', abilities: [], abilityText: 'Ossos blindados: tem 1 dado de Defesa.',
+    levels: { '': [2, 3, 1, 1, 1, 0, 2], '2': [3, 4, 1, 1, 1, 0, 3], '4': [4, 5, 1, 1, 1, 0, 3], '6': [5, 6, 1, 1, 1, 0, 4] } },
+  zumbi_arremessador: { name: 'Zumbi Arremessador', abbr: 'ZA', category: 'Lacaio Menor', attackType: 'ranged', attackName: 'Machado Voador', abilities: [], abilityText: '',
+    levels: { '': [2, 3, 0, 1, 1, 0, 2], '2': [3, 4, 0, 1, 1, 0, 3], '4': [4, 5, 0, 1, 1, 0, 3], '6': [5, 6, 0, 1, 1, 0, 4] } },
+  zumbi_retalhador: { name: 'Zumbi Retalhador', abbr: 'ZR', category: 'Lacaio Maior', attackType: 'melee', attackName: 'Retalhar', abilities: ['critExtra'], abilityText: 'Cada ✷ causa 1 acerto adicional.',
+    levels: { '': [4, 5, 0, 2, 1, 0, 3], '2': [5, 6, 0, 2, 1, 0, 4], '4': [6, 7, 0, 2, 1, 0, 4], '6': [8, 8, 0, 2, 1, 0, 5] } },
+  fantasma: { name: 'Fantasma', abbr: 'FA', category: 'Lacaio Maior', attackType: 'melee', attackName: 'Toque Gélido', abilities: ['ghost'],
+    abilityText: 'Fantasma: atravessa paredes, portas e Espaços bloqueados; os Espaços ao lado dele contam como Perto mesmo com parede.',
+    levels: { '': [3, 5, 0, 2, 1, 0, 3], '2': [4, 6, 0, 2, 1, 0, 3], '4': [5, 7, 0, 2, 1, 0, 4], '6': [6, 8, 0, 2, 1, 0, 5] } },
+  necromante: { name: 'Necromante', abbr: 'NE', category: 'Lacaio Maior', attackType: 'ranged', attackName: 'Canto Macabro', abilities: ['raise'],
+    abilityText: 'Erguer os Mortos: antes de atacar, traz de volta o primeiro Monstro do Tabuleiro de Entrada para Perto dele.',
+    levels: { '': [3, 5, 0, 2, 1, 0, 3], '2': [4, 6, 0, 2, 1, 0, 3], '4': [5, 7, 1, 2, 1, 0, 4], '6': [6, 8, 1, 2, 1, 0, 4] } },
+  ivan: { name: 'Ivan', abbr: 'IV', category: 'Vilão Menor', attackType: 'melee', attackName: 'Arranca-Cérebro', abilities: ['critExhaust'], abilityText: 'Cada ✷ no ataque exausta uma carta de Ataque do alvo.',
+    levels: { '': [4, 6, 1, 3, 2, 0, 4], '2': [5, 7, 1, 3, 2, 0, 4], '4': [6, 8, 2, 3, 2, 0, 5], '6': [8, 8, 2, 3, 2, 0, 5] } },
+  frank: { name: 'Frank', abbr: 'FK', category: 'Vilão Menor', attackType: 'melee', attackName: 'Abraço Esmagador', abilities: ['daze'], abilityText: 'Se causar Ferimento, o alvo fica Atordoado.',
+    levels: { '': [6, 7, 1, 3, 1, 0, 4], '2': [7, 8, 1, 3, 1, 0, 5], '4': [8, 9, 2, 3, 1, 0, 5], '6': [9, 9, 2, 3, 1, 0, 6] } },
+  dr_spider: { name: 'Dr. Spider', abbr: 'DS', category: 'Vilão Menor', attackType: 'ranged', attackName: 'Experimento Instável', abilities: ['banish'],
+    abilityText: 'Banimento: se causar Ferimento, o alvo vai para o Tabuleiro de Entrada (com os Ferimentos e marcadores).',
+    levels: { '': [4, 6, 1, 3, 2, 0, 4], '2': [5, 7, 1, 3, 2, 0, 4], '4': [6, 8, 1, 3, 2, 0, 5], '6': [8, 8, 2, 3, 2, 0, 5] } },
+  // Reservas de Comida (Abatedouro): marcador atacável como se fosse um personagem; um ✷ o destrói
+  reserva: { name: 'Reserva de Comida', abbr: 'RC', category: 'Lacaio Menor', attackType: 'melee', attackName: '—', abilities: ['object'],
+    abilityText: 'Marcador de Missão: ataque-o como um personagem; se o ataque rolar algum ✷, ele é destruído. Não reage nem ocupa o Espaço.',
+    levels: { '': [99, 0, 0, 0, 0, 0, 0], '2': [99, 0, 0, 0, 0, 0, 0], '4': [99, 0, 0, 0, 0, 0, 0], '6': [99, 0, 0, 0, 0, 0, 0] } },
+  rei_pavoroso: { name: 'Rei Pavoroso', abbr: 'RP', category: 'Vilão Maior', attackType: 'melee', attackName: 'Lâmina do Além', abilities: ['huge', 'shove', 'banish'],
+    abilityText: 'Enorme: ocupa o Espaço inteiro (bloqueia Inimigos e a Linha de Visão). Empurrão: entra em Espaços ocupados e põe quem está lá num Espaço Perto. Banimento: se causar Ferimento, o alvo vai para o Tabuleiro de Entrada.',
+    levels: { '': [7, 8, 2, 4, 2, 0, 5], '2': [9, 9, 2, 4, 2, 0, 5], '4': [11, 0, 3, 4, 2, 0, 6], '6': [14, 0, 3, 4, 2, 0, 6] } },
+} satisfies Record<string, MonBase>);
 const LEVEL_LABEL: Record<string, string> = { '': '1', '2': '2-3', '4': '4-5', '6': '6' };
 
 export const MONSTERS: Record<string, MonsterDef> = {};
