@@ -166,21 +166,22 @@ export class BattlePanel {
     this.prepTarget = targetId;
     this.carry = null;
     this.onCancel = onCancel;
-    const usable = h.cards.filter(c => !c.exhausted && g.canCardHit(h, c, h.cell!, t));
+    const pool = g.attackCardPool(h);
+    const usable = pool.filter(c => !c.exhausted && g.canCardHit(h, c, h.cell!, t));
     let sel = usable.find(c => c.uid === preselect)?.uid ?? usable[0]?.uid ?? null;
     let sacrifice = false;
     const boosts = new Set<string>();
     const render = () => {
-      const card = h.cards.find(c => c.uid === sel);
+      const card = pool.find(c => c.uid === sel);
       const avail = card ? [...g.boostsFor(h, card), ...g.optionalPerms(h)] : [];
       for (const b of [...boosts]) if (!avail.some(x => x.uid === b)) boosts.delete(b);
       const prev = card ? g.attackDicePreview(h, card, t, [...boosts]) : null;
-      const pierce = !!card && g.ab(h) === 'magia_perfurante' && !!CARDS[card.defId].magic;
-      const defDice = pierce ? 0 : g.defenseDice(t, h);
+      const pierce = !!card && g.piercing(h, card);
+      const defDice = pierce ? 0 : g.defenseDice(t, h, card ? CARDS[card.defId].attackType : undefined);
       this.el.innerHTML = `<div class="bt-box">
         <div class="bt-head"><span class="bt-reason">Batalha</span><span class="bt-title">Escolha a arma</span><button class="bt-x" title="Cancelar (Esc)">✕</button></div>
         <div class="bt-arena">${this.fighterHtml(h, 'left', h.wounds)}<div class="bt-vs">VS</div>${this.fighterHtml(t, 'right', t.wounds)}</div>
-        <div class="bt-weapons">${h.cards.filter(c => CARDS[c.defId].kind === 'attack').map(c => {
+        <div class="bt-weapons">${pool.map(c => {
           const d = CARDS[c.defId];
           const can = usable.includes(c);
           const why = c.exhausted ? 'Exaustada' : !can ? (d.fx.astral ? 'Alvo não está Perto de um Aliado' : d.attackType === 'melee' ? 'Alvo não está Perto' : 'Sem Linha de Visão') : '';

@@ -33,6 +33,15 @@ NAMES = {
     'sister-of-pain': 'irma_dor', 'sister-of-pleasure': 'irma_prazer',
     'schmetterling': 'troll', 'bullroarer': 'minotauro', 'lord-fang': 'lorde_presas',
 }
+# Heróis extras (ref/modelos/extra/<nome>.jpg) -> 'x_<nome>'; ficam no manifesto como 'lazy' (o jogo carrega só quando usa)
+EXTRA_DIR = os.path.join(SRC, 'extra')
+LAZY = set()
+if os.path.isdir(EXTRA_DIR):
+    for f in sorted(os.listdir(EXTRA_DIR)):
+        if f.endswith('.jpg'):
+            NAMES['extra/' + f[:-4]] = 'x_' + f[:-4].replace('-', '_')
+            LAZY.add('x_' + f[:-4].replace('-', '_'))
+
 # altura do corpo relativa a um Herói comum (1.0)
 SIZE = {
     'orc': 1.22, 'goblin': 0.86, 'espetado': 0.9, 'diva': 1.0, 'grom': 1.04, 'johan': 1.0, 'kanga': 1.0,
@@ -168,6 +177,8 @@ def build(lineup_path=None):
                 entry['top'][d] = round(top * scale / canvas.height, 4)
             lineup.append((cid, side, canvas, feet_s, top * scale))
             print(f'{cid:12s} {side:5s} caixa {pose.size} corpo {top}->{feet} escala {scale:.3f} png {canvas.size}')
+        if cid in LAZY:
+            entry['lazy'] = True
         if cid in FACE:
             fx_, fy_, fs_ = FACE[cid]
             entry['face'] = {'se': [fx_, fy_, fs_], 'sw': [round(1 - fx_, 4), fy_, fs_]}  # FACE foi medido na pose 'se' (espelhada)

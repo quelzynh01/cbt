@@ -177,13 +177,23 @@ export class Renderer {
     this.canvas.style.height = `${window.innerHeight}px`;
   }
 
-  /** Ponto do mundo no centro da tela. */
-  viewCenter(): Pt { return this.screenToWorld(window.innerWidth / 2, window.innerHeight / 2); }
+  /** Área livre do tabuleiro (sem as barras de botões do celular): --safe-top/bottom/left/right no CSS. */
+  view(): { w: number; h: number; cx: number; cy: number } {
+    const st = getComputedStyle(document.documentElement);
+    const v = (k: string) => parseFloat(st.getPropertyValue(k)) || 0;
+    const t = v('--safe-top'), b = v('--safe-bottom'), l = v('--safe-left'), r = v('--safe-right');
+    const W = window.innerWidth, H = window.innerHeight;
+    const w = Math.max(120, W - l - r), h = Math.max(120, H - t - b);
+    return { w, h, cx: l + w / 2, cy: t + h / 2 };
+  }
+
+  /** Ponto do mundo no centro da área livre. */
+  viewCenter(): Pt { const v = this.view(); return this.screenToWorld(v.cx, v.cy); }
 
   /** Desliza a câmera até deixar o ponto do mundo (wx, wy) no centro da tela. */
   glideTo(wx: number, wy: number, zoom = this.cam.zoom) {
-    const w = window.innerWidth, h = window.innerHeight;
-    this.camGoal = { zoom, x: w / 2 - wx * zoom, y: h / 2 - wy * zoom };
+    const v = this.view();
+    this.camGoal = { zoom, x: v.cx - wx * zoom, y: v.cy - wy * zoom };
   }
 
   /** Desliza a câmera até os Espaços (sem mudar o zoom). */
@@ -200,13 +210,14 @@ export class Renderer {
   /** Mostra o mapa inteiro. */
   fit() {
     this.camGoal = null;
-    const w = window.innerWidth, h = window.innerHeight;
+    const v = this.view();
+    const small = v.w < 700;
     const tl = g2s(0, 9), tr = g2s(9, 0), top = g2s(0, 0), bot = g2s(9, 9);
-    const mapW = tr.x - tl.x + 120, mapH = bot.y - top.y + 220;
-    this.cam.zoom = Math.max(0.15, Math.min(1.25, Math.min((w - 120) / mapW, (h - 150) / mapH)));
+    const mapW = tr.x - tl.x + (small ? 20 : 120), mapH = bot.y - top.y + (small ? 120 : 220);
+    this.cam.zoom = Math.max(0.15, Math.min(1.25, Math.min((v.w - (small ? 12 : 120)) / mapW, (v.h - (small ? 20 : 150)) / mapH)));
     const cx = (tl.x + tr.x) / 2, cy = (top.y + bot.y) / 2 - 20;
-    this.cam.x = w / 2 - cx * this.cam.zoom;
-    this.cam.y = h / 2 - cy * this.cam.zoom;
+    this.cam.x = v.cx - cx * this.cam.zoom;
+    this.cam.y = v.cy - cy * this.cam.zoom;
   }
 
   flash: { cells: Cell[]; dest: Cell[]; t0: number } | null = null;
@@ -228,22 +239,23 @@ export class Renderer {
     const pts = cells.flatMap(c => [g2s(c.c, c.r), g2s(c.c + 1, c.r + 1), g2s(c.c + 1, c.r), g2s(c.c, c.r + 1)]);
     const x0 = Math.min(...pts.map(p => p.x)), x1 = Math.max(...pts.map(p => p.x));
     const y0 = Math.min(...pts.map(p => p.y)) - 120, y1 = Math.max(...pts.map(p => p.y));
-    const w = window.innerWidth, h = window.innerHeight;
-    const z = Math.max(0.15, Math.min(this.cam.zoom, (w - 640) / Math.max(1, x1 - x0), (h - 260) / Math.max(1, y1 - y0)));
+    const v = this.view();
+    const padX = v.w < 700 ? 30 : 640, padY = v.w < 700 ? 60 : 260;
+    const z = Math.max(0.15, Math.min(this.cam.zoom, (v.w - padX) / Math.max(1, x1 - x0), (v.h - padY) / Math.max(1, y1 - y0)));
     this.cam.zoom = z;
-    this.cam.x = w / 2 - ((x0 + x1) / 2) * z;
-    this.cam.y = h / 2 + 20 - ((y0 + y1) / 2) * z;
+    this.cam.x = v.cx - ((x0 + x1) / 2) * z;
+    this.cam.y = v.cy + 20 - ((y0 + y1) / 2) * z;
   }
 
   /** Aproxima a câmera de um conjunto de Espaços (ex.: Área Inicial do jogador). */
   focus(cells: Cell[], zoom = 0.6) {
     this.camGoal = null;
-    const w = window.innerWidth, h = window.innerHeight;
+    const v = this.view();
     const pts = cells.map(c => g2s(c.c + 0.5, c.r + 0.5));
     const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length, cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
     this.cam.zoom = zoom;
-    this.cam.x = w / 2 - cx * zoom;
-    this.cam.y = h / 2 - (cy - 40) * zoom;
+    this.cam.x = v.cx - cx * zoom;
+    this.cam.y = v.cy - (cy - 40) * zoom;
   }
 
   zoomAt(sx: number, sy: number, factor: number) {

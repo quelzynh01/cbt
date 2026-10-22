@@ -12,7 +12,7 @@ function paint() {
   if (!el) return;
   const p = total ? Math.min(1, done / total) : 0;
   (el.querySelector('.ld-bar i') as HTMLElement).style.width = `${Math.round(p * 100)}%`;
-  (el.querySelector('.ld-txt') as HTMLElement).textContent = `Carregando personagens, marcadores, dados e sons… ${done}/${total}`;
+  (el.querySelector('.ld-txt') as HTMLElement).textContent = `Carregando… ${done}/${total}`;
 }
 
 export function showLoading() {

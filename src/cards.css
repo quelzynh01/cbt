@@ -181,3 +181,7 @@
 .ic-row .ic-rr { width: 32px; height: 32px; }
 .acard.hero .ac-text.has-row { gap: 2px; padding-top: 4px; padding-bottom: 4px; }
 .acard.hero .ac-text.has-row p { font-size: 11px; line-height: 1.2; }
+
+/* arte do personagem ainda carregando */
+canvas[data-art] { transition: opacity .25s; }
+canvas[data-art].art-wait { opacity: 0; }

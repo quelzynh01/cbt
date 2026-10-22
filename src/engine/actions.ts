@@ -9,6 +9,8 @@ export type Action =
   | { type: 'attack'; cardUid: string; targetId: string; secondaryId?: string; sacrifice?: boolean; boosts?: string[] }
   | { type: 'token'; tokenId: string }
   | { type: 'card'; heroId: string; cardUid: string; target?: string; cell?: Cell }
+  /** Habilidade do Herói usada como ação (Heróis extras). */
+  | { type: 'power'; heroId: string; target?: string; cell?: Cell }
   | { type: 'rest'; opts?: RestOptions }
   | { type: 'end' }
   | { type: 'vengeance'; dest: Cell | null; attack: boolean }
@@ -36,6 +38,7 @@ export function applyAction(g: Game, by: GuildId, a: Action): boolean {
     case 'attack': return g.attack(a.cardUid, a.targetId, a.secondaryId, !!a.sacrifice, a.boosts ?? []);
     case 'token': return g.useToken(a.tokenId);
     case 'card': return g.useCard(a.heroId, a.cardUid, a.target, a.cell);
+    case 'power': return g.usePower(a.heroId, a.target, a.cell);
     case 'rest': return g.rest(a.opts ?? {});
     case 'end': return g.endTurn();
   }

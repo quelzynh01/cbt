@@ -977,7 +977,7 @@ export async function preloadArt(onEach?: () => void, expect?: (n: number) => vo
     img.onerror = () => { onEach?.(); resolve(); };
     img.src = `${import.meta.env.BASE_URL}portraits/${id}.webp`;
   })));
-  await loadSprites(onEach, expect);
+  await loadSprites();
   await faces;
   artVersion++;
 }
@@ -985,26 +985,53 @@ export async function preloadArt(onEach?: () => void, expect?: (n: number) => vo
 /** Retratos (quadradinhos) dos personagens: public/portraits/<id>.webp (tools/build_portraits.py). */
 const portraits = new Map<string, HTMLImageElement>();
 
-async function loadSprites(onEach?: () => void, expect?: (n: number) => void): Promise<void> {
+type Entry = string[] | { dirs: string[]; ext?: string; lazy?: boolean; feet?: Record<string, number>; top?: Record<string, number>; face?: Record<string, number[]> };
+let manifest: Record<string, Entry> = {};
+const lazyLoading = new Map<string, Promise<void>>();
+
+/** Carrega a arte (sprites das 4 direções e, se faltar, o retrato) dos personagens que ainda não foram carregados.
+ *  Nada de sprite é carregado no início: cada personagem só vem quando entra numa partida ou aparece numa carta. */
+export function ensureArt(ids: string[], onEach?: () => void, expect?: (n: number) => void): Promise<void> {
+  const jobs: Promise<void>[] = [];
+  const fresh: Promise<void>[] = [];
+  for (const id of new Set(ids.map(artId))) {
+    const e = manifest[id];
+    if (!e) continue;
+    let p = lazyLoading.get(id);
+    if (!p) {
+      const dirs = Array.isArray(e) ? e : e.dirs;
+      const face = !portraits.has(id) && !Array.isArray(e) && !!e.lazy;
+      expect?.(dirs.length + (face ? 1 : 0));
+      p = Promise.all([
+        ...dirs.map(d => new Promise<void>(resolve => {
+          if (!Array.isArray(e)) meta.set(`${id}_${d}`, { feet: e.feet?.[d] ?? 1, top: e.top?.[d] ?? 0, face: e.face?.[d] });
+          const img = new Image();
+          img.onload = () => { images.set(`${id}_${d}`, img); onEach?.(); resolve(); };
+          img.onerror = () => { onEach?.(); resolve(); };
+          img.src = `${import.meta.env.BASE_URL}sprites/${id}_${d}.${Array.isArray(e) ? 'png' : e.ext ?? 'png'}`;
+        })),
+        ...(face ? [new Promise<void>(resolve => {
+          const img = new Image();
+          img.onload = () => { portraits.set(id, img); onEach?.(); resolve(); };
+          img.onerror = () => { onEach?.(); resolve(); };
+          img.src = `${import.meta.env.BASE_URL}portraits/${id}.webp`;
+        })] : []),
+      ]).then(() => undefined);
+      lazyLoading.set(id, p);
+      fresh.push(p);
+    }
+    jobs.push(p);
+  }
+  if (fresh.length) Promise.all(fresh).then(() => { cache.clear(); artVersion++; });
+  return Promise.all(jobs).then(() => undefined);
+}
+
+/** Só o manifesto: os sprites vêm depois, sob demanda (ensureArt). */
+async function loadSprites(): Promise<void> {
   try {
     const res = await fetch(`${import.meta.env.BASE_URL}sprites/manifest.json`, { cache: 'no-cache' });
     if (!res.ok) return;
-    type Entry = string[] | { dirs: string[]; ext?: string; feet?: Record<string, number>; top?: Record<string, number>; face?: Record<string, number[]> };
-    const man = (await res.json()) as Record<string, Entry>;
-    const jobs: Promise<void>[] = [];
-    expect?.(Object.values(man).reduce((n, e) => n + (Array.isArray(e) ? e : e.dirs).length, 0));
-    for (const [id, e] of Object.entries(man)) for (const d of Array.isArray(e) ? e : e.dirs) {
-      if (!Array.isArray(e)) meta.set(`${id}_${d}`, { feet: e.feet?.[d] ?? 1, top: e.top?.[d] ?? 0, face: e.face?.[d] });
-      jobs.push(new Promise(resolve => {
-        const img = new Image();
-        img.onload = () => { images.set(`${id}_${d}`, img); onEach?.(); resolve(); };
-        img.onerror = () => { onEach?.(); resolve(); };
-        img.src = `${import.meta.env.BASE_URL}sprites/${id}_${d}.${Array.isArray(e) ? 'png' : e.ext ?? 'png'}`;
-      }));
-    }
-    await Promise.all(jobs);
-    cache.clear();
-    artVersion++;
+    manifest = (await res.json()) as Record<string, Entry>;
   } catch { /* sem manifesto: só arte procedural */ }
 }
 

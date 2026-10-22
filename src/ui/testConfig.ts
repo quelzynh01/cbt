@@ -16,6 +16,8 @@ export interface TestConfig {
   cards: Record<string, string[]>;
   /** Configurações da partida: limite de 8 dados de ataque e 6 de defesa. */
   diceCap?: boolean;
+  /** Escolheu algum Herói extra: a IA também sorteia entre todos os Heróis. */
+  allHeroes?: boolean;
 }
 
 const STORE = 'cbt.test';
@@ -46,7 +48,7 @@ export function normalizeTestConfig(c: Partial<TestConfig>): TestConfig {
   for (const h of ALL_HEROES) if (heroes.length < 3 && !heroes.includes(h)) heroes = [...heroes, h];
   const gear = distributeStartingGear(heroes);
   const cards = Object.fromEntries(heroes.map(h => [h, (c.cards?.[h] ?? gear[h]).filter(id => CARDS[id]).slice(0, slotsFor((c.cards?.[h] ?? gear[h]).filter(id => CARDS[id])))]));
-  return { mapId, teams, heroes, cards, ...(c.diceCap ? { diceCap: true } : {}) };
+  return { mapId, teams, heroes, cards, ...(c.diceCap ? { diceCap: true } : {}), ...(heroes.some(h => HEROES[h].extra) ? { allHeroes: true } : {}) };
 }
 
 export function loadTestConfig(): TestConfig {

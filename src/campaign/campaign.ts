@@ -1,5 +1,5 @@
 import { CARDS, CURSES, curseDeck, upgradeDeck } from '../engine/cards';
-import { ALL_HEROES, HEROES, distributeStartingGear, levelForScenario, setGuildNames, teamName } from '../engine/data';
+import { HEROES, distributeStartingGear, heroPool, levelForScenario, setGuildNames, teamName } from '../engine/data';
 import type { Game } from '../engine/game';
 import { CAMPAIGN, MAPS } from '../engine/maps';
 import type { GuildId } from '../engine/types';
@@ -91,6 +91,8 @@ export interface CampaignState {
   aiLevel?: AILevel;
   /** Limite de dados (Configurações da partida): no máximo 8 dados de ataque e 6 de defesa por rolagem. Sem isso, ilimitado. */
   diceCap?: boolean;
+  /** Configurações da partida: "Permitir Todos os Heróis" (os extras entram no recrutamento). Sem isso, só os Core Heroes. */
+  allHeroes?: boolean;
 }
 
 // ------------------------------------------------------------------ persistência
@@ -115,14 +117,14 @@ function shuffled<T>(c: CampaignState, a: T[]): T[] {
 }
 
 // ------------------------------------------------------------------ criação
-export function newCampaign(opponents: number, name?: string, aiLevel: AILevel = 'normal', diceCap = false, pickOne = false): CampaignState {
+export function newCampaign(opponents: number, name?: string, aiLevel: AILevel = 'normal', diceCap = true, pickOne = true, allHeroes = false): CampaignState {
   const ids: GuildId[] = ['azul', 'vermelho', 'verde', 'laranja'];
-  const c: CampaignState = { version: 1, guilds: [], played: [], chooser: 'azul', phase: 'setup', seed: (Date.now() ^ (Math.random() * 1e9)) | 0, elapsed: 0, aiLevel, diceCap, ...(pickOne ? { pickOne } : {}) };
+  const c: CampaignState = { version: 1, guilds: [], played: [], chooser: 'azul', phase: 'setup', seed: (Date.now() ^ (Math.random() * 1e9)) | 0, elapsed: 0, aiLevel, diceCap, ...(pickOne ? { pickOne } : {}), ...(allHeroes ? { allHeroes } : {}) };
   for (let i = 0; i <= opponents; i++) c.guilds.push({ id: ids[i], controller: i === 0 ? 'human' : 'ai', heroes: [], inventory: {}, saved: 0, titles: [], curses: {}, ...(i === 0 && name?.trim() ? { name: name.trim().slice(0, 20) } : {}) });
   useCampaignNames(c);
   // Recrutamento de Heróis (p.7): cada jogador recebe uma mão, escolhe 1 e passa o resto para a esquerda.
   const size = c.guilds.length <= 3 ? 4 : 3;
-  const pool = shuffled(c, ALL_HEROES);
+  const pool = shuffled(c, heroPool(allHeroes));
   c.setup = { step: 'draft', round: 0, hands: Object.fromEntries(c.guilds.map(g => [g.id, pool.splice(0, size)])) };
   return c;
 }

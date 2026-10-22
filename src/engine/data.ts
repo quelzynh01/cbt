@@ -1,4 +1,5 @@
-import type { DieFace, GuildId, HeroDef, MonsterDef, TokenType } from './types';
+import type { DieFace, GuildId, HeroAbility, HeroDef, MonsterDef, TokenType } from './types';
+import { EXTRA_HEROES } from './extraHeroes';
 
 // ---------------------------------------------------------------------------
 // Heróis (Livro de Regras p.8 — cartas de Grom, Maya e Zazu)
@@ -66,8 +67,66 @@ export const HEROES: Record<string, HeroDef> = {
   },
 };
 
-/** Ordem da galeria de personagens. */
+/** Ordem da galeria de personagens (Core Heroes). */
 export const ALL_HEROES = ['grom', 'maya', 'zazu', 'vapor', 'espetado', 'diva', 'casacaverde', 'hobsbawm', 'johan', 'kanga', 'escarlate', 'seth'];
+export const CORE_HEROES = ALL_HEROES;
+
+// ---------------------------------------------------------------------------
+// Heróis extras (ref/wiki/extra-heroes.csv): id 'x_<nome>'. Jogáveis com "Permitir Todos os Heróis".
+// ---------------------------------------------------------------------------
+const EXTRA_ABILITY: Record<string, HeroAbility> = {
+  black_newt: 'cheiro_sangue',
+  bob: 'zas_tras',
+  bowie: 'bate_corre',
+  chooloo: 'ataque_mental',
+  elysia: 'olhar_petrificante',
+  frowny_faceless: 'feitico_tenaz',
+  hitch: 'suga_mente',
+  king_of_thieves: 'cobica',
+  koba: 'teleporte',
+  lilith: 'ritual_sangue',
+  lord_fang: 'chamado',
+  lydia: 'lamina_sugadora',
+  monkey_king: 'trapaceiro',
+  monkey_queen: 'macaco_ve',
+  montoya: 'mestre_espadachim',
+  morgan: 'aura_mistica',
+  pigsy: 'hora_lanche',
+  pluck: 'tiro_explosivo',
+  prince_aaron: 'presenca',
+  queen_of_beggars: 'doces_travessuras',
+  serious_faceless: 'feitico_pressa',
+  smiley_faceless: 'feitico_trapaceiro',
+  sonja: 'frenesi',
+  sting: 'paria',
+  surprised_faceless: 'feitico_banshee',
+  the_heartless: 'ataque_cardiaco',
+  the_nameless: 'mente_brilhante',
+  tomrick: 'sorte_apostador',
+  viktor: 'cacador',
+  aeric: 'resistencia_panda',
+  brenna: 'relampago',
+  farfalla: 'efeito_borboleta',
+  haldor: 'contagem_corpos',
+  hassan: 'encantado',
+  leeroy: 'lobo_solitario',
+  mchammer: 'briga',
+  mittens: 'garras',
+  nibbles: 'devorar',
+  tiaret: 'arremesso_selvagem',
+  yun: 'implacavel',
+  zahra: 'acrobata',
+};
+for (const x of EXTRA_HEROES) {
+  const id = `x_${x.id}`;
+  HEROES[id] = {
+    id, name: x.name, nameEn: x.name, title: 'Herói Extra', extra: true,
+    defense: x.def, hp: x.hp, ability: EXTRA_ABILITY[x.id], abilityName: x.ability, abilityText: x.text,
+  };
+}
+export const EXTRA_HERO_IDS = EXTRA_HEROES.map(x => `x_${x.id}`);
+/** Heróis que podem ser recrutados (Configurações da partida: só os Core ou todos). */
+export function heroPool(allHeroes = false): string[] { return allHeroes ? [...ALL_HEROES, ...EXTRA_HERO_IDS] : ALL_HEROES.slice(); }
 
 export const HERO_ORDER = ['grom', 'maya', 'zazu'];
 /** Guilda padrão do jogador no Modo Teste (o 1º é selecionado ao começar). */

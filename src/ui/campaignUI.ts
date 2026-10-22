@@ -106,19 +106,46 @@ export class CampaignUI {
         <p>Entre os cenários: <b>Maldições Mortais</b>, <b>Fase de Melhorias</b> e <b>Títulos</b>. O vencedor de cada cenário escolhe o próximo.</p>
         <label class="lb-field">Nome da sua Guilda <input id="cp-name" maxlength="20" placeholder="Azul (opcional)"/></label>
         <label class="lb-field">Dificuldade da IA <select id="cp-ai"><option value="normal">Normal</option><option value="hard" ${getSettings().ai === 'hard' ? 'selected' : ''}>Difícil</option></select></label>
-        <h4 class="cp-opt-h">⚙️ Configurações da partida</h4>
-        <label class="set-opt"><input type="checkbox" id="cp-cap"/> <b>Limite de dados</b> — no máximo 8 dados de ataque e 6 de defesa por rolagem (contando críticos e rerrolagens), como os dados físicos da caixa. Sem marcar, os dados são ilimitados.</label>
-        <label class="set-opt"><input type="checkbox" id="cp-one"/> <b>Pegar 1 carta</b> — na Fase de Melhorias cada um pega <b>1 carta</b> e passa o resto (6 rodadas), em vez de 2 cartas (3 rodadas).</label>
+        <div class="cp-cfgrow"><span class="lb-sum" id="cp-cfgsum"></span><button id="cp-cfg">⚙️ Configurações da partida</button></div>
         <label class="lb-field">Adversários (IA) <select id="cp-opp"><option value="1">1</option><option value="2">2</option><option value="3" selected>3</option></select></label>
         <button class="primary cp-big" id="cp-start">🏰 Começar campanha</button>
       </div>`);
+    const cfg = this.cfg;
+    const sum = () => { (this.page.querySelector('#cp-cfgsum') as HTMLElement).textContent = [cfg.diceCap ? 'Limite de dados' : 'Dados ilimitados', cfg.pickOne ? 'Pegar 1 carta' : 'Pegar 2 cartas', cfg.allHeroes ? 'Todos os Heróis' : 'Apenas Core Heroes'].join(' · '); };
+    sum();
+    (this.page.querySelector('#cp-cfg') as HTMLElement).onclick = () => this.matchSettings(sum);
     (this.page.querySelector('#cp-start') as HTMLElement).onclick = () => {
       const n = Number((this.page.querySelector('#cp-opp') as HTMLSelectElement).value);
-      this.c = newCampaign(n, (this.page.querySelector('#cp-name') as HTMLInputElement).value, (this.page.querySelector('#cp-ai') as HTMLSelectElement).value as 'normal' | 'hard', (this.page.querySelector('#cp-cap') as HTMLInputElement).checked, (this.page.querySelector('#cp-one') as HTMLInputElement).checked);
+      this.c = newCampaign(n, (this.page.querySelector('#cp-name') as HTMLInputElement).value, (this.page.querySelector('#cp-ai') as HTMLSelectElement).value as 'normal' | 'hard', cfg.diceCap, cfg.pickOne, cfg.allHeroes);
       this.c.chooser = human(this.c).id;
       this.save();
       this.setupFlow();
     };
+  }
+
+  /** Configurações da partida da nova campanha (padrão: Limite de dados, Pegar 1 carta e Apenas Core Heroes). */
+  private cfg = { diceCap: true, pickOne: true, allHeroes: false };
+
+  /** Janela "Configurações da partida" (igual à da sala online). */
+  private matchSettings(done: () => void) {
+    document.getElementById('matchcfg')?.remove();
+    const el = document.createElement('div');
+    el.id = 'matchcfg';
+    const cfg = this.cfg;
+    el.innerHTML = `<div class="mc-cfg">
+        <div class="gd-title">⚙️ Configurações da partida</div>
+        <label class="mcf-row">Heróis <select id="mc-heroes"><option value="core">⭐ Apenas Core Heroes</option><option value="all" ${cfg.allHeroes ? 'selected' : ''}>🌟 Permitir Todos os Heróis</option></select></label>
+        <label class="set-opt"><input type="checkbox" id="mc-cap" ${cfg.diceCap ? 'checked' : ''}/> <b>Limite de dados</b> — no máximo 8 dados de ataque e 6 de defesa por rolagem (contando críticos e rerrolagens), como os dados físicos da caixa. Sem marcar, ilimitado.</label>
+        <label class="set-opt"><input type="checkbox" id="mc-one" ${cfg.pickOne ? 'checked' : ''}/> <b>Pegar 1 carta</b> — na Fase de Melhorias cada um pega <b>1 carta</b> e passa o resto (6 rodadas), em vez de 2 cartas (3 rodadas).</label>
+        <div class="gd-btns"><button class="primary" id="mc-ok">✔ Pronto</button></div>
+      </div>`;
+    (el.querySelector('#mc-heroes') as HTMLSelectElement).onchange = e => { cfg.allHeroes = (e.target as HTMLSelectElement).value === 'all'; };
+    (el.querySelector('#mc-cap') as HTMLInputElement).onchange = e => { cfg.diceCap = (e.target as HTMLInputElement).checked; };
+    (el.querySelector('#mc-one') as HTMLInputElement).onchange = e => { cfg.pickOne = (e.target as HTMLInputElement).checked; };
+    const close = () => { el.remove(); done(); };
+    (el.querySelector('#mc-ok') as HTMLElement).onclick = close;
+    el.onpointerdown = e => { if (e.target === el) close(); };
+    document.body.append(el);
   }
 
   /** Preparação: recrutamento, votação e equipamento inicial. */

@@ -16,6 +16,8 @@ export type AIAction =
   | { type: 'move'; cell: Cell }
   | { type: 'attack'; cardUid: string; targetId: string; boosts?: string[]; sacrifice?: boolean }
   | { type: 'token'; tokenId: string }
+  /** Habilidade do Herói usada como ação (Heróis extras). */
+  | { type: 'power'; heroId: string; target?: string; cell?: Cell }
   | { type: 'rest'; opts?: RestOptions }
   | { type: 'end' };
 
@@ -63,6 +65,8 @@ const near = (g: Game, c: Cell) => [c, ...g.board.neighbors(c).filter(n => g.boa
 export class SimpleAI {
   private queue: AIAction[] = [];
   private usedToken = false;
+  /** Herói que já atacou nesta ativação (Caçador pode atacar de novo). */
+  private attackedHero: string | null = null;
   /** Turnos seguidos sem progresso (moedas, Missões, Monstros). Quanto mais, mais agressiva a IA fica. */
   private idle = 0;
   private lastScore = -1;
@@ -90,27 +94,62 @@ export class SimpleAI {
       const tok = this.tokenToUse(g, h);
       if (tok) { this.usedToken = true; return { type: 'token', tokenId: tok.id }; }
     }
+    // habilidades dos Heróis extras (Relâmpago, Ataque Mental) antes do que foi planejado
+    if (h) { const pw = this.powerToUse(g, h); if (pw) return pw; }
     const a = this.queue.shift();
     if (!a) {
-      // Bênção de Hobsbawm: ataque Mágico sem Movimento -> ativa outro Aliado em Linha de Visão
-      if (g.s.blessing || g.s.warCry) {
+      // Bênção de Hobsbawm / Grito de Guerra / Mente Brilhante -> ativa outro Aliado
+      if (g.s.blessing || g.s.warCry || g.s.brightMind) {
         let best: Plan | null = null;
         for (const ally of g.heroesOf(g.currentGuild().id)) {
           if (!g.canBless(ally.id)) continue;
-          const p = this.planHero(g, ally, this.goalDistances(g, ally.guild!, ally));
+          const p = this.planHero(g, ally, this.goalDistances(g, ally.guild!, ally), g.blessKind(ally.id) === 'mind');
           if (p && p.value > 0.5 && (!best || p.value > best.value)) best = p;
         }
         if (best) { this.queue = best.steps.slice(); this.usedToken = false; return { type: 'activate', heroId: best.heroId }; }
       }
+      // Caçador (Viktor): matou o alvo e pode atacar de novo — ataca daqui se valer a pena
+      const act = g.s.activation;
+      if (h?.alive && h.cell && act && !act.attacked && !act.moveOnly && g.ab(h) === 'cacador' && this.attackedHero === h.id) {
+        const atk = this.bestAttack(g, h, h.cell);
+        if (atk && atk.value > 0.3) return this.attackStep(g, h, atk);
+      }
+      this.attackedHero = null;
       return { type: 'end' };
     }
-    if (a.type === 'move' && !g.canMove()) return this.next(g);
+    if (a.type === 'move') {
+      if (!g.canMove() || !h?.cell) return this.next(g);
+      const nd = g.reachable(h, g.s.activation!.mp, h.cell, true).get(key(a.cell));
+      if (!nd || !nd.canEnd) return this.next(g);
+    }
     if (a.type === 'attack') {
       const t = g.unit(a.targetId);
-      const card = h?.cards.find(c => c.uid === a.cardUid);
-      if (!h || !h.alive || !h.cell || !card || card.exhausted || !t.alive || !t.cell || !g.canCardHit(h, card, h.cell, t)) return this.next(g);
+      const card = h ? g.findAttackCard(h, a.cardUid) : undefined;
+      if (!h || !h.alive || !h.cell || g.s.activation?.attacked || !card || card.exhausted || !t.alive || !t.cell || !g.canCardHit(h, card, h.cell, t)) return this.next(g);
+      this.attackedHero = h.id;
     }
     return a;
+  }
+
+  /** Habilidades usadas como ação: Relâmpago (Brenna) e Ataque Mental (Chooloo). */
+  private powerToUse(g: Game, h: Unit): AIAction | null {
+    const info = g.heroPower(h);
+    if (!info?.ok) return null;
+    const ab = g.ab(h);
+    if (ab === 'relampago') {
+      const foes = g.onBoard().filter(u => u.id !== h.id && g.isEnemy(h, u) && h.cell && g.board.isClose(u.cell!, h.cell));
+      const hpLeft = g.maxHp(h) - h.wounds;
+      const finishers = foes.filter(u => g.maxHp(u) - u.wounds <= 1).length;
+      if (hpLeft >= 3 && (foes.length >= 2 || finishers)) return { type: 'power', heroId: h.id };
+      return null;
+    }
+    if (ab === 'ataque_mental') {
+      // atordoa quem vai atacar (sem Defesa) se ele tiver Defesa boa
+      const next = this.queue.find(x => x.type === 'attack') as { targetId: string } | undefined;
+      const t = next && g.powerTargets(h).find(u => u.id === next.targetId);
+      if (t && g.defenseDice(t, h) >= 2) return { type: 'power', heroId: h.id, target: t.id };
+    }
+    return null;
   }
 
   // ------------------------------------------------------------------ poções
@@ -159,8 +198,9 @@ export class SimpleAI {
     return best;
   }
 
-  private planHero(g: Game, h: Unit, goals: Map<string, number>): Plan | null {
-    const nodes = g.reachable(h, 3, h.cell!, true);
+  /** `moveOnly`: ativação só para o Movimento (Mente Brilhante). */
+  private planHero(g: Game, h: Unit, goals: Map<string, number>, moveOnly = false): Plan | null {
+    const nodes = g.reachable(h, g.startMp(h), h.cell!, true);
     const hp = g.maxHp(h) - h.wounds;
     let best: Plan | null = null;
     const consider = (value: number, steps: AIAction[]) => {
@@ -186,12 +226,12 @@ export class SimpleAI {
       const riskPenalty = (risk >= hp ? risk * 4 + 6 : risk * (this.hard ? 1.4 : 1.2)) * (1 - 0.5 * this.aggr);
       const threat = this.hard ? this.heroThreat(g, h, n.cell, hp - Math.min(risk, hp - 0.5)) : 0;
       // Mover e depois atacar
-      const atk = this.bestAttack(g, h, n.cell);
+      const atk = moveOnly ? null : this.bestAttack(g, h, n.cell);
       if (atk) consider(gain + atk.value + pos * 0.3 + finish - riskPenalty - threat, [...moveSteps, this.attackStep(g, h, atk)]);
       consider(gain + pos - startPos + finish - riskPenalty - threat + (moveSteps.length ? 0 : -0.2), moveSteps);
     }
     // Atacar primeiro e depois mover
-    const atk0 = this.bestAttack(g, h, startCell);
+    const atk0 = moveOnly ? null : this.bestAttack(g, h, startCell);
     if (atk0) {
       let bestMove: { v: number; cell: Cell | null } = { v: this.endBonus(g, h, startCell), cell: null };
       for (const n of nodes.values()) {
@@ -292,7 +332,7 @@ export class SimpleAI {
     const guild = g.guild(h.guild!);
     const barrierClosed = !!g.map.barrier && !g.passesBarrier(h);
     try {
-      for (const card of h.cards) {
+      for (const card of g.usableCards(h)) {
         if (card.exhausted) continue;
         const def = CARDS[card.defId];
         if (def.kind !== 'attack') continue;
@@ -301,11 +341,13 @@ export class SimpleAI {
           let dice = g.attackDicePreview(h, card, t, boosts).dice;
           if (g.ab(h) === 'maestria_arco' && def.group === 'Arco') dice += 0.2;
           if (def.fx.critExtra) dice += def.fx.critExtra * 0.2;
-          const pierce = g.ab(h) === 'magia_perfurante' && def.magic;
+          if (g.ab(h) === 'mestre_espadachim' && def.group === 'Espada' && !h.spent) dice += 2;
+          const pierce = g.piercing(h, card);
           const rem = g.maxHp(t) - t.wounds;
-          let exp = Math.max(0, dice * ATK_EXP(def.attackType!) - (pierce ? 0 : g.defenseDice(t, h) * DEF_EXP));
+          const tdef = g.defenseDice(t, h, def.attackType);
+          let exp = Math.max(0, dice * ATK_EXP(def.attackType!) - (pierce ? 0 : tdef * DEF_EXP));
           let killP = Math.max(0, Math.min(1, (exp - rem + 1.2) / 2));
-          if (this.hard) ({ killP, exp } = exactAttack(dice, def.attackType!, pierce ? 0 : g.defenseDice(t, h), rem));
+          if (this.hard) ({ killP, exp } = exactAttack(dice, def.attackType!, pierce ? 0 : tdef, rem));
           let killBonus = 0;
           let retaliation = 0;
           let progress = 0;
@@ -339,7 +381,10 @@ export class SimpleAI {
           killBonus *= 1 + this.aggr;
           // sem Missões contra Jogador (Templo): brigar com Heróis só vale para abrir caminho
           const dmgWeight = t.kind === 'hero' && g.map.pvp === false ? 0.3 : 1;
-          const value = Math.min(exp, rem) * (1 + this.aggr) * dmgWeight + progress + killP * killBonus - retaliation - deathRisk + (def.fx.drain ? Math.min(exp, h.wounds) * 0.6 : 0);
+          const ab = g.ab(h);
+          const selfHeal = def.fx.drain || (ab === 'ritual_sangue' && def.magic) || (ab === 'lamina_sugadora' && ['Espada', 'Machado', 'Lança'].includes(def.group))
+            || (ab === 'devorar' && killP > 0.3);
+          const value = Math.min(exp, rem) * (1 + this.aggr) * dmgWeight + progress + killP * killBonus - retaliation - deathRisk + (selfHeal ? Math.min(exp, h.wounds) * 0.6 : 0);
           if (!best || value > best.value) best = { card, target: t, value, boosts };
         }
       }
@@ -514,9 +559,17 @@ export class SimpleAI {
 export const HERO_TIER: Record<string, number> = {
   maya: 9, seth: 8.5, diva: 8.5, grom: 8, casacaverde: 8, hobsbawm: 7.5,
   escarlate: 7.5, zazu: 7, johan: 7, vapor: 7, espetado: 6.5, kanga: 6.5,
+  // Heróis extras
+  x_the_heartless: 8, x_surprised_faceless: 7.5, x_lilith: 7.5, x_frowny_faceless: 7.5, x_prince_aaron: 7.5, x_sonja: 7.5,
+  x_chooloo: 7, x_the_nameless: 7, x_hassan: 7, x_lydia: 7, x_mittens: 7, x_leeroy: 7, x_aeric: 7, x_smiley_faceless: 7,
+  x_serious_faceless: 7, x_tomrick: 7, x_viktor: 7, x_mchammer: 7, x_haldor: 6.5, x_nibbles: 7, x_black_newt: 6.5,
+  x_bowie: 7, x_pluck: 6.5, x_elysia: 7, x_brenna: 7, x_yun: 6.5, x_sting: 6.5, x_montoya: 7, x_morgan: 6, x_pigsy: 6.5,
+  x_tiaret: 6.5, x_king_of_thieves: 6.5, x_queen_of_beggars: 6, x_zahra: 6, x_koba: 6, x_lord_fang: 6.5, x_monkey_king: 6.5,
+  x_monkey_queen: 6, x_hitch: 6, x_farfalla: 6, x_bob: 6,
 };
-const RANGED = new Set(['maya', 'seth', 'casacaverde', 'hobsbawm', 'johan']);
-const TANK = new Set(['diva', 'grom', 'espetado', 'johan', 'escarlate']);
+const RANGED = new Set(['maya', 'seth', 'casacaverde', 'hobsbawm', 'johan', 'x_bowie', 'x_pluck', 'x_lilith', 'x_surprised_faceless', 'x_frowny_faceless',
+  'x_serious_faceless', 'x_smiley_faceless', 'x_tomrick', 'x_the_nameless', 'x_morgan', 'x_tiaret', 'x_bob', 'x_chooloo']);
+const TANK = new Set(['diva', 'grom', 'espetado', 'johan', 'escarlate', 'x_aeric', 'x_haldor', 'x_mchammer', 'x_nibbles', 'x_sting', 'x_montoya', 'x_the_nameless', 'x_tiaret']);
 
 /** Escolha de Herói no recrutamento: força + equilíbrio da Guilda (alcance e resistência). */
 export function pickHero(hand: string[], have: string[], level: AILevel, rnd: () => number): string {
@@ -535,10 +588,13 @@ export function cardFit(hero: string, id: string): number {
   const d = CARDS[id];
   const ab = HEROES[hero]?.ability;
   if (!d) return 0;
-  if (d.magic) return ab === 'dominio_magia' || ab === 'magia_perfurante' ? 2.2 : ab === 'bencao' ? 1.8 : 0.6;
-  if (d.group === 'Arco') return ab === 'maestria_arco' ? 2.2 : 0.7;
-  if (d.group === 'Espada') return ab === 'arremesso' ? 2 : 1;
-  if (d.kind === 'attack' && d.attackType === 'melee') return ab === 'furia' || ab === 'apunhalar' || ab === 'oportunista' ? 1.4 : 1;
+  const MAGIC = ['dominio_magia', 'magia_perfurante', 'ritual_sangue', 'feitico_tenaz', 'feitico_pressa', 'feitico_trapaceiro', 'feitico_banshee', 'mente_brilhante', 'sorte_apostador', 'aura_mistica', 'zas_tras'];
+  if (d.magic) return MAGIC.includes(ab ?? '') ? 2.2 : ab === 'bencao' ? 1.8 : 0.6;
+  if (d.group === 'Arco') return ab === 'maestria_arco' || ab === 'bate_corre' ? 2.2 : ab === 'tiro_explosivo' ? 1.6 : 0.7;
+  if (d.group === 'Espada') return ab === 'arremesso' || ab === 'ataque_cardiaco' || ab === 'mestre_espadachim' ? 2 : ab === 'lamina_sugadora' ? 1.6 : 1;
+  if ((d.group === 'Lança' || d.group === 'Arremesso') && ab === 'arremesso_selvagem') return 2;
+  if (d.kind === 'attack' && d.attackType === 'ranged') return ab === 'tiro_explosivo' ? 1.6 : 1;
+  if (d.kind === 'attack' && d.attackType === 'melee') return ['furia', 'apunhalar', 'oportunista', 'frenesi', 'contagem_corpos', 'briga', 'lamina_sugadora'].includes(ab ?? '') ? 1.4 : 1;
   if (d.defBonus || d.hpBonus) return HEROES[hero].defense <= 2 ? 1.3 : 1;
   return 1;
 }

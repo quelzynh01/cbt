@@ -1,9 +1,9 @@
 import type { MapDef } from '../engine/board';
 import { EXTRA_HEROES } from '../engine/extraHeroes';
 import { key } from '../engine/board';
-import { ALL_HEROES, CARDS, HEROES, MONSTERS, TEST_HUMAN_HEROES, distributeStartingGear } from '../engine/data';
+import { ALL_HEROES, CARDS, HEROES, MONSTERS, TEST_HUMAN_HEROES, distributeStartingGear, EXTRA_HERO_IDS } from '../engine/data';
 import { CAMPAIGN, MAPS, difficultyBadge, getMap, loadMapId, mapDifficulty, saveMapId } from '../engine/maps';
-import { drawFace } from '../render/chibi';
+import { drawFace, ensureArt } from '../render/chibi';
 import { MAX_SLOTS, TEST_GUILDS, slotsFor, type TestConfig, loadTestConfig, normalizeTestConfig, saveTestConfig } from './testConfig';
 import { GUILDS } from '../engine/data';
 import { ITEM_LEVEL, MONSTER_LEVEL, curseCard, extraHeroCard, heroCard, itemCard, monsterCard, paintCardArt } from './cardview';
@@ -103,6 +103,10 @@ export class MenuPages {
   /** Galeria de Heróis. `onBack` (sala online): escolher os 3 Heróis da sua Guilda. */
   /** Aba dos Heróis na Biblioteca: os do jogo ou os extras (só para ver). */
   private heroSet: 'core' | 'extra' = 'core';
+  /** Aba de Heróis no Modo Teste. */
+  private tsSet: 'core' | 'extra' = 'core';
+  /** Espaço de Herói escolhido no Modo Teste (o próximo Herói tocado vai nele). */
+  private tsSlot = 0;
   showHeroes(onBack?: () => void) {
     if (onBack) { this.back = onBack; this.tab = null; this.picking = true; }
     else if (this.tab) this.picking = false;
@@ -120,7 +124,7 @@ export class MenuPages {
         <div><b>Sua Guilda</b> (sala online) — clique nos cartões para escolher 3 Heróis.</div>
         <div class="mp-slots">${[0, 1, 2].map(i => `<span class="slot">${i + 1}. ${this.guild[i] ? HEROES[this.guild[i]].name : '—'}</span>`).join('')}</div>
       </div>`}
-      ${sub}${extra ? '<p class="muted">Heróis extras: só para conhecer — ainda não dá para jogar com eles.</p>' : ''}
+      ${sub}${extra ? '<p class="muted">Heróis extras: jogáveis com <b>Permitir Todos os Heróis</b> nas Configurações da partida (no Modo Teste, pela aba Extra Heroes).</p>' : ''}
       <div class="hgrid cards3">${cards}</div>`);
     paintCardArt(this.page);
     this.page.querySelectorAll<HTMLElement>('[data-hs]').forEach(b => { b.onclick = () => { this.heroSet = b.dataset.hs as 'core' | 'extra'; this.showHeroes(); }; });
@@ -177,8 +181,13 @@ export class MenuPages {
           <select data-ctl="${i}"><option value="human" ${t.controller === 'human' ? 'selected' : ''}>👤 Você</option><option value="ai" ${t.controller === 'ai' ? 'selected' : ''}>🤖 IA</option></select></div>`).join('')}</div>
         <label class="ts-diff">Dificuldade da IA <select id="ts-ai"><option value="normal" ${getSettings().ai === 'normal' ? 'selected' : ''}>Normal</option><option value="hard" ${getSettings().ai === 'hard' ? 'selected' : ''}>Difícil</option></select></label>
         <p class="muted">${humans === 0 ? 'Todos os times são IA: você assiste à partida.' : humans > 1 ? 'Vários times "Você": jogam neste computador, revezando.' : 'Times "Você" são controlados por você; os outros pela IA.'} Nenhum Herói se repete entre os times.</p></section>
-      <section class="ts-sec ts-wide"><h3>3. Seus Heróis <small>(Time 1 — escolha 3)</small></h3>
-        <div class="ts-heroes">${ALL_HEROES.map(h => { const i = c.heroes.indexOf(h); return `<button class="ts-hero ${i >= 0 ? 'on' : ''}" data-th="${h}">${i >= 0 ? `<span class="pick-badge">${i + 1}</span>` : ''}<canvas width="72" height="72" data-face="${h}"></canvas><b>${HEROES[h].name}</b><small>${HEROES[h].title}</small></button>`; }).join('')}</div></section>
+      <section class="ts-sec ts-wide"><h3>3. Seus Heróis <small>(Time 1)</small></h3>
+        <div class="ts-slots">${[0, 1, 2].map(i => { const h = c.heroes[i]; const d = HEROES[h]; return `<button class="ts-slot ${i === this.tsSlot ? 'sel' : ''}" data-tslot="${i}" title="Escolher quem vai no espaço ${i + 1}">
+          <span class="ts-sn">${i + 1}</span><canvas width="96" height="96" data-face="${h}"></canvas>
+          <span class="ts-si"><b>${d.name}</b><small>${d.title}</small><em>⚡ ${d.abilityName}</em></span>${i === this.tsSlot ? '<span class="ts-swap">trocar ▾</span>' : ''}</button>`; }).join('')}</div>
+        <p class="ts-help">👆 Toque num <b>espaço</b> acima (fica dourado) e depois no <b>Herói</b> que vai nele. As cartas do espaço continuam com o novo Herói.</p>
+        <div class="lib-filter ts-tabs"><button class="${this.tsSet === 'core' ? 'primary' : ''}" data-tset="core">⭐ Core Heroes <small>(${ALL_HEROES.length})</small></button><button class="${this.tsSet === 'extra' ? 'primary' : ''}" data-tset="extra">✨ Extra Heroes <small>(${EXTRA_HERO_IDS.length})</small></button></div>
+        <div class="ts-heroes">${(this.tsSet === 'extra' ? EXTRA_HERO_IDS : ALL_HEROES).map(h => { const i = c.heroes.indexOf(h); return `<button class="ts-hero ${i >= 0 ? 'on' : ''}" data-th="${h}">${i >= 0 ? `<span class="pick-badge">${i + 1}</span>` : ''}<canvas width="72" height="72" data-face="${h}"></canvas><b>${HEROES[h].name}</b><small>${HEROES[h].title}</small></button>`; }).join('')}</div></section>
       <section class="ts-sec ts-wide"><h3>4. Itens <small>(até ${MAX_SLOTS} cartas por Herói)</small></h3>
         <p class="muted">Clique num <b>espaço vazio</b> ou numa <b>carta</b> para escolher qual carta vai nele (qualquer carta do jogo, ou trocar entre Heróis).</p>
         <div class="ts-btnrow"><button id="ts-gear">Equipamento inicial padrão</button><button id="ts-clear">Remover todas as cartas</button></div>
@@ -192,8 +201,11 @@ export class MenuPages {
     closeMapPeek();
     attachMapPeek(this.page);
     this.page.querySelectorAll<HTMLCanvasElement>('canvas[data-face]').forEach(cv => drawFace(cv, cv.dataset.face!, '#3a5a8a'));
+    // retratos dos Heróis extras: desenha de novo quando a arte terminar de carregar
+    if (this.tsSet === 'extra' || c.heroes.some(h => HEROES[h].extra)) void ensureArt(EXTRA_HERO_IDS).then(() => this.page.querySelectorAll<HTMLCanvasElement>('canvas[data-face]').forEach(cv => drawFace(cv, cv.dataset.face!, '#3a5a8a')));
     const save = () => { this.test = normalizeTestConfig(c); saveTestConfig(this.test); saveMapId(this.test.mapId); this.onMapChange(); this.showTestSetup(onStart); };
     (this.page.querySelector('#ts-cap') as HTMLInputElement).onchange = e => { c.diceCap = (e.target as HTMLInputElement).checked; save(); };
+    this.page.querySelectorAll<HTMLElement>('[data-tset]').forEach(b => { b.onclick = () => { this.tsSet = b.dataset.tset as 'core' | 'extra'; this.showTestSetup(onStart); }; });
     (this.page.querySelector('#ts-ai') as HTMLSelectElement).onchange = e => saveSettings({ ...getSettings(), ai: (e.target as HTMLSelectElement).value as 'normal' | 'hard' });
     (this.page.querySelector('#ts-map') as HTMLSelectElement).onchange = e => { c.mapId = (e.target as HTMLSelectElement).value; save(); };
     this.page.querySelectorAll<HTMLElement>('[data-n]').forEach(b => { b.onclick = () => {
@@ -203,17 +215,27 @@ export class MenuPages {
     }; });
     this.page.querySelectorAll<HTMLInputElement>('[data-tn]').forEach(inp => { inp.onchange = () => { c.teams[Number(inp.dataset.tn)].name = inp.value; save(); }; });
     this.page.querySelectorAll<HTMLSelectElement>('[data-ctl]').forEach(s => { s.onchange = () => { c.teams[Number(s.dataset.ctl)].controller = s.value as 'human' | 'ai'; save(); }; });
+    // espaços dos Heróis: escolhe o espaço, depois o Herói que vai nele
+    this.page.querySelectorAll<HTMLElement>('[data-tslot]').forEach(b => { b.onclick = () => { this.tsSlot = Number(b.dataset.tslot); this.showTestSetup(onStart); }; });
     this.page.querySelectorAll<HTMLElement>('[data-th]').forEach(b => { b.onclick = () => {
       const h = b.dataset.th!;
-      const i = c.heroes.indexOf(h);
-      if (i >= 0) { if (c.heroes.length > 1) { c.heroes.splice(i, 1); delete c.cards[h]; } }
-      else {
-        if (c.heroes.length >= 3) { const out = c.heroes.pop()!; delete c.cards[out]; }
-        c.heroes.push(h);
-        c.cards[h] = distributeStartingGear([...c.heroes])[h] ?? [];
+      const slot = this.tsSlot;
+      const old = c.heroes[slot];
+      if (h === old) return;
+      const j = c.heroes.indexOf(h);
+      if (j >= 0) {
+        // já está em outro espaço: os dois trocam de lugar (com as cartas)
+        [c.heroes[slot], c.heroes[j]] = [c.heroes[j], c.heroes[slot]];
+      } else {
+        // entra no espaço e fica com as cartas de quem saiu
+        c.heroes[slot] = h;
+        c.cards[h] = c.cards[old] ?? [];
+        delete c.cards[old];
       }
+      // próximo espaço fica escolhido (para montar a Guilda em sequência)
+      this.tsSlot = (slot + 1) % 3;
       this.test = c;
-      if (c.heroes.length === 3) save(); else this.showTestSetup(onStart);
+      save();
     }; });
     (this.page.querySelector('#ts-gear') as HTMLElement).onclick = () => { c.cards = distributeStartingGear(c.heroes); save(); };
     (this.page.querySelector('#ts-clear') as HTMLElement).onclick = () => { c.cards = Object.fromEntries(c.heroes.map(h => [h, []])); save(); };

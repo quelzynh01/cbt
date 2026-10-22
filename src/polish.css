@@ -1,0 +1,118 @@
+/* =====================================================================
+   Acabamento comum de todas as telas (carregado por último):
+   campos, opções, títulos de página, caixas, rolagem e botões.
+   ===================================================================== */
+:root { color-scheme: dark; accent-color: #f0c243; }
+
+/* ---------- rolagem ---------- */
+* { scrollbar-width: thin; scrollbar-color: #b98a4a rgba(0,0,0,.25); }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: rgba(0,0,0,.22); border-radius: 8px; }
+::-webkit-scrollbar-thumb { background: linear-gradient(#c99a52, #8a6232); border-radius: 8px; border: 2px solid rgba(0,0,0,.35); }
+
+/* ---------- botões ---------- */
+button { transition: transform .08s, filter .15s, box-shadow .15s; letter-spacing: .2px; }
+button:active:not(:disabled) { transform: translateY(1px); box-shadow: 0 1px 0 #2a1a0d, inset 0 1px 0 rgba(255,255,255,.1); }
+button.primary { text-shadow: 0 1px 0 rgba(255,240,200,.45); box-shadow: 0 2px 0 #6b3d0c, inset 0 1px 0 rgba(255,255,255,.35); }
+button.primary:hover:not(:disabled) { box-shadow: 0 2px 0 #6b3d0c, 0 0 16px rgba(240,194,67,.45), inset 0 1px 0 rgba(255,255,255,.35); }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid #ffe08a; outline-offset: 2px; }
+
+/* ---------- campos ---------- */
+select { appearance: none; -webkit-appearance: none; font-family: inherit; font-weight: 700; color: var(--text);
+  background: #24180e url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23f0c243' stroke-width='2'/%3E%3C/svg%3E") no-repeat right 9px center / 11px;
+  border: 2px solid var(--line); border-radius: 10px; padding: 5px 30px 5px 10px; }
+select option { background: #24180e; color: var(--text); }
+input::placeholder { color: #8f7c62; }
+
+/* caixas de marcar e opções redondas no estilo do jogo */
+input[type=checkbox], input[type=radio] { appearance: none; -webkit-appearance: none; width: 20px; height: 20px; flex: none; margin: 0; padding: 0;
+  border: 2px solid var(--line); background: #1e140b; box-shadow: inset 0 2px 3px rgba(0,0,0,.55);
+  display: inline-grid; place-items: center; vertical-align: middle; transition: background .15s, border-color .15s; }
+input[type=checkbox] { border-radius: 6px; }
+input[type=radio] { border-radius: 50%; }
+input[type=checkbox]:checked { background: linear-gradient(#f3c24a, #c58520); border-color: #ffe08a; }
+input[type=checkbox]:checked::after { content: ''; width: 5px; height: 10px; border: solid #2a1606; border-width: 0 3px 3px 0; transform: translateY(-1px) rotate(45deg); }
+input[type=radio]:checked { border-color: #ffe08a; }
+input[type=radio]:checked::after { content: ''; width: 10px; height: 10px; border-radius: 50%; background: radial-gradient(#ffe9a6, #e0a12c); box-shadow: 0 0 6px rgba(240,194,67,.8); }
+input[type=checkbox]:disabled, input[type=radio]:disabled { opacity: .45; }
+
+/* barras de volume */
+input[type=range] { appearance: none; -webkit-appearance: none; height: 8px; border-radius: 6px; padding: 0;
+  background: linear-gradient(90deg, #f0c243, #b9761b); box-shadow: inset 0 1px 3px rgba(0,0,0,.6), 0 0 0 1px rgba(0,0,0,.4); }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #fff3c4, #e0a12c); border: 2px solid #6b3d0c; box-shadow: 0 2px 4px rgba(0,0,0,.5); }
+input[type=range]::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #fff3c4, #e0a12c); border: 2px solid #6b3d0c; }
+
+/* ---------- opções (Configurações e Configurações da partida) ----------
+   o texto corre normal ao lado da caixa (antes cada pedaço em negrito virava uma coluna) */
+.set-opt { display: block; position: relative; padding: 8px 12px 8px 42px; line-height: 1.35; text-align: left;
+  border: 1px solid rgba(185,138,74,.22); transition: background .15s, border-color .15s; }
+.set-opt > input[type=checkbox], .set-opt > input[type=radio] { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); }
+.set-opt:hover { background: rgba(240,194,67,.07); border-color: rgba(240,194,67,.45); }
+.set-opt:has(> input:checked) { background: rgba(240,194,67,.1); border-color: rgba(240,194,67,.6); }
+.set-opt b { color: #fff3d6; }
+.set-box { margin: 0 auto; width: 100%; }
+.set-box h3 { display: flex; align-items: center; gap: 10px; font-size: 17px; }
+.set-box h3::after { content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, rgba(240,194,67,.5), transparent); }
+
+/* ---------- páginas do menu ---------- */
+.menu-page { background: linear-gradient(180deg, rgba(58,41,26,.97), rgba(33,23,14,.97));
+  box-shadow: 0 20px 60px rgba(0,0,0,.6), inset 0 0 0 1px rgba(255,220,150,.08), inset 0 0 60px rgba(0,0,0,.35); }
+.mp-head { margin-bottom: 12px; padding: 12px 0 10px; background: linear-gradient(#36271a 85%, rgba(54,39,26,.9));
+  border-bottom: 2px solid transparent; border-image: linear-gradient(90deg, transparent, #b98a4a 12%, #f0c243 50%, #b98a4a 88%, transparent) 1; }
+.mp-head h2 { text-shadow: 0 2px 0 #1a0f06, 0 0 18px rgba(240,194,67,.25); letter-spacing: .4px; }
+
+/* caixas de seção com o mesmo acabamento */
+.ts-sec, .lb-box, .rules section, .cp-box, .lb-codebox, .mc-cfg {
+  box-shadow: inset 0 1px 0 rgba(255,230,180,.06), 0 4px 14px rgba(0,0,0,.25); }
+.ts-sec, .lb-box, .rules section { background: linear-gradient(rgba(0,0,0,.2), rgba(0,0,0,.32)); border: 1px solid rgba(185,138,74,.5); border-radius: 14px; }
+.ts-sec h3, .lb-box h3, .rules h3 { text-shadow: 0 2px 0 rgba(0,0,0,.45); }
+
+/* Nova Campanha: as edições no meio da tela */
+.ed-list { min-height: calc(100% - 100px); align-content: center; margin: 0 auto; }
+.ed-card { transition: transform .15s, box-shadow .2s, filter .15s; }
+.ed-card:not(.soon):hover { transform: translateY(-4px); box-shadow: 0 12px 30px rgba(0,0,0,.5), 0 0 22px rgba(240,194,67,.35); }
+
+/* abas (Biblioteca, Configurações, Heróis) */
+.lib-filter, .set-tabs { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* Configurações da partida (janela) */
+.mc-cfg .set-opt { font-size: 14px; }
+.mc-cfg .gd-title { text-align: center; font-size: 20px; }
+
+/* tela de carregamento do mapa: a arte vertical do mapa sem faixas pretas */
+.ml-box { grid-template-columns: auto minmax(0, 1fr); }
+.ml-art { background: none; }
+.ml-art img { height: min(64vh, 620px); width: auto; max-width: 42vw; max-height: none; object-fit: cover; }
+@media (max-width: 760px), (max-height: 560px) { .ml-art img { height: 72vh; max-width: 38vw; } }
+
+/* ajustes finos */
+.ed-list { min-height: 0; margin: max(24px, 12vh) auto 24px; }
+.ed-card { min-height: 300px; padding-top: 28px; }
+.ed-icon { font-size: 54px; filter: drop-shadow(0 6px 8px rgba(0,0,0,.5)); }
+.cp-box { background: linear-gradient(rgba(0,0,0,.18), rgba(0,0,0,.3)); border: 1px solid rgba(185,138,74,.5); border-radius: 16px; padding: 16px 22px; }
+.cp-box > p, .cp-box > ol { margin: 6px 0; }
+.cp-box .cp-steps li { margin: 3px 0; }
+.mp-head { background: rgba(50,35,22,.88); backdrop-filter: blur(6px); }
+.cp-cfgrow { background: rgba(0,0,0,.22); border: 1px dashed rgba(185,138,74,.5); border-radius: 12px; padding: 8px 12px; }
+.cp-cfgrow .lb-sum { color: #ffe08a; font-weight: 700; }
+.lb-entry .lb-field { text-align: center; justify-items: center; }
+.lb-entry .lb-field input { width: 100%; text-align: center; }
+
+/* Modo Teste: espaços dos Heróis (como os espaços de carta) */
+.ts-slots { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 6px 0 4px; }
+.ts-slot { position: relative; display: flex; align-items: center; gap: 10px; padding: 10px 12px; text-align: left; border-radius: 14px;
+  background: linear-gradient(rgba(0,0,0,.25), rgba(0,0,0,.4)); border: 2px dashed rgba(185,138,74,.6); box-shadow: none; color: var(--text); }
+.ts-slot canvas { width: 64px; height: 64px; flex: none; border-radius: 50%; border: 3px solid #8fc3ff; box-shadow: 0 4px 10px rgba(0,0,0,.5); }
+.ts-slot .ts-si { display: grid; gap: 1px; min-width: 0; }
+.ts-slot b { font-size: 17px; line-height: 1.05; color: #fff3d6; }
+.ts-slot small { font-size: 11px; color: var(--muted); }
+.ts-slot em { font-style: normal; font-size: 11.5px; color: #d7b8ff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ts-sn { position: absolute; top: -9px; left: -9px; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-weight: 800;
+  background: linear-gradient(#f3c24a, #c58520); color: #2a1606; border: 2px solid #ffe08a; box-shadow: 0 2px 4px rgba(0,0,0,.5); }
+.ts-slot.sel { border-style: solid; border-color: #ffe14d; background: linear-gradient(rgba(255,225,77,.18), rgba(255,225,77,.06)); box-shadow: 0 0 0 2px rgba(255,225,77,.35), 0 0 18px rgba(255,225,77,.35); }
+.ts-slot.sel canvas { border-color: #ffe14d; }
+.ts-swap { position: absolute; right: 10px; bottom: 6px; font-size: 11px; font-weight: 800; color: #ffe14d; animation: opPulse 1.2s ease-in-out infinite; }
+.ts-help { margin: 4px 0 8px; font-size: 13px; color: var(--muted); }
+.ts-hero.on { opacity: .6; }
+@media (max-width: 700px) { .ts-slots { grid-template-columns: 1fr; } }

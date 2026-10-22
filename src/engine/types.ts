@@ -13,7 +13,9 @@ export interface CardInst { uid: string; defId: string; exhausted: boolean; uses
 export type HeroAbility =
   | 'furia' | 'dominio_magia' | 'oportunista' | 'furtivo' | 'espinhos'
   | 'duro_na_queda' | 'maestria_arco' | 'bencao' | 'arremesso' | 'autossacrificio'
-  | 'apunhalar' | 'magia_perfurante';
+  | 'apunhalar' | 'magia_perfurante'
+  // Heróis extras
+  | 'cheiro_sangue' | 'zas_tras' | 'bate_corre' | 'ataque_mental' | 'olhar_petrificante' | 'feitico_tenaz' | 'suga_mente' | 'cobica' | 'teleporte' | 'ritual_sangue' | 'chamado' | 'lamina_sugadora' | 'trapaceiro' | 'macaco_ve' | 'mestre_espadachim' | 'aura_mistica' | 'hora_lanche' | 'tiro_explosivo' | 'presenca' | 'doces_travessuras' | 'feitico_pressa' | 'feitico_trapaceiro' | 'frenesi' | 'paria' | 'feitico_banshee' | 'ataque_cardiaco' | 'mente_brilhante' | 'sorte_apostador' | 'cacador' | 'resistencia_panda' | 'relampago' | 'efeito_borboleta' | 'contagem_corpos' | 'encantado' | 'lobo_solitario' | 'briga' | 'garras' | 'devorar' | 'arremesso_selvagem' | 'implacavel' | 'acrobata';
 
 export interface HeroDef {
   id: string;
@@ -28,6 +30,8 @@ export interface HeroDef {
   abilityName: string;
   abilityText: string;
   title: string;
+  /** Herói extra (fora da caixa básica). */
+  extra?: boolean;
 }
 
 export type MonsterCategory = 'Lacaio Menor' | 'Lacaio Maior' | 'Vilão Menor' | 'Vilão Maior';
@@ -85,6 +89,8 @@ export interface Unit {
   covered?: CardInst;
   /** Herói exaustado por uma carta (Escudos, Escudo das Almas): não pode ser ativado até a Guilda Descansar. */
   spent?: boolean;
+  /** Olhar Petrificante (Elysia): marcadores que tiram 1 Ponto de Movimento cada (Descansar remove). */
+  petrified?: number;
 }
 
 export interface Door { id: string; a: Cell; b: Cell; open: boolean; small?: boolean; locked?: boolean }
@@ -99,6 +105,10 @@ export interface Activation {
   used?: string[];
   /** Algo já aconteceu nesta ativação (ex.: as Botas moveram um Aliado): não dá mais para trocar de Herói nem Descansar. */
   committed?: boolean;
+  /** Ativação só para o Movimento (Mente Brilhante): não pode atacar. */
+  moveOnly?: boolean;
+  /** Habilidade de "uma vez por ativação" já usada (Relâmpago). */
+  powerUsed?: boolean;
 }
 
 export interface MissionDef {
@@ -214,6 +224,16 @@ export interface GameState {
   warCry?: GuildId | null;
   /** Cartas ativáveis já usadas neste turno (Manto do Deslocamento). */
   turnUsed?: string[];
+  /** Heróis Inimigos mortos por cada Herói neste cenário (Contagem de Corpos). */
+  heroKills?: Record<string, number>;
+  /** Mente Brilhante: a Guilda pode ativar outro Herói só para o Movimento. */
+  brightMind?: GuildId | null;
+  /** Macaco Vê, Macaco Faz: Habilidade copiada até o fim do turno. */
+  copied?: { heroId: string; ability: HeroAbility } | null;
+  /** Garras de Gatinho: Inimigos que já sofreram o Ferimento neste turno. */
+  clawed?: string[];
+  /** Doces ou Travessuras: já usada neste turno. */
+  beggarUsed?: boolean;
   debug: { attackDice: DiceMode; defenseDice: DiceMode; revealTokens: boolean; heroesImmortal: boolean; freeMode?: boolean };
 }
 

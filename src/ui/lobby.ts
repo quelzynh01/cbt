@@ -34,8 +34,10 @@ export class OnlineLobby {
   /** Editor de inventário desenhado nesta tela (liga os cliques depois de montar o HTML). */
   private invBind: { items: InvItem[]; opts: InvOptions } | null = null;
   private mode: 'single' | 'campaign' = 'campaign';
-  private diceCap = false;
-  private pickOne = false;
+  /** Configurações da partida (padrão: Limite de dados, Pegar 1 carta e Apenas Core Heroes). */
+  private diceCap = true;
+  private pickOne = true;
+  private allHeroes = false;
   private lastTick = -1;
   /** Campanha online (anfitrião): a preparação guardada enquanto um cenário é jogado. */
   private stash: OnlineSetup | null = null;
@@ -83,7 +85,7 @@ export class OnlineLobby {
       <div class="mp-head"><button class="mp-back">← Voltar</button><h2>Multiplayer Online</h2></div>
       <div class="lb-entry">
         <label class="lb-field">Seu nome <small>(também é o nome do seu time)</small> <input id="lb-name" maxlength="16" value="${esc(savedName())}" placeholder="Ex.: Raquel"/></label>
-        <div class="lb-cols">
+        <div class="lb-stack">
           <div class="lb-box"><h3>Criar sala</h3><p>Você será o anfitrião: o jogo roda no seu navegador. Mantenha a aba aberta durante a partida.</p>
             <button class="primary" id="lb-create">👑 Criar sala</button></div>
           <div class="lb-box"><h3>Entrar numa sala</h3><p>Digite o código que o anfitrião enviou.</p>
@@ -166,7 +168,7 @@ export class OnlineLobby {
           <button id="lb-copy">📋 Copiar link</button><small>${esc(link)}</small></div>
         <div class="lb-seats">${slots}</div>
         <div class="lb-actions">
-          ${host ? `<span class="lb-sum">${this.mode === 'campaign' ? '🏰 Campanha (6 cenários)' : '⚔ Partida única'} · IA ${getSettings().ai === 'hard' ? 'Difícil' : 'Normal'}${this.diceCap ? ' · Limite de dados' : ''}${this.mode === 'campaign' && this.pickOne ? ' · Pegar 1 carta' : ''}</span>
+          ${host ? `<span class="lb-sum">${this.mode === 'campaign' ? '🏰 Campanha (6 cenários)' : '⚔ Partida única'} · IA ${getSettings().ai === 'hard' ? 'Difícil' : 'Normal'}${this.diceCap ? ' · Limite de dados' : ''}${this.mode === 'campaign' && this.pickOne ? ' · Pegar 1 carta' : ''} · ${this.allHeroes ? 'Todos os Heróis' : 'Apenas Core Heroes'}</span>
             <button id="lb-cfg">⚙️ Configurações da partida</button>
             <button class="primary" id="lb-start" ${canStart ? '' : 'disabled'}>▶ Ir para a mesa</button>` : '<span class="lb-wait">Aguardando o anfitrião levar todos para a mesa…</span>'}
         </div>
@@ -197,6 +199,7 @@ export class OnlineLobby {
         <div class="gd-title">⚙️ Configurações da partida</div>
         <label class="mcf-row">Modo <select id="mc-mode"><option value="campaign" ${this.mode === 'campaign' ? 'selected' : ''}>🏰 Campanha (6 cenários)</option><option value="single" ${this.mode === 'single' ? 'selected' : ''}>⚔ Partida única</option></select></label>
         <label class="mcf-row">Dificuldade da IA <select id="mc-ai"><option value="normal">Normal</option><option value="hard" ${getSettings().ai === 'hard' ? 'selected' : ''}>Difícil</option></select></label>
+        <label class="mcf-row">Heróis <select id="mc-heroes"><option value="core">⭐ Apenas Core Heroes</option><option value="all" ${this.allHeroes ? 'selected' : ''}>🌟 Permitir Todos os Heróis</option></select></label>
         <label class="set-opt"><input type="checkbox" id="mc-cap" ${this.diceCap ? 'checked' : ''}/> <b>Limite de dados</b> — no máximo 8 dados de ataque e 6 de defesa por rolagem. Sem marcar, ilimitado.</label>
         ${this.mode === 'campaign' ? `<label class="set-opt"><input type="checkbox" id="mc-one" ${this.pickOne ? 'checked' : ''}/> <b>Pegar 1 carta</b> — na Fase de Melhorias cada um pega 1 carta por rodada e passa o resto (em vez de 2).</label>` : ''}
         <div class="gd-btns"><button class="primary" id="mc-ok">✔ Pronto</button></div>
@@ -204,6 +207,7 @@ export class OnlineLobby {
       (el.querySelector('#mc-mode') as HTMLSelectElement).onchange = e => { this.mode = (e.target as HTMLSelectElement).value as 'single' | 'campaign'; draw(); };
       (el.querySelector('#mc-ai') as HTMLSelectElement).onchange = e => saveSettings({ ...getSettings(), ai: (e.target as HTMLSelectElement).value as 'normal' | 'hard' });
       (el.querySelector('#mc-cap') as HTMLInputElement).onchange = e => { this.diceCap = (e.target as HTMLInputElement).checked; };
+      (el.querySelector('#mc-heroes') as HTMLSelectElement).onchange = e => { this.allHeroes = (e.target as HTMLSelectElement).value === 'all'; };
       const one = el.querySelector('#mc-one') as HTMLInputElement | null;
       if (one) one.onchange = () => { this.pickOne = one.checked; };
       (el.querySelector('#mc-ok') as HTMLElement).onclick = () => { el.remove(); this.renderRoom(); };
@@ -217,7 +221,7 @@ export class OnlineLobby {
   private startSetup() {
     const host = this.session as HostSession;
     const l = host.lobby;
-    l.setup = newSetup(l.seats.map(s => ({ guild: s.guild, ai: s.ai })), getSettings().ai, Math.random, this.mode, this.diceCap, this.mode === 'campaign' && this.pickOne);
+    l.setup = newSetup(l.seats.map(s => ({ guild: s.guild, ai: s.ai })), getSettings().ai, Math.random, this.mode, this.diceCap, this.mode === 'campaign' && this.pickOne, this.allHeroes);
     this.hostAdvance();
   }
 

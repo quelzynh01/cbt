@@ -485,3 +485,15 @@
 .buy-hint.more { background: rgba(240,194,67,.15); border: 2px solid #f0c243; color: #ffe9a8; animation: actPulse 1.6s ease-in-out infinite; }
 .buy-hint.ok { background: rgba(70,200,90,.12); border: 2px solid #46c85a; color: #c9f5cf; }
 .buy-hint.bad { background: rgba(224,80,58,.15); border: 2px solid #e0503a; color: #ffb3a3; }
+
+/* Nova Campanha: botão das Configurações da partida e o resumo */
+.cp-cfgrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 6px 0; }
+.cp-cfgrow .lb-sum { flex: 1 1 200px; }
+
+/* Online: tela inicial centralizada (Criar sala em cima, Entrar numa sala embaixo) */
+.lb-entry { max-width: 520px; text-align: center; }
+.lb-entry .lb-field { text-align: left; }
+.lb-stack { display: grid; gap: 14px; }
+.lb-stack .lb-box { justify-items: center; text-align: center; }
+.lb-stack .lb-box button { min-width: 220px; }
+.lb-stack .lb-code-in { width: min(260px, 100%); }

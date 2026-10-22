@@ -24,6 +24,8 @@ export interface HudActions {
   useToken(tokenId: string): void;
   /** Carta ativável (ícone ⚡). */
   useCard(heroId: string, cardUid: string): void;
+  /** Habilidade do Herói usada como ação (Heróis extras). */
+  usePower(heroId: string): void;
   endTurn(): void;
   rest(): void;
   inspect(unitId: string | null): void;
@@ -793,7 +795,10 @@ export class Hud {
         ${isActive ? (g.freeMode ? '<span class="mp" title="Modo Livre">👣 ∞</span>' : `<span class="mp" title="Pontos de Movimento">👣 ${[0, 1, 2].map(i => `<i class="${i < act!.mp && !act!.moveLocked ? 'on' : ''}"></i>`).join('')}</span>`) : ''}
         ${isActive ? `<span title="Ataque">${act!.attacked ? '⚔ usado' : '⚔ disponível'}</span>` : ''}
       </div>
-      <div class="ability ${u.curse === 'amnesia' ? 'off' : ''}"><b>${hd.abilityName}</b> — ${hd.abilityText}</div>
+      <div class="ability ${u.curse === 'amnesia' ? 'off' : ''}"><b>${hd.abilityName}</b> — ${richText(hd.abilityText)}</div>
+      ${(() => { const p = mine ? g.heroPower(u) : null; return p ? `<button class="hb-power ${p.ok ? '' : 'off'}" id="hb-power" title="${p.label}${p.why ? ` — ${p.why}` : ''}">⚡ ${hd.abilityName}<small>${p.ok ? p.label : p.why}</small></button>` : ''; })()}
+      ${g.s.copied?.heroId === u.id ? `<div class="tag rr">🐒 Copiou: <b>${Object.values(HEROES).find(x => x.ability === g.s.copied!.ability)?.abilityName ?? ''}</b> (até o fim do turno)</div>` : ''}
+      ${u.petrified ? `<div class="tag stun">🗿 Petrificado: −${u.petrified} de Movimento até Descansar</div>` : ''}
       ${u.curse ? `<div class="ability curse-ab" title="${CURSES[u.curse]?.text ?? ''}"><b>☠ ${CURSES[u.curse]?.name}</b> — ${CURSES[u.curse]?.text}</div>` : ''}
       ${g.rerollsOf(u) ? `<div class="tag rr">↻ Rerrolagem ${g.rerollsOf(u)} ${getSettings().reroll === 'auto' ? '(automática nos dados que falharem)' : '(você escolhe os dados após cada rolagem)'}</div>` : ''}
       ${u.stunned ? '<div class="tag stun">✷ Atordoado — não rola Defesa até Descansar</div>' : ''}
@@ -808,6 +813,8 @@ export class Hud {
     box.querySelectorAll<HTMLElement>('[data-card]').forEach(el => {
       el.onclick = () => { if (mine && isActive && usableIds.has(el.dataset.card!)) this.actions.selectCard(el.dataset.card!); };
     });
+    const pw = box.querySelector<HTMLElement>('#hb-power');
+    if (pw) pw.onclick = e => { e.stopPropagation(); if (!pw.classList.contains('off')) this.actions.usePower(u.id); };
     box.querySelectorAll<HTMLElement>('[data-useact]').forEach(b => {
       b.onclick = e => { e.stopPropagation(); if (!b.classList.contains('off')) this.actions.useCard(u.id, b.dataset.useact!); };
     });

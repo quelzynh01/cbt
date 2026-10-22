@@ -1,6 +1,6 @@
 import { Board, key, parseKey, sameCell, type MapDef } from './board';
 import {
-  ALL_HEROES, ATTACK_DIE, CARDS, DEFENSE_DIE, ENTRY_PAIRS, EXPLORATION_BAG, GUILDS, HEROES, HERO_ORDER, MONSTERS, TOKEN_INFO, distributeStartingGear, levelSuffix, lowerSuffix,
+  heroPool, ATTACK_DIE, CARDS, DEFENSE_DIE, ENTRY_PAIRS, EXPLORATION_BAG, GUILDS, HEROES, HERO_ORDER, MONSTERS, TOKEN_INFO, distributeStartingGear, levelSuffix, lowerSuffix,
 } from './data';
 import { nextRandom, randInt, shuffle } from './rng';
 import { CURSES, type CardFx } from './cards';
@@ -40,7 +40,10 @@ export interface RerollRequest { heroId: string; kind: 'attack' | 'defense'; fac
 /** Escolha do jogador no meio de um ataque: para onde empurrar (Rajada de Vento) ou quem mais atingir (Raio Nova, Fender).
  *  A resposta é o índice em `cells`/`units`, ou −1 para não fazer nada. */
 export interface ChoiceRequest {
-  choice: 'push' | 'extra';
+  /** confirm: pergunta sim (0) ou não (−1). */
+  choice: 'push' | 'extra' | 'confirm';
+  /** Texto da pergunta (confirm) ou explicação da escolha. */
+  text?: string;
   guild: GuildId;
   heroId: string;
   /** Carta/efeito que pede a escolha. */
@@ -75,6 +78,8 @@ export interface NewGameOptions {
   deploy?: boolean;
   /** Limite de dados (Configurações da partida): no máximo 8 dados de ataque e 6 de defesa por rolagem. Sem isso, ilimitado. */
   diceCap?: boolean;
+  /** Quem não trouxe Heróis (IA) sorteia também entre os Heróis extras. */
+  allHeroes?: boolean;
 }
 
 const FREE_MP = 99;
@@ -158,7 +163,7 @@ export class Game {
       p.heroes = uniq.length === 3 ? uniq : undefined;
     }
     for (const p of players) if (!p.heroes) {
-      const free = shuffle(s, ALL_HEROES.filter(h => !taken.has(h)));
+      const free = shuffle(s, heroPool(!!opts.allHeroes).filter(h => !taken.has(h)));
       const pick = [...HERO_ORDER.filter(h => !taken.has(h)), ...free.filter(h => !HERO_ORDER.includes(h))].slice(0, 3);
       pick.forEach(h => taken.add(h));
       p.heroes = pick;
@@ -321,8 +326,31 @@ export class Game {
   /** Habilidade Natural (Amnésia anula). */
   ab(h: Unit): string | null {
     if (h.kind !== 'hero' || h.curse === 'amnesia') return null;
+    const cp = this.s.copied;
+    if (cp && cp.heroId === h.id) return cp.ability;
     return HEROES[h.defId].ability;
   }
+
+  /** Cartas de Ataque Mágicas equipadas (Aura Mística). */
+  private magicCards(h: Unit): number { return h.cards.filter(c => this.cardDef(c).kind === 'attack' && this.cardDef(c).magic).length; }
+
+  /** Lobo Solitário: nenhum Aliado em Linha de Visão. */
+  alone(h: Unit): boolean {
+    if (!h.cell || h.kind !== 'hero') return false;
+    return !this.heroesOf(h.guild!).some(x => x.id !== h.id && x.alive && x.cell && this.hasLOS(h, h.cell!, x.cell));
+  }
+
+  /** Presença Poderosa: o alvo está Perto de um Prince Aaron da Guilda de quem ataca (−2 de Defesa). */
+  presenceVs(t: Unit, attacker: Unit): boolean {
+    if (attacker.kind !== 'hero' || !t.cell) return false;
+    return this.heroesOf(attacker.guild!).some(x => x.alive && x.cell && this.ab(x) === 'presenca' && this.isEnemy(x, t) && this.board.isClose(x.cell, t.cell!));
+  }
+
+  /** Movimento que o Herói tem ao ser ativado (Olhar Petrificante tira 1 por marcador). */
+  startMp(h: Unit): number { return Math.max(0, 3 - (h.petrified ?? 0)); }
+
+  /** Movimento do Monstro (Olhar Petrificante tira 1 por marcador). */
+  monMove(m: Unit): number { return Math.max(0, MONSTERS[m.defId].move - (m.petrified ?? 0)); }
 
   /** Soma de um efeito numérico das cartas Permanentes (e de todas as cartas para bônus de status). */
   private permFx<K extends keyof CardFx>(h: Unit, k: K): CardFx[K][] {
@@ -333,7 +361,7 @@ export class Game {
   /** Conjunto de Rerrolagem do Herói (p.27): soma das cartas, exaustadas ou não. */
   rerollsOf(h: Unit): number {
     if (h.kind !== 'hero') return MONSTERS[h.defId].rerolls;
-    return h.cards.reduce((s, c) => s + (this.cardDef(c).rerolls ?? 0), 0);
+    return h.cards.reduce((s, c) => s + (this.cardDef(c).rerolls ?? 0), 0) + (this.ab(h) === 'feitico_trapaceiro' ? 1 : 0);
   }
 
   isOrcLike(u: Unit): boolean { return u.kind === 'monster' && ['orc', 'goblin', 'capitao_orc'].includes(baseId(u.defId)); }
@@ -374,16 +402,26 @@ export class Game {
   maxHp(u: Unit): number {
     if (u.kind === 'monster') return MONSTERS[u.defId].hp;
     const curse = u.curse ? CURSES[u.curse]?.hp ?? 0 : 0;
-    return Math.max(1, HEROES[u.defId].hp + u.cards.reduce((s, c) => s + (this.cardDef(c).hpBonus ?? 0), 0) + curse);
+    const aura = this.ab(u) === 'aura_mistica' ? this.magicCards(u) : 0;
+    return Math.max(1, HEROES[u.defId].hp + u.cards.reduce((s, c) => s + (this.cardDef(c).hpBonus ?? 0), 0) + curse + aura);
   }
 
-  defenseDice(u: Unit, attacker?: Unit | null): number {
+  /** `type`: tipo do ataque recebido (Resistência do Panda: +2 contra ataques a Distância). */
+  defenseDice(u: Unit, attacker?: Unit | null, type?: AttackType): number {
     if (u.stunned) return 0;
-    if (u.kind === 'monster') return this.monDef(u, attacker).defense;
-    let d = HEROES[u.defId].defense + u.cards.reduce((s, c) => s + (this.cardDef(c).defBonus ?? 0), 0);
-    if (this.ab(u) === 'furia' && u.wounds > 0) d += 1;
-    if (this.hasPerm(u, 'lastStand')) d += u.wounds;
-    if (this.hasPerm(u, 'moonShield')) d *= 2;
+    let d: number;
+    if (u.kind === 'monster') d = this.monDef(u, attacker).defense;
+    else {
+      d = HEROES[u.defId].defense + u.cards.reduce((s, c) => s + (this.cardDef(c).defBonus ?? 0), 0);
+      const ab = this.ab(u);
+      if (ab === 'furia' && u.wounds > 0) d += 1;
+      if (ab === 'aura_mistica') d += this.magicCards(u);
+      if (ab === 'lobo_solitario' && this.alone(u)) d += 1;
+      if (ab === 'resistencia_panda' && type === 'ranged') d += 2;
+      if (this.hasPerm(u, 'lastStand')) d += u.wounds;
+      if (this.hasPerm(u, 'moonShield')) d *= 2;
+    }
+    if (attacker && this.presenceVs(u, attacker)) d = Math.max(0, d - 2);
     return d;
   }
 
@@ -416,8 +454,27 @@ export class Game {
     }
     if (this.canAttackFrom(hero, from, def.attackType, target)) return true;
     if (def.fx.diagonal && target.alive && target.cell && this.isEnemy(hero, target) && this.diagonalClose(from, target.cell)) return true;
+    if (hero.kind === 'hero' && this.ab(hero) === 'arremesso_selvagem' && ['Lança', 'Arremesso', 'Exótica'].includes(def.group)
+      && this.canAttackFrom(hero, from, 'ranged', target)) return true;
     return hero.kind === 'hero' && this.ab(hero) === 'arremesso' && def.group === 'Espada'
       && this.canAttackFrom(hero, from, 'ranged', target);
+  }
+
+  /** Cartas de Ataque que o Herói pode usar: as suas e, com Suga-Mente (Hitch), as não exaustadas de um Herói no mesmo Espaço. */
+  attackCardPool(h: Unit): CardInst[] {
+    const own = h.cards.filter(c => this.isAttackCard(c));
+    if (h.kind !== 'hero' || this.ab(h) !== 'suga_mente' || !h.cell) return own;
+    const other = this.unitsAt(h.cell).filter(x => x.kind === 'hero' && x.id !== h.id).flatMap(x => x.cards.filter(c => !c.exhausted && this.isAttackCard(c)));
+    return [...own, ...other];
+  }
+  findAttackCard(h: Unit, uid: string): CardInst | undefined { return this.attackCardPool(h).find(c => c.uid === uid); }
+  /** Carta emprestada (Suga-Mente): de quem é. */
+  cardOwner(c: CardInst): Unit | undefined { return this.units().find(u => u.cards.includes(c)); }
+
+  /** O alvo não rola Defesa contra esta carta? (Magia Perfurante, Ataque Cardíaco) */
+  piercing(h: Unit, card: CardInst): boolean {
+    const d = this.cardDef(card), ab = this.ab(h);
+    return (ab === 'magia_perfurante' && !!d.magic) || (ab === 'ataque_cardiaco' && d.group === 'Espada');
   }
 
   attackTargets(hero: Unit, card: CardInst, from: Cell = hero.cell!): Unit[] {
@@ -430,6 +487,7 @@ export class Game {
     let n = 0;
     const notes: string[] = [];
     if (this.ab(h) === 'furia' && h.wounds > 0) { n++; notes.push('Fúria de Combate +1'); }
+    if (this.ab(h) === 'lobo_solitario' && this.alone(h)) { n++; notes.push('Lobo Solitário +1'); }
     for (const r of this.permFx(h, 'rawr')) { n += r ?? 0; notes.push(`Amuleto Rawr! +${r}`); }
     if (this.hasPerm(h, 'bookDead')) {
       const deaths = this.heroesOf(h.guild!).reduce((s, x) => s + x.deaths, 0);
@@ -450,6 +508,19 @@ export class Game {
     if (ab === 'magia_perfurante' && def.magic) notes.push('Magia Perfurante: alvo sem Defesa');
     if (ab === 'maestria_arco' && def.group === 'Arco') notes.push('Maestria com Arco: cada ✷ = +1 acerto');
     if (ab === 'arremesso' && def.group === 'Espada' && h.cell && target.cell && !this.board.isClose(h.cell, target.cell)) notes.push('Arremesso de Lâmina (a Distância)');
+    // Heróis extras
+    const meleeNM = def.attackType === 'melee' && !def.magic;
+    if (ab === 'cheiro_sangue' && target.wounds > 0) { n++; notes.push('Cheiro de Sangue +1 (alvo ferido)'); }
+    if (ab === 'cobica' && target.kind === 'hero' && target.tokens.some(t => t.type !== 'missao')) { n += 2; notes.push('Cobiça +2 (alvo com marcador)'); }
+    if (ab === 'frenesi' && meleeNM && h.cell) { const k = this.enemiesClose(h).length; if (k) { n += k; notes.push(`Frenesi +${k}`); } }
+    if (ab === 'paria' && target.kind === 'monster') { n++; notes.push('Pária +1 (Monstro)'); }
+    if (ab === 'contagem_corpos' && meleeNM) { const k = this.s.heroKills?.[h.id] ?? 0; if (k) { n += k; notes.push(`Contagem de Corpos +${k}`); } }
+    if (ab === 'lobo_solitario' && this.alone(h)) { n++; notes.push('Lobo Solitário +1'); }
+    if (ab === 'ataque_cardiaco' && def.group === 'Espada') notes.push('Ataque Cardíaco: alvo sem Defesa');
+    if (ab === 'feitico_tenaz' && def.magic && target.wounds > 0) notes.push('Feitiço Tenaz: a carta não será exaustada');
+    if (ab === 'mestre_espadachim' && def.group === 'Espada' && !h.spent) notes.push('Mestre Espadachim: pode exaustar o Herói para +2');
+    if (ab === 'suga_mente' && !h.cards.includes(card)) notes.push('Suga-Mente: carta emprestada, não é exaustada');
+    if (this.presenceVs(target, h)) notes.push('Presença Poderosa: alvo com −2 de Defesa');
     const fx = def.fx;
     if (fx.vsOrcs && this.isOrcLike(target)) { n += fx.vsOrcs; notes.push(`+${fx.vsOrcs} contra Orcs/Goblins`); }
     if (fx.vsHeroes && target.kind === 'hero') { n += fx.vsHeroes; notes.push(`+${fx.vsHeroes} contra Herói`); }
@@ -483,6 +554,7 @@ export class Game {
     const open: PathNode[] = [start];
     const done = new Set<string>();
     const isHero = u.kind === 'hero';
+    const acro = isHero && this.ab(u) === 'acrobata';
     while (open.length) {
       open.sort((a, b) => a.cost - b.cost);
       const n = open.shift()!;
@@ -494,6 +566,7 @@ export class Game {
       const relax = (to: Cell, mpCost: number, extra: Partial<PathNode>, penalty: number) => {
         const st = this.status(u, to);
         if (st === 'blocked') return;
+        if (acro && !extra.portal && this.unitsAt(to).some(x => x.kind === 'hero' && x.id !== u.id)) mpCost = Math.max(0, mpCost - 1);
         const nmp = n.mp + mpCost;
         if (nmp > mp) return;
         const cost = n.cost + mpCost + penalty;
@@ -691,15 +764,28 @@ export class Game {
     const a = this.s.activation;
     const done = this.s.activatedThisTurn ?? [];
     if (a && a.heroId !== heroId && !this.freeMode && !this.activationFresh()) {
-      if (!this.canBless(heroId)) return false;
-      this.log(this.s.warCry === h.guild && !this.s.blessing ? `Grito de Guerra: ${this.name(h)} é ativado!` : `Bênção de Hobsbawm: ${this.name(h)} é ativado!`);
+      const kind = this.blessKind(heroId);
+      if (!kind) return false;
+      if (kind === 'mind') {
+        // Mente Brilhante: só para fazer o Movimento
+        this.log(`Mente Brilhante: ${this.name(h)} é ativado só para se mover!`);
+        this.s.brightMind = null;
+        const done2 = this.s.activatedThisTurn ?? [];
+        this.s.activation = { heroId, mp: this.startMp(h), moved: false, moveLocked: false, attacked: true, moveOnly: true };
+        this.s.activatedThisTurn = [...done2.filter(x => x !== heroId), heroId];
+        this.pickup(h);
+        this.checkEscort(h);
+        this.applyFree();
+        return true;
+      }
+      this.log(kind === 'war' ? `Grito de Guerra: ${this.name(h)} é ativado!` : `Bênção de Hobsbawm: ${this.name(h)} é ativado!`);
       this.s.blessing = null;
       this.s.warCry = null;
     } else if (a?.heroId === heroId) return true;
     else if (!this.freeMode && done.includes(heroId) && !this.activationFresh()) return false;
     // trocar de uma ativação ainda sem ações não conta como ativação
     const prevFresh = a && a.heroId !== heroId && this.activationFresh() ? a.heroId : null;
-    this.s.activation = { heroId, mp: 3, moved: false, moveLocked: false, attacked: false };
+    this.s.activation = { heroId, mp: this.startMp(h), moved: false, moveLocked: false, attacked: false };
     this.s.activatedThisTurn = [...done.filter(x => x !== prevFresh && x !== heroId), heroId];
     // ao ser ativado, pega o que ficou no seu Espaço (ex.: o Inimigo que estava ali morreu)
     this.pickup(h);
@@ -711,7 +797,7 @@ export class Game {
   /** A ativação atual ainda não fez nada (dá para trocar de Herói ou Descansar). */
   activationFresh(): boolean {
     const a = this.s.activation;
-    return !!a && !a.moved && !a.attacked && a.mp >= 3 && !a.committed;
+    return !!a && !a.moved && !a.attacked && a.mp >= this.startMp(this.unit(a.heroId)) && !a.committed;
   }
 
   /** Dá para Descansar agora? Só se nenhum Herói fez nada neste turno (Bênção/Grito de Guerra, Botas e turno adicional contam). */
@@ -723,17 +809,22 @@ export class Game {
   }
 
   /** Pode ativar `heroId` pela Bênção? (outro Aliado, não ativado neste turno, em Linha de Visão de Hobsbawm). */
-  canBless(heroId: string): boolean {
+  canBless(heroId: string): boolean { return !!this.blessKind(heroId); }
+
+  /** Por qual efeito o Aliado pode ser ativado agora: Grito de Guerra, Bênção ou Mente Brilhante (só Movimento). */
+  blessKind(heroId: string): 'war' | 'bless' | 'mind' | null {
     const b = this.s.blessing;
-    if (this.freeMode) return false;
+    if (this.freeMode) return null;
     const ally0 = this.unit(heroId);
+    if (!ally0 || !ally0.alive || !ally0.cell || ally0.spent || (this.s.activatedThisTurn ?? []).includes(heroId)) return null;
     // Grito de Guerra: qualquer Aliado ainda não ativado neste turno
-    if (this.s.warCry && ally0?.guild === this.s.warCry && ally0.alive && ally0.cell && !ally0.spent && !(this.s.activatedThisTurn ?? []).includes(heroId)) return true;
-    if (!b) return false;
-    const hob = this.unit(b.heroId), ally = this.unit(heroId);
-    if (!hob.alive || !hob.cell || !ally.alive || !ally.cell || ally.id === hob.id || ally.guild !== hob.guild) return false;
-    if ((this.s.activatedThisTurn ?? []).includes(heroId) || ally.spent) return false;
-    return this.hasLOS(hob, hob.cell, ally.cell);
+    if (this.s.warCry && ally0.guild === this.s.warCry) return 'war';
+    if (b) {
+      const hob = this.unit(b.heroId);
+      if (hob.alive && hob.cell && ally0.id !== hob.id && ally0.guild === hob.guild && this.hasLOS(hob, hob.cell, ally0.cell)) return 'bless';
+    }
+    if (this.s.brightMind && ally0.guild === this.s.brightMind) return 'mind';
+    return null;
   }
 
   canMove(): boolean {
@@ -821,6 +912,7 @@ export class Game {
       this.checkHideout(h);
     }
     if (h.alive) this.assassinCloak(h);
+    if (h.alive) this.trickOrTreat(h);
     if (a.mp < 0) a.mp = 0;
     this.checkActiveDeath();
     this.applyFree();
@@ -848,8 +940,8 @@ export class Game {
     return this.s.doors.filter(d => sameCell(d.a, h.cell) || sameCell(d.b, h.cell)).map(d => d.id);
   }
 
-  /** Cartas de ataque disponíveis do Herói ativo. */
-  usableCards(h: Unit): CardInst[] { return h.cards.filter(c => !c.exhausted && this.isAttackCard(c)); }
+  /** Cartas de ataque disponíveis do Herói ativo (Suga-Mente: também as de quem divide o Espaço). */
+  usableCards(h: Unit): CardInst[] { return this.attackCardPool(h).filter(c => !c.exhausted); }
 
   /** Kanga pode sofrer 1 Ferimento em vez de exaustar a carta (se não morrer com isso). */
   canSacrifice(h: Unit): boolean {
@@ -857,8 +949,8 @@ export class Game {
   }
 
   /** Rolagem de um Herói com o Conjunto de Rerrolagem usado automaticamente nos dados que falharam. */
-  private heroRoll(h: Unit, n: number, die: DieFace[], success: DieFace, mode: DiceMode, kind: 'attack' | 'defense' = 'attack'): RollResult {
-    const rr = this.rerollsOf(h);
+  private heroRoll(h: Unit, n: number, die: DieFace[], success: DieFace, mode: DiceMode, kind: 'attack' | 'defense' = 'attack', rrOver?: number): RollResult {
+    const rr = rrOver ?? this.rerollsOf(h);
     if (mode !== 'normal' || !rr) return this.roll(n, die, success, mode);
     return this.rollRerolls(n, die, success, rr, h, kind);
   }
@@ -876,20 +968,31 @@ export class Game {
         this.log(`Escudo do Rei: ${this.name(t)} rola +${n} dados de Defesa (o Herói fica exausto).`);
       }
     }
+    // Encantado (Hassan): quem se defende do ataque dele não usa Rerrolagem
+    const charmed = attacker.kind === 'hero' && this.ab(attacker) === 'encantado';
     if (t.kind === 'hero') {
-      const r = this.heroRoll(t, dice, DEFENSE_DIE, 'shield', this.s.debug.defenseDice, 'defense');
+      const r = this.heroRoll(t, dice, DEFENSE_DIE, 'shield', this.s.debug.defenseDice, 'defense', charmed ? 0 : undefined);
       if (this.hasPerm(t, 'dragonHeart') && r.crits) r.successes += r.crits;
+      const tab = this.ab(t);
+      // Trapaceiro (Monkey King): cada ✷ na Defesa bloqueia mais um
+      if (tab === 'trapaceiro' && r.crits) { r.successes += r.crits; this.emit({ t: 'skill', id: t.id, skill: 'trapaceiro', name: 'Trapaceiro' }); }
+      // Implacável (Yun): com ✷ na Defesa, restaura uma carta
+      if (tab === 'implacavel' && r.crits) {
+        const c = t.cards.filter(x => x.exhausted).sort((p, q) => (this.isAttackCard(q) ? 1 : 0) - (this.isAttackCard(p) ? 1 : 0))[0];
+        if (c) { c.exhausted = false; c.uses = 0; this.emit({ t: 'skill', id: t.id, skill: 'implacavel', name: 'Implacável' }); this.log(`Implacável: ${this.name(t)} restaura ${this.cardDef(c).name}.`); }
+      }
       return r;
     }
-    return this.rollRerolls(dice, DEFENSE_DIE, 'shield', this.monDef(t, attacker).rerolls);
+    return this.rollRerolls(dice, DEFENSE_DIE, 'shield', charmed ? 0 : this.monDef(t, attacker).rerolls);
   }
 
   /** Ataque (p.15-17) + reações (p.19-21). */
   attack(cardUid: string, targetId: string, secondaryId?: string, sacrifice = false, boostUids: string[] = []): boolean {
     const a = this.s.activation;
-    if (!this.canAct() || !a || a.attacked) return false;
+    if (!this.canAct() || !a || a.attacked || a.moveOnly) return false;
     const h = this.unit(a.heroId);
-    const card = h.cards.find(c => c.uid === cardUid);
+    const card = this.findAttackCard(h, cardUid);
+    const borrowed = !!card && !h.cards.includes(card);
     const target = this.unit(targetId);
     if (!card || card.exhausted || !target || !h.cell) return false;
     const def = this.cardDef(card);
@@ -901,7 +1004,18 @@ export class Game {
 
     if (a.moved) a.moveLocked = true; // o Movimento não pode ser retomado depois do Ataque
     a.attacked = true;
-    const { dice: n, notes } = this.attackDicePreview(h, card, target, boosts.map(b => b.uid));
+    let { dice: n, notes } = this.attackDicePreview(h, card, target, boosts.map(b => b.uid));
+    notes = notes.filter(x => !x.startsWith('Mestre Espadachim'));
+    // Mestre Espadachim (Montoya): exaustar o Herói para +2 dados com Espada
+    if (ab === 'mestre_espadachim' && def.group === 'Espada' && !h.spent && !this.freeMode
+      && this.confirm(h, 'Mestre Espadachim', `Exaustar <b>${HEROES[h.defId].name}</b> (não pode ser ativado até Descansar) para rolar <b>+2 dados</b> com ${def.name}?`, true)) {
+      h.spent = true;
+      n += 2;
+      if (this.s.diceCap && n > 8) n = 8;
+      notes.push('Mestre Espadachim +2');
+      this.emit({ t: 'skill', id: h.id, skill: 'mestre_espadachim', name: 'Mestre Espadachim' });
+    }
+    const targetHurt = target.wounds > 0;
     this.curCard = { name: CARDS[card.defId]?.name ?? '', type: CARDS[card.defId]?.attackType ?? 'melee' };
 
     // custos: Sacrifício (Kanga), Ampliações que ferem, Grrrr!
@@ -915,20 +1029,43 @@ export class Game {
     }
     // exaustar a carta (Maya: Mágicas 2x; Zazu: alvo flanqueado; Varinha da Pressa)
     const flanked = ab === 'oportunista' && this.isCornered(target, h);
-    const noExhaust = boosts.some(b => this.cardDef(b).fx.noExhaust);
+    const tenaz = ab === 'feitico_tenaz' && !!def.magic && targetHurt;
+    const noExhaust = boosts.some(b => this.cardDef(b).fx.noExhaust) || borrowed || tenaz;
+    if (tenaz) this.emit({ t: 'skill', id: h.id, skill: 'feitico_tenaz', name: 'Feitiço Tenaz' });
     if (!this.freeMode) {
       for (const b of boosts) if (this.cardDef(b).kind === 'boost') b.exhausted = true;
       if (!flanked && !sacrificed && !noExhaust) {
-        card.uses += 1;
-        if (!(def.magic && ab === 'dominio_magia' && card.uses < 2)) card.exhausted = true;
+        // Efeito Borboleta (Farfalla): exausta a carta de Ataque de um Herói Perto no lugar da sua
+        const swapped = ab === 'efeito_borboleta' ? this.butterfly(h) : false;
+        if (!swapped) {
+          card.uses += 1;
+          if (!(def.magic && ab === 'dominio_magia' && card.uses < 2)) card.exhausted = true;
+        }
       }
     }
     // Bênção (Hobsbawm): ataque Mágico sem ter feito Movimento -> pode ativar outro Aliado em LdV
     this.s.blessing = ab === 'bencao' && def.magic && !a.moved ? { heroId: h.id } : null;
 
     const fx = def.fx;
-    let atk = this.heroRoll(h, n, ATTACK_DIE, def.attackType!, this.s.debug.attackDice);
+    // Rerrolagem: Encantado (alvo Hassan) = nenhuma; Feitiço Trapaceiro (Smiley) com Mágica = todas da Guilda
+    let rrAtk = this.rerollsOf(h);
+    if (ab === 'feitico_trapaceiro' && def.magic) rrAtk = this.heroesOf(h.guild!).filter(x => x.alive).reduce((s, x) => s + this.rerollsOf(x), 0);
+    if (this.ab(target) === 'encantado') { rrAtk = 0; notes.push('Encantado: sem Rerrolagem'); }
+    let atk = this.heroRoll(h, n, ATTACK_DIE, def.attackType!, this.s.debug.attackDice, 'attack', rrAtk);
     if (this.knightShield(target, atk.successes)) { atk = this.roll(n, ATTACK_DIE, def.attackType!, 'normal'); notes.push(`Escudo de Cavaleiro: ataque rolado de novo`); }
+    // Sorte de Apostador (Tomrick): exaustar o Herói para trocar um dado que falhou por ✷
+    const failIdx = atk.faces.findIndex(f => f !== def.attackType && f !== 'crit');
+    if (ab === 'sorte_apostador' && def.magic && !h.spent && failIdx >= 0 && !this.freeMode
+      && this.confirm(h, 'Sorte de Apostador', `Você rolou ${atk.successes} acerto${atk.successes === 1 ? '' : 's'}. Exaustar <b>${HEROES[h.defId].name}</b> (não pode ser ativado até Descansar) para trocar um dado que falhou por <b>✷</b>?`, atk.successes < 3, atk.faces)) {
+      h.spent = true;
+      atk.faces[failIdx] = 'crit';
+      const more = this.roll(1, ATTACK_DIE, def.attackType!, 'normal');
+      atk.faces.push(...more.faces);
+      atk.successes += 1 + more.successes;
+      atk.crits += 1 + more.crits;
+      notes.push('Sorte de Apostador: um dado vira ✷');
+      this.emit({ t: 'skill', id: h.id, skill: 'sorte_apostador', name: 'Sorte de Apostador' });
+    }
     this.curAttack = { id: h.id, faces: atk.faces.slice(), hits: atk.successes, type: def.attackType!, base: n };
     if (atk.rerolled) notes.push(`↻ ${atk.rerolled} dado${atk.rerolled > 1 ? 's' : ''} rerrolado${atk.rerolled > 1 ? 's' : ''}`);
     if (ab === 'maestria_arco' && def.group === 'Arco' && atk.crits) { atk.successes += atk.crits; notes.push(`Maestria com Arco: +${atk.crits}`); }
@@ -946,10 +1083,10 @@ export class Game {
     if (cleaveOk && cleave.includes('all')) for (const u of enemiesCloseTo(h.cell!, targets)) { targets.push(u); notes.push(`Fender: atinge também ${this.name(u)}`); cleaved = true; }
 
     const targetCells = new Map(targets.map(t => [t.id, { ...t.cell! }]));
-    const pierce = (ab === 'magia_perfurante' && !!def.magic) || (fx.critNoDefense && atk.crits > 0);
+    const pierce = this.piercing(h, card) || (fx.critNoDefense && atk.crits > 0);
     if (fx.critNoDefense && atk.crits > 0) notes.push(`${def.name}: alvo não rola Defesa`);
     const defend = (t: Unit) => {
-      const dr = this.defenseRoll(t, pierce ? 0 : this.defenseDice(t, h), h);
+      const dr = this.defenseRoll(t, pierce ? 0 : this.defenseDice(t, h, def.attackType), h);
       const blocks = fx.onlyCritSaves ? dr.faces.filter(f => f === 'crit').length : dr.successes;
       if (fx.onlyCritSaves) dr.successes = blocks;
       return { t, dr, wounds: Math.max(0, atk.successes - blocks) };
@@ -1044,13 +1181,66 @@ export class Game {
       if (x > 0 && u.alive) { u.wounds -= x; this.emit({ t: 'heal', id: u.id, amount: x, wounds: u.wounds }); }
     };
     if (fx.drain && h.alive) {
-      const hits = results[0].wounds;
+      // cada acerto rolado cura, mesmo que o alvo bloqueie com a Defesa
+      const hits = atk.successes;
       heal(h, hits);
       const allies = this.heroesOf(h.guild!).filter(x => x.id !== h.id && x.alive && x.cell && this.board.isClose(x.cell, h.cell!));
       if (fx.drain === 'ally1') { const a1 = allies.sort((p, q) => q.wounds - p.wounds)[0]; if (a1) heal(a1, hits); }
       if (fx.drain === 'allies') for (const x of allies) heal(x, hits);
     }
     if (boosts.some(b => this.cardDef(b).fx.lifesteal) && h.alive) heal(h, dealt);
+    // ---- Heróis extras: depois do dano
+    const killedMain = !target.alive || dying.includes(target);
+    if (h.alive && dealt > 0 && ((ab === 'ritual_sangue' && def.magic) || (ab === 'lamina_sugadora' && ['Espada', 'Machado', 'Lança'].includes(def.group)))) {
+      this.emit({ t: 'skill', id: h.id, skill: ab, name: ab === 'ritual_sangue' ? 'Ritual de Sangue' : 'Lâmina Sugadora' });
+      heal(h, dealt);
+    }
+    // Feitiço da Banshee: o ataque Mágico que fere Atordoa
+    if (ab === 'feitico_banshee' && def.magic) for (const r of results) if (r.wounds > 0 && r.t.alive && !r.t.stunned && !dying.includes(r.t)) this.setStun(r.t, true);
+    // Olhar Petrificante: 1 marcador por ✷ no alvo (não em Vilões)
+    if (ab === 'olhar_petrificante' && atk.crits && target.alive && !dying.includes(target) && !(target.kind === 'monster' && MONSTERS[target.defId].category.startsWith('Vilão'))) {
+      target.petrified = (target.petrified ?? 0) + atk.crits;
+      this.emit({ t: 'skill', id: h.id, skill: 'olhar_petrificante', name: 'Olhar Petrificante' });
+      this.log(`Olhar Petrificante: ${this.name(target)} perde ${target.petrified} Ponto${target.petrified > 1 ? 's' : ''} de Movimento até Descansar.`);
+    }
+    // Briga (McHammer): cada ✷ num ataque Próximo não Mágico fere outro Inimigo Perto
+    if (ab === 'briga' && def.attackType === 'melee' && !def.magic && atk.crits && h.alive && h.cell) {
+      for (let i = 0; i < atk.crits; i++) {
+        const others = this.enemiesClose(h).filter(u => !targets.includes(u) && !dying.includes(u)).sort((p, q) => this.killScore(p) - this.killScore(q));
+        if (!others.length) break;
+        this.emit({ t: 'skill', id: h.id, skill: 'briga', name: 'Briga' });
+        this.log(`Briga: 1 Ferimento em ${this.name(others[0])}.`);
+        this.hurt(others[0], 1, h);
+      }
+    }
+    // Tiro Explosivo (Pluck): acertou com ataque a Distância não Mágico -> move os personagens do Espaço do alvo
+    if (ab === 'tiro_explosivo' && def.attackType === 'ranged' && !def.magic && results[0].wounds > 0) {
+      const c0 = targetCells.get(target.id)!;
+      for (const u of this.unitsAt(c0)) if (u.alive && !dying.includes(u)) this.pushAway(u, h, 2, 'Tiro Explosivo');
+    }
+    // Zás-Trás (Bob): ✷ num ataque Mágico -> um Herói da Guilda vai para Perto do alvo
+    if (ab === 'zas_tras' && def.magic && atk.crits && h.alive) this.zasTras(h, targetCells.get(target.id)!);
+    // Mente Brilhante: ✷ num ataque Mágico -> outro Aliado pode se mover
+    if (ab === 'mente_brilhante' && def.magic && atk.crits && this.heroesOf(h.guild!).some(x => x.id !== h.id && x.alive && x.cell && !x.spent && !(this.s.activatedThisTurn ?? []).includes(x.id))) {
+      this.s.brightMind = h.guild;
+      this.emit({ t: 'skill', id: h.id, skill: 'mente_brilhante', name: 'Mente Brilhante' });
+      this.log(`Mente Brilhante: ${this.guild(h.guild!).name} pode ativar outro Herói só para se mover.`);
+    }
+    // Trapaceiro (Monkey King): com ✷ na Defesa pode ir para um Espaço Perto
+    for (const r of results) if (r.t.kind === 'hero' && r.t.alive && this.ab(r.t) === 'trapaceiro' && r.dr.crits) this.tricksterHop(r.t, h);
+    // Bate e Corre (Arco) / Feitiço da Pressa (Mágica): 2 PM extras para usar na hora
+    if (h.alive && ((ab === 'bate_corre' && def.group === 'Arco') || (ab === 'feitico_pressa' && def.magic))) {
+      a.moveLocked = false;
+      a.mp = Math.max(this.freeMode ? FREE_MP : 0, 2);
+      this.emit({ t: 'skill', id: h.id, skill: ab, name: ab === 'bate_corre' ? 'Bate e Corre' : 'Feitiço da Pressa' });
+      this.log(`${ab === 'bate_corre' ? 'Bate e Corre' : 'Feitiço da Pressa'}: ${this.name(h)} ganha 2 Pontos de Movimento.`);
+    }
+    // Caçador (Viktor): matou o alvo -> pode usar outra carta de Ataque
+    if (ab === 'cacador' && killedMain && h.alive && h.cards.some(c => !c.exhausted && this.isAttackCard(c))) {
+      a.attacked = false;
+      this.emit({ t: 'skill', id: h.id, skill: 'cacador', name: 'Caçador' });
+      this.log(`Caçador: ${this.name(h)} pode atacar de novo.`);
+    }
     // Rajada de Vento: empurra o alvo (sem Reação de Alerta)
     if (fx.push && results[0].wounds > 0 && target.alive && target.cell && !dying.includes(target)) this.pushAway(target, h, fx.push);
     // Enxame da Morte: com ✷, Monstros do Cemitério voltam perto dos Inimigos
@@ -1131,7 +1321,7 @@ export class Game {
     const p = this.s.pending;
     if (!p) return null;
     const m = this.unit(p.monsterId), h = this.unit(p.heroId);
-    const reach = this.reachable(m, MONSTERS[m.defId].move);
+    const reach = this.reachable(m, this.monMove(m));
     const attackFrom = new Set<string>();
     for (const [k, n] of reach) if (n.canEnd && this.monsterCanAttack(m, h, n.cell)) attackFrom.add(k);
     return { reach, attackFrom };
@@ -1144,7 +1334,7 @@ export class Game {
     const m = this.unit(p.monsterId), h = this.unit(p.heroId);
     if (!m.alive || !m.cell || !h.alive) { doAttack = false; dest = null; }
     if (dest && m.cell && !sameCell(dest, m.cell)) {
-      const nodes = this.reachable(m, MONSTERS[m.defId].move);
+      const nodes = this.reachable(m, this.monMove(m));
       const n = nodes.get(key(dest));
       if (!n || !n.canEnd) return false;
       this.walkMonster(m, nodes, dest);
@@ -1211,6 +1401,16 @@ export class Game {
 
   /** Coroa de Sangue: quem sai de um Espaço Perto do Herói com a Coroa sofre 2 Ferimentos. */
   private bloodCrown(mover: Unit, from: Cell) {
+    // Garras de Gatinho (Mittens): 1 Ferimento em quem sai de Perto dele (1 por Inimigo por turno)
+    for (const x of this.heroesAll()) {
+      if (!mover.alive) return;
+      if (this.ab(x) !== 'garras' || !x.alive || !x.cell || !this.isEnemy(x, mover) || !this.board.isClose(x.cell, from)) continue;
+      if ((this.s.clawed ?? []).includes(mover.id)) continue;
+      this.s.clawed = [...(this.s.clawed ?? []), mover.id];
+      this.emit({ t: 'skill', id: x.id, skill: 'garras', name: 'Garras de Gatinho' });
+      this.log(`Garras de Gatinho: ${this.name(mover)} sofre 1 Ferimento ao sair de perto de ${this.name(x)}.`);
+      this.hurt(mover, 1, x);
+    }
     for (const x of this.heroesAll()) {
       if (!mover.alive) return;
       const n = this.permFx(x, 'bloodCrown').reduce((s: number, v) => s + (v ?? 0), 0);
@@ -1252,10 +1452,12 @@ export class Game {
   }
 
   /** Rajada de Vento: empurra o alvo até N Espaços, para o mais longe possível de quem atacou. */
-  private pushAway(t: Unit, by: Unit, n: number) {
+  private pushAway(t: Unit, by: Unit, n: number, source = 'Rajada de Vento') {
     const start = t.cell!;
     const nodes = this.reachable(t, n, start, false);
-    const dist = (c: Cell) => Math.abs(c.c - by.cell!.c) + Math.abs(c.r - by.cell!.r);
+    // quem atacou pode ter morrido na retaliação: a distância conta a partir de onde ele estava (ou do alvo)
+    const ref = by.cell ?? start;
+    const dist = (c: Cell) => Math.abs(c.c - ref.c) + Math.abs(c.r - ref.r);
     const cells: Cell[] = [];
     for (const [k, nd] of nodes) {
       if (!nd.canEnd || nd.prev === null || nd.portal) continue;
@@ -1265,7 +1467,7 @@ export class Game {
     }
     if (!cells.length) return;
     // quem atacou escolhe o Espaço (como se movesse o alvo); automático: o mais longe de quem atacou
-    const pick = by.guild && this.choiceHook ? this.choiceHook({ choice: 'push', guild: by.guild, heroId: by.id, source: 'Rajada de Vento', targetId: t.id, cells }) : 'auto';
+    const pick = by.guild && this.choiceHook ? this.choiceHook({ choice: 'push', guild: by.guild, heroId: by.id, source, targetId: t.id, cells }) : 'auto';
     let best: Cell | null = null;
     if (pick === 'auto') {
       for (const c of cells) if (!best || dist(c) > dist(best)) best = c;
@@ -1277,7 +1479,235 @@ export class Game {
       t.cell = { ...st.cell };
       this.emit({ t: 'move', id: t.id, from, to: st.cell, push: true });
     }
-    this.log(`Rajada de Vento: ${this.name(t)} é empurrado.`);
+    this.log(`${source}: ${this.name(t)} é empurrado.`);
+    if (t.kind === 'hero' && t.alive) { this.triggerMines(t); this.pickupAfterCombat(); }
+  }
+
+  /** Pergunta sim/não a quem controla o Herói (Mestre Espadachim, Sorte de Apostador…). `auto`: a resposta da IA. */
+  private confirm(h: Unit, source: string, text: string, auto: boolean, faces?: DieFace[]): boolean {
+    if (!h.guild || !this.choiceHook) return auto;
+    const i = this.choiceHook({ choice: 'confirm', guild: h.guild, heroId: h.id, source, text, ...(faces ? { faces: faces.slice() } : {}) });
+    return i === 'auto' ? auto : i === 0;
+  }
+
+  /** Efeito Borboleta: escolhe um Herói Perto com carta de Ataque pronta e exausta a dele. true = trocou. */
+  private butterfly(h: Unit): boolean {
+    if (!h.cell) return false;
+    const best = (u: Unit) => u.cards.filter(c => !c.exhausted && this.isAttackCard(c)).sort((p, q) => this.cardDef(q).dice - this.cardDef(p).dice)[0];
+    const near = this.onBoard().filter(u => u.kind === 'hero' && u.id !== h.id && this.board.isClose(u.cell!, h.cell!) && best(u));
+    if (!near.length) return false;
+    let pick: Unit | null | undefined;
+    const i = this.choiceHook && h.guild ? this.choiceHook({ choice: 'extra', guild: h.guild, heroId: h.id, source: 'Efeito Borboleta', units: near.map(u => u.id),
+      text: 'Exaustar a carta de Ataque de qual Herói Perto no lugar da sua?' }) : 'auto';
+    if (i === 'auto') pick = near.filter(u => u.guild !== h.guild).sort((p, q) => this.cardDef(best(q)!).dice - this.cardDef(best(p)!).dice)[0] ?? null;
+    else pick = near[i] ?? null;
+    if (!pick) return false;
+    const c = best(pick)!;
+    c.exhausted = true;
+    this.emit({ t: 'skill', id: h.id, skill: 'efeito_borboleta', name: 'Efeito Borboleta' });
+    this.log(`Efeito Borboleta: ${this.cardDef(c).name} de ${this.name(pick)} é exaustada no lugar da carta de ${this.name(h)}.`);
+    return true;
+  }
+
+  /** Espaços Perto de `c` (e ele mesmo) onde `u` pode ser colocado. */
+  private placeCells(u: Unit, c: Cell): Cell[] {
+    return [c, ...this.board.neighbors(c).filter(nb => this.board.isClose(c, nb))]
+      .filter(x => this.board.playable(x) && !sameCell(x, u.cell) && this.unitsAt(x).filter(o => o.id !== u.id).length < 2 && this.status(u, x) !== 'blocked');
+  }
+
+  /** Coloca um personagem num Espaço (sem Movimento: não aciona Reações). */
+  private place(u: Unit, cell: Cell) {
+    const from = u.cell!;
+    u.cell = { ...cell };
+    this.emit({ t: 'move', id: u.id, from, to: { ...cell }, portal: true });
+    if (u.kind === 'hero') { this.triggerMines(u); this.pickup(u); this.checkEscort(u); this.checkHideout(u); }
+  }
+
+  /** Zás-Trás (Bob): um Herói da Guilda é colocado Perto do alvo. */
+  private zasTras(h: Unit, at: Cell) {
+    if (!this.choiceHook || !h.guild) return; // a IA não usa
+    const allies = this.heroesOf(h.guild).filter(x => x.alive && x.cell && this.placeCells(x, at).length);
+    if (!allies.length) return;
+    const i = this.choiceHook({ choice: 'extra', guild: h.guild, heroId: h.id, source: 'Zás-Trás', units: allies.map(u => u.id), text: 'Você rolou ✷: qual Herói da sua Guilda vai para Perto do alvo?' });
+    const ally = i === 'auto' ? null : allies[i];
+    if (!ally) return;
+    const cells = this.placeCells(ally, at);
+    const j = this.choiceHook({ choice: 'push', guild: h.guild, heroId: h.id, source: 'Zás-Trás', targetId: ally.id, cells, text: `Escolha onde ${HEROES[ally.defId].name} aparece.` });
+    const cell = j === 'auto' ? null : cells[j];
+    if (!cell) return;
+    this.emit({ t: 'skill', id: h.id, skill: 'zas_tras', name: 'Zás-Trás' });
+    this.place(ally, cell);
+    this.log(`Zás-Trás: ${this.name(ally)} aparece perto do alvo.`);
+  }
+
+  /** Trapaceiro (Monkey King): depois de rolar ✷ na Defesa, pode ir para um Espaço Perto. */
+  private tricksterHop(t: Unit, by: Unit) {
+    if (!t.cell || this.s.activation?.heroId === t.id) return;
+    const cells = this.placeCells(t, t.cell).filter(c => !sameCell(c, t.cell));
+    if (!cells.length) return;
+    const pick = this.choiceHook && t.guild ? this.choiceHook({ choice: 'push', guild: t.guild, heroId: t.id, source: 'Trapaceiro', targetId: t.id, cells,
+      text: `${HEROES[t.defId].name} rolou ✷ na Defesa: pode ir para um Espaço Perto.` }) : 'auto';
+    let cell: Cell | null = null;
+    if (pick === 'auto') {
+      // IA: sai de perto de quem atacou, se der
+      if (by.cell && this.board.isClose(by.cell, t.cell)) cell = cells.find(c => !this.board.isClose(by.cell!, c) && !this.monstersCloseTo(c).length) ?? null;
+    } else cell = cells[pick] ?? null;
+    if (!cell) return;
+    this.emit({ t: 'skill', id: t.id, skill: 'trapaceiro', name: 'Trapaceiro' });
+    this.place(t, cell);
+    this.log(`Trapaceiro: ${this.name(t)} pula para outro Espaço.`);
+  }
+
+  /** Doces ou Travessuras (Queen of Beggars): ao terminar o Movimento Perto de um Herói Inimigo, ele dá um marcador ou sofre 1 Ferimento. */
+  private trickOrTreat(h: Unit) {
+    if (this.ab(h) !== 'doces_travessuras' || this.s.beggarUsed || !h.cell) return;
+    const foes = this.enemiesClose(h).filter(u => u.kind === 'hero');
+    if (!foes.length) return;
+    const give = (u: Unit) => u.tokens.filter(t => t.type !== 'missao').sort((p, q) => (p.value ?? 1) - (q.value ?? 1))[0];
+    const victim = foes.find(u => give(u)) ?? foes.sort((p, q) => this.killScore(p) - this.killScore(q))[0];
+    this.s.beggarUsed = true;
+    this.emit({ t: 'skill', id: h.id, skill: 'doces_travessuras', name: 'Doces ou Travessuras' });
+    const tok = give(victim);
+    if (tok) {
+      victim.tokens.splice(victim.tokens.indexOf(tok), 1);
+      tok.faceUp = true;
+      h.tokens.push(tok);
+      this.emit({ t: 'pickup', heroId: h.id, token: tok });
+      this.log(`Doces ou Travessuras: ${this.name(victim)} dá ${TOKEN_INFO[tok.type].name} para ${this.name(h)}.`);
+    } else {
+      this.log(`Doces ou Travessuras: ${this.name(victim)} não tem marcador e sofre 1 Ferimento.`);
+      this.damageHero(victim, 1, { kind: 'hero', id: h.id });
+    }
+  }
+
+  // =========================================================================
+  // Habilidades usadas como ação (Heróis extras): Ataque Mental, Teleporte, Chamado, Macaco Vê, Relâmpago
+  // =========================================================================
+  heroPower(h: Unit): { label: string; ok: boolean; why?: string; pick?: 'enemy' | 'hero' | 'cell' } | null {
+    const ab = this.ab(h);
+    if (!h || h.kind !== 'hero' || !['ataque_mental', 'teleporte', 'chamado', 'macaco_ve', 'relampago'].includes(ab ?? '')) return null;
+    const a = this.s.activation;
+    const active = this.canAct() && h.guild === this.currentGuild().id && a?.heroId === h.id && h.alive && !!h.cell;
+    const no = (label: string, why: string) => ({ label, ok: false, why });
+    const exhaust = ' (exausta o Herói até Descansar)';
+    if (ab === 'ataque_mental') {
+      const label = `Atordoar um Inimigo em Linha de Visão${exhaust}`;
+      if (!active) return no(label, 'Só durante a ativação deste Herói');
+      if (h.spent) return no(label, 'Herói já exausto');
+      if (!this.powerTargets(h).length) return no(label, 'Nenhum Inimigo em Linha de Visão');
+      return { label, ok: true, pick: 'enemy' };
+    }
+    if (ab === 'teleporte') {
+      const label = `Ir para Perto de um Herói Aliado${exhaust}`;
+      if (!active) return no(label, 'Só durante a ativação deste Herói');
+      if (h.spent) return no(label, 'Herói já exausto');
+      if (!this.powerCells(h).length) return no(label, 'Nenhum Aliado no tabuleiro');
+      return { label, ok: true, pick: 'cell' };
+    }
+    if (ab === 'chamado') {
+      const label = `Puxar um Herói em Linha de Visão para Perto${exhaust}`;
+      if (!active) return no(label, 'Só durante a ativação deste Herói');
+      if (h.spent) return no(label, 'Herói já exausto');
+      if (!this.powerTargets(h).length) return no(label, 'Nenhum Herói em Linha de Visão');
+      return { label, ok: true, pick: 'hero' };
+    }
+    if (ab === 'macaco_ve') {
+      const label = 'Copiar a Habilidade de um Herói em Linha de Visão (até o fim do turno)';
+      if (!active) return no(label, 'Só durante a ativação deste Herói');
+      if (!this.powerTargets(h).length) return no(label, 'Nenhum Herói em Linha de Visão');
+      return { label, ok: true, pick: 'hero' };
+    }
+    const label = 'Sofrer 1 Ferimento: 1 Ferimento em todos os Inimigos Perto';
+    if (!active) return no(label, 'Só durante a ativação deste Herói');
+    if (a!.powerUsed) return no(label, 'Já usado nesta ativação');
+    if (h.wounds + 1 >= this.maxHp(h)) return no(label, 'O Herói morreria');
+    if (!this.enemiesClose(h).length) return no(label, 'Nenhum Inimigo Perto');
+    return { label, ok: true };
+  }
+
+  /** Alvos da habilidade: Inimigos (Ataque Mental) ou Heróis (Chamado, Macaco Vê) em Linha de Visão. */
+  powerTargets(h: Unit): Unit[] {
+    const ab = this.ab(h);
+    if (!h.cell) return [];
+    const los = (u: Unit) => u.alive && !!u.cell && u.id !== h.id && this.hasLOS(h, h.cell!, u.cell);
+    if (ab === 'ataque_mental') return this.onBoard().filter(u => los(u) && this.isEnemy(h, u) && !u.stunned);
+    if (ab === 'chamado') return this.onBoard().filter(u => u.kind === 'hero' && los(u) && !this.board.isClose(u.cell!, h.cell!) && this.placeCells(u, h.cell!).length);
+    if (ab === 'macaco_ve') return this.onBoard().filter(u => u.kind === 'hero' && los(u) && u.curse !== 'amnesia' && HEROES[u.defId].ability !== 'macaco_ve');
+    return [];
+  }
+
+  /** Espaços da habilidade: Teleporte (Perto de um Aliado) ou Chamado (Perto de quem chama, para `target`). */
+  powerCells(h: Unit, target?: string): Cell[] {
+    const ab = this.ab(h);
+    if (!h.cell) return [];
+    if (ab === 'teleporte') {
+      const out: Cell[] = [];
+      for (const x of this.heroesOf(h.guild!)) if (x.id !== h.id && x.alive && x.cell) for (const c of this.placeCells(h, x.cell)) if (!out.some(o => sameCell(o, c))) out.push(c);
+      return out;
+    }
+    if (ab === 'chamado' && target) return this.placeCells(this.unit(target), h.cell);
+    return [];
+  }
+
+  usePower(heroId: string, target?: string, cell?: Cell): boolean {
+    const h = this.unit(heroId);
+    if (!h || h.guild !== this.currentGuild().id) return false;
+    const info = this.heroPower(h);
+    if (!info?.ok) return false;
+    const a = this.s.activation!;
+    const ab = this.ab(h)!;
+    const name = HEROES[h.defId].abilityName;
+    if (ab === 'ataque_mental') {
+      const t = this.powerTargets(h).find(u => u.id === target);
+      if (!t) return false;
+      h.spent = true;
+      a.committed = true;
+      this.emit({ t: 'skill', id: h.id, skill: ab, name });
+      this.setStun(t, true);
+      this.log(`${name}: ${this.name(t)} fica Atordoado.`);
+      return true;
+    }
+    if (ab === 'teleporte') {
+      if (!cell || !this.powerCells(h).some(c => sameCell(c, cell))) return false;
+      h.spent = true;
+      a.committed = true;
+      this.emit({ t: 'skill', id: h.id, skill: ab, name });
+      this.place(h, cell);
+      this.log(`${name}: ${this.name(h)} aparece perto de um Aliado.`);
+      this.checkActiveDeath();
+      return true;
+    }
+    if (ab === 'chamado') {
+      const t = this.powerTargets(h).find(u => u.id === target);
+      if (!t || !cell || !this.powerCells(h, t.id).some(c => sameCell(c, cell))) return false;
+      h.spent = true;
+      a.committed = true;
+      this.emit({ t: 'skill', id: h.id, skill: ab, name });
+      this.place(t, cell);
+      this.log(`${name}: ${this.name(h)} puxa ${this.name(t)} para perto.`);
+      return true;
+    }
+    if (ab === 'macaco_ve') {
+      const t = this.powerTargets(h).find(u => u.id === target);
+      if (!t) return false;
+      a.committed = true;
+      this.s.copied = { heroId: h.id, ability: HEROES[t.defId].ability };
+      this.emit({ t: 'skill', id: h.id, skill: ab, name });
+      this.log(`${name}: ${this.name(h)} copia ${HEROES[t.defId].abilityName} de ${this.name(t)} até o fim do turno.`);
+      return true;
+    }
+    if (ab === 'relampago') {
+      a.powerUsed = true;
+      a.committed = true;
+      const near = this.enemiesClose(h);
+      this.emit({ t: 'skill', id: h.id, skill: ab, name });
+      this.damageHero(h, 1, { kind: 'trap' });
+      this.log(`${name}: ${this.name(h)} sofre 1 Ferimento e causa 1 em ${near.map(x => this.name(x)).join(', ')}.`);
+      for (const x of near) this.hurt(x, 1, h);
+      this.checkActiveDeath();
+      return true;
+    }
+    return false;
   }
 
   /** Enxame da Morte: até N Monstros do Cemitério voltam ao tabuleiro perto de Heróis Inimigos. */
@@ -1306,7 +1736,7 @@ export class Game {
     const a = this.s.activation;
     const myTurn = this.canAct() && !this.s.pending && h.guild === this.currentGuild().id;
     const usedAct = !!a?.used?.includes(c.uid);
-    const fresh = !!a && a.heroId === h.id && !a.moved && !a.attacked && a.mp >= 3;
+    const fresh = !!a && a.heroId === h.id && !a.moved && !a.attacked && a.mp >= this.startMp(h);
     const no = (label: string, why: string) => ({ label, ok: false, why });
     if (fx.apocalypse) {
       const label = 'Apocalipse: 1 Ferimento em todos os Inimigos Perto';
@@ -1347,7 +1777,7 @@ export class Game {
       if (a.heroId === h.id) return no(label, 'Funciona quando outro Herói está ativado');
       if (usedAct) return no(label, 'Já usado nesta ativação');
       // "Quando você ativa um Herói diferente": só logo ao ativar, antes de o Herói ativado mover ou atacar
-      if (a.moved || a.attacked || a.mp < 3 || a.committed) return no(label, 'Só logo ao ativar outro Herói');
+      if (a.moved || a.attacked || a.mp < this.startMp(this.unit(a.heroId)) || a.committed) return no(label, 'Só logo ao ativar outro Herói');
       if (!h.alive || !h.cell) return no(label, 'Herói fora do tabuleiro');
       return { label, ok: true, pick: 'cell' };
     }
@@ -1512,7 +1942,15 @@ export class Game {
       for (const c of h.cards) { c.exhausted = false; c.uses = 0; }
       if (h.alive && h.stunned) this.setStun(h, false);
       h.spent = false;
+      h.petrified = 0;
       if (!h.alive) this.resurrect(h, o.resurrect?.[h.id]);
+      // Hora do Lanche (Pigsy): cura todos os Ferimentos
+      if (h.alive && h.wounds && this.ab(h) === 'hora_lanche') {
+        const x = h.wounds;
+        h.wounds = 0;
+        this.emit({ t: 'skill', id: h.id, skill: 'hora_lanche', name: 'Hora do Lanche' });
+        this.emit({ t: 'heal', id: h.id, amount: x, wounds: 0 });
+      }
     }
     this.log(`${g.name} descansou: cartas restauradas.`);
     this.endTurn();
@@ -1606,6 +2044,7 @@ export class Game {
       this.s.blessing = null;
       this.s.warCry = null;
       this.s.turnUsed = [];
+      this.clearTurnFx();
       this.log('Turno adicional! Ative outro Herói.');
       this.emit({ t: 'turn', guild: this.currentGuild().id, turn: this.s.turn });
       return true;
@@ -1618,6 +2057,7 @@ export class Game {
     this.s.blessing = null;
     this.s.warCry = null;
     this.s.turnUsed = [];
+    this.clearTurnFx();
     this.emit({ t: 'turn', guild: this.currentGuild().id, turn: this.s.turn });
     for (const h of this.heroesOf(this.currentGuild().id)) {
       const g = this.permFx(h, 'genesis').reduce((a: number, b) => a + (b ?? 0), 0);
@@ -1631,6 +2071,23 @@ export class Game {
   // Internos: dano, morte, coleta, monstros
   // =========================================================================
   private killScore(u: Unit) { return this.maxHp(u) - u.wounds; }
+
+  /** Efeitos que duram até o fim do turno (Heróis extras). */
+  private clearTurnFx() {
+    this.s.brightMind = null;
+    this.s.copied = null;
+    this.s.clawed = [];
+    this.s.beggarUsed = false;
+  }
+
+  /** Devorar (Nibbles): matou um Inimigo -> cura todos os Ferimentos. */
+  private devour(killer: Unit) {
+    if (killer.kind !== 'hero' || !killer.alive || !killer.wounds || this.ab(killer) !== 'devorar') return;
+    const x = killer.wounds;
+    killer.wounds = 0;
+    this.emit({ t: 'skill', id: killer.id, skill: 'devorar', name: 'Devorar' });
+    this.emit({ t: 'heal', id: killer.id, amount: x, wounds: 0 });
+  }
 
   private setStun(u: Unit, on: boolean) {
     u.stunned = on;
@@ -1665,6 +2122,7 @@ export class Game {
     h.alive = false;
     h.deaths += 1;
     h.stunned = false;
+    h.petrified = 0;
     h.cell = null;
     this.emit({ t: 'death', id: h.id });
     this.log(`${this.name(h)} morreu!`);
@@ -1673,6 +2131,7 @@ export class Game {
       const killer = this.unit(src.id);
       const kg = killer.guild!;
       this.gainCoins(kg, 1, 'matou um Herói Inimigo');
+      if (kg !== h.guild) { (this.s.heroKills ??= {})[killer.id] = (this.s.heroKills[killer.id] ?? 0) + 1; this.devour(killer); }
       if (dropped.length && killer.alive) {
         const pick = dropped.sort((p, q) => (q.value ?? 1) - (p.value ?? 1))[0];
         dropped.splice(dropped.indexOf(pick), 1);
@@ -1695,7 +2154,9 @@ export class Game {
     const md = MONSTERS[m.defId];
     m.alive = false;
     m.cell = null;
+    m.petrified = 0;
     this.emit({ t: 'death', id: m.id, exterminated });
+    this.devour(killer);
     this.log(`${this.name(killer)} matou ${md.name}.`);
     const g = this.guild(killer.guild!);
     if (md.category.startsWith('Vilão')) {
@@ -2085,8 +2546,9 @@ export class Game {
     let dice = md.dice;
     if (ab.includes('packBonus') && this.monstersOnBoard().some(o => o.id !== m.id && this.board.isClose(o.cell!, m.cell!))) { dice++; notes.push('+1 dado (Perto de outro Monstro)'); }
     if (md !== MONSTERS[m.defId]) notes.push('Destruidor da Pedra Sangrenta: Orc mais fraco');
-    let atk = this.rollRerolls(dice, ATTACK_DIE, md.attackType, md.rerolls, m, 'attack', h);
-    if (this.knightShield(h, atk.successes)) { atk = this.rollRerolls(dice, ATTACK_DIE, md.attackType, md.rerolls, m, 'attack', h); notes.push('Escudo de Cavaleiro: ataque rolado de novo'); }
+    const mrr = this.ab(h) === 'encantado' ? 0 : md.rerolls;
+    let atk = this.rollRerolls(dice, ATTACK_DIE, md.attackType, mrr, m, 'attack', h);
+    if (this.knightShield(h, atk.successes)) { atk = this.rollRerolls(dice, ATTACK_DIE, md.attackType, mrr, m, 'attack', h); notes.push('Escudo de Cavaleiro: ataque rolado de novo'); }
     this.curAttack = { id: m.id, faces: atk.faces.slice(), hits: atk.successes, type: md.attackType, base: dice };
     if (md.rerolls) notes.push(`Rerrolagem ${md.rerolls}`);
     if (ab.includes('critExtra') && atk.crits) { atk.successes += atk.crits; notes.push(`+${atk.crits} acerto(s) por ✷`); }
@@ -2097,7 +2559,7 @@ export class Game {
     if (targets.length > 1) notes.push(md.hitsAll ? 'Atinge todos os Heróis Perto!' : 'Atinge também os Heróis Perto do alvo!');
     if (this.ab(h) === 'furia' && h.wounds > 0 && !h.stunned) notes.push('Fúria de Combate: +1 dado de Defesa');
     const res = targets.map(t => {
-      const dr = this.defenseRoll(t, this.defenseDice(t, m), m);
+      const dr = this.defenseRoll(t, this.defenseDice(t, m, md.attackType), m);
       return { t, dr, wounds: Math.max(0, atk.successes - dr.successes) };
     });
     this.emit({
@@ -2137,7 +2599,7 @@ export class Game {
   private vengeance(m: Unit, h: Unit) {
     const md = MONSTERS[m.defId];
     if (!this.monsterCanAttack(m, h)) {
-      const nodes = this.reachable(m, md.move);
+      const nodes = this.reachable(m, this.monMove(m));
       let best: PathNode | null = null;
       for (const n of nodes.values()) {
         if (!n.canEnd || n.prev === null) continue;

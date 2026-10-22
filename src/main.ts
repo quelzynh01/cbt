@@ -2,6 +2,8 @@ import './style.css';
 import './menu.css';
 import './mapinfo.css';
 import './cards.css';
+import './polish.css';
+import './mobile.css';
 import { Controller } from './ui/controller';
 import { DEFAULT_CURSOR, POINTER_CURSOR } from './render/cursors';
 
@@ -13,28 +15,21 @@ import { OnlineLobby } from './ui/lobby';
 import { CampaignUI } from './ui/campaignUI';
 import { gameOptions, recordResult } from './campaign/campaign';
 import { preloadArt } from './render/chibi';
-import { TOKEN_COUNT, preloadTokens } from './render/tokens';
-import { DICE_COUNT, preloadDice } from './render/dice';
-import { SOUND_COUNT, preloadSounds } from './audio/sfx';
 import { initMusic, setMusic } from './audio/music';
 import { soundWidget } from './audio/widget';
 import { hideLoading, loader, showLoading } from './ui/loading';
 
-// ---------------------------------------------------------------- celular: tela deitada
-// O navegador só deixa travar a orientação em tela cheia, e só depois de um toque: no primeiro toque o jogo
-// entra em tela cheia e trava deitado (Android). Onde não dá (iPhone), o aviso "Gire o celular" aparece em pé.
+// ---------------------------------------------------------------- celular: em pé ou deitado
+// No primeiro toque o jogo entra em tela cheia (esconde as barras do navegador). Dá para jogar nas duas orientações.
 const isTouch = matchMedia('(pointer: coarse)').matches;
 document.documentElement.classList.toggle('touch', isTouch);
-async function landscape() {
-  try {
-    if (!document.fullscreenElement) await document.documentElement.requestFullscreen?.({ navigationUI: 'hide' });
-    await (screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> }).lock?.('landscape');
-  } catch { /* sem suporte (iPhone) ou recusado: fica o aviso */ }
+async function fullscreen() {
+  try { if (!document.fullscreenElement) await document.documentElement.requestFullscreen?.({ navigationUI: 'hide' }); } catch { /* sem suporte (iPhone) */ }
 }
-if (isTouch) {
-  window.addEventListener('pointerdown', () => { void landscape(); }, { once: true, capture: true });
-  document.getElementById('rot-full')!.addEventListener('click', () => { void landscape(); });
-}
+if (isTouch) window.addEventListener('pointerdown', () => { void fullscreen(); }, { once: true, capture: true });
+// a câmera recentraliza quando o celular gira
+const portraitMq = matchMedia('(orientation: portrait)');
+portraitMq.addEventListener?.('change', () => setTimeout(() => window.dispatchEvent(new Event('resize')), 250));
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const hud = document.getElementById('hud')!;
@@ -124,18 +119,14 @@ document.getElementById('m-set')!.onclick = () => pages.showSettings();
 
 hud.classList.add('hidden');
 
-// Carrega os sprites (PNG) antes de liberar o jogo.
+// No início só os retratos (menus); os personagens, marcadores, dados e sons vêm ao entrar numa partida (mapLoading).
 // Atalhos: /#teste inicia direto no Modo Teste; /#biblioteca abre a Biblioteca.
 showLoading();
-loader.expect(TOKEN_COUNT + DICE_COUNT + SOUND_COUNT);
 initMusic();
 setMusic('menu');
 menu.querySelector('.menu-box')!.append(soundWidget());
 Promise.all([
   preloadArt(loader.tick, loader.expect),
-  preloadTokens(loader.tick),
-  preloadDice(loader.tick),
-  preloadSounds(loader.tick),
   document.fonts?.ready ?? Promise.resolve(),
 ]).then(() => {
   hideLoading();
