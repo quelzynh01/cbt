@@ -1185,7 +1185,9 @@ body:has(#roulette, #gamemenu:not(.hidden), #gamedialog) :is(#activebar, #banner
 #topbar .brand .sub { color: #f2e6d0; }
 #turninfo { display: none !important; }
 #topbar .sndw-vol { display: none !important; }
-#topbar #testbtn { margin-left: auto; }
+/* o nome do jogo à esquerda empurra todos os botões para a direita (com ou sem o botão Teste, que no online fica escondido) */
+#topbar .brand { margin-right: auto; }
+#topbar { gap: 8px; }
 #topbar > button, #topbar .sndw button { box-shadow: 0 3px 8px rgba(0,0,0,.5); }
 /* tudo sobe: o que ficava abaixo da faixa */
 #leftside, #rightside { top: 58px; }
