@@ -37,8 +37,8 @@ export const MANSAO: MapDef = {
     [C(2, 0), C(3, 0)], [C(5, 0), C(6, 0)], [C(3, 0), C(3, 1)], [C(4, 0), C(4, 1)], [C(5, 0), C(5, 1)],
     // salão do meio (linha 2)
     [C(0, 2), C(0, 1)], [C(0, 2), C(0, 3)],
-    [C(1, 2), C(1, 1)], [C(7, 2), C(7, 1)],
-    [C(2, 2), C(2, 1)], [C(3, 2), C(3, 1)], [C(5, 2), C(5, 1)], [C(6, 2), C(6, 1)],
+    // os Espaços dos Saqueadores (1,2) e (7,2) são abertos em cima: só as portas dos lados
+    [C(2, 2), C(2, 1)], [C(3, 2), C(3, 1)], [C(4, 2), C(4, 1)], [C(5, 2), C(5, 1)], [C(6, 2), C(6, 1)],
     [C(3, 2), C(3, 3)], [C(5, 2), C(5, 3)],
     [C(8, 2), C(8, 1)], [C(8, 2), C(8, 3)],
     // salas dos Capitães e o depósito dos nobres (linha 3)
