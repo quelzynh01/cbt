@@ -1,11 +1,12 @@
 import type { MapDef } from '../engine/board';
+import { EXTRA_HEROES } from '../engine/extraHeroes';
 import { key } from '../engine/board';
 import { ALL_HEROES, CARDS, HEROES, MONSTERS, TEST_HUMAN_HEROES, distributeStartingGear } from '../engine/data';
 import { CAMPAIGN, MAPS, difficultyBadge, getMap, loadMapId, mapDifficulty, saveMapId } from '../engine/maps';
 import { drawFace } from '../render/chibi';
 import { MAX_SLOTS, TEST_GUILDS, slotsFor, type TestConfig, loadTestConfig, normalizeTestConfig, saveTestConfig } from './testConfig';
 import { GUILDS } from '../engine/data';
-import { ITEM_LEVEL, MONSTER_LEVEL, curseCard, heroCard, itemCard, monsterCard, paintCardArt } from './cardview';
+import { ITEM_LEVEL, MONSTER_LEVEL, curseCard, extraHeroCard, heroCard, itemCard, monsterCard, paintCardArt } from './cardview';
 import { CARDS as ALL_CARDS, CURSES } from '../engine/cards';
 import { TITLES, TITLE_TEXT } from '../engine/titles';
 import { getSettings, saveSettings } from './settings';
@@ -100,10 +101,16 @@ export class MenuPages {
   }
 
   /** Galeria de Heróis. `onBack` (sala online): escolher os 3 Heróis da sua Guilda. */
+  /** Aba dos Heróis na Biblioteca: os do jogo ou os extras (só para ver). */
+  private heroSet: 'core' | 'extra' = 'core';
   showHeroes(onBack?: () => void) {
     if (onBack) { this.back = onBack; this.tab = null; this.picking = true; }
     else if (this.tab) this.picking = false;
-    const cards = ALL_HEROES.map(id => {
+    const extra = !this.picking && this.heroSet === 'extra';
+    const sub = this.picking ? '' : `<div class="lib-filter">
+      <button class="${extra ? '' : 'primary'}" data-hs="core">⭐ Core Heroes <small>(${ALL_HEROES.length})</small></button>
+      <button class="${extra ? 'primary' : ''}" data-hs="extra">✨ Extra Heroes <small>(${EXTRA_HEROES.length})</small></button></div>`;
+    const cards = extra ? EXTRA_HEROES.map(h => extraHeroCard(h)).join('') : ALL_HEROES.map(id => {
       const idx = this.guild.indexOf(id);
       const on = this.picking && idx >= 0;
       return heroCard(id, on ? 'picked' : '', `data-hero="${id}"`, '', on ? `${idx + 1}` : '');
@@ -113,8 +120,10 @@ export class MenuPages {
         <div><b>Sua Guilda</b> (sala online) — clique nos cartões para escolher 3 Heróis.</div>
         <div class="mp-slots">${[0, 1, 2].map(i => `<span class="slot">${i + 1}. ${this.guild[i] ? HEROES[this.guild[i]].name : '—'}</span>`).join('')}</div>
       </div>`}
+      ${sub}${extra ? '<p class="muted">Heróis extras: só para conhecer — ainda não dá para jogar com eles.</p>' : ''}
       <div class="hgrid cards3">${cards}</div>`);
     paintCardArt(this.page);
+    this.page.querySelectorAll<HTMLElement>('[data-hs]').forEach(b => { b.onclick = () => { this.heroSet = b.dataset.hs as 'core' | 'extra'; this.showHeroes(); }; });
     this.page.querySelectorAll<HTMLElement>('[data-hero]').forEach(el => {
       if (this.picking) el.onclick = () => this.toggle(el.dataset.hero!);
     });

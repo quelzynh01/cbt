@@ -138,24 +138,12 @@ export const CARD_ART: Record<string, { img: string; kind: 'fill' | 'icon' }> = 
     "img": "die_booten",
     "kind": "icon"
   },
-  "tiro_certeiro": {
-    "img": "tiro_certeiro",
-    "kind": "icon"
-  },
   "grrr": {
     "img": "grrr",
     "kind": "fill"
   },
   "mais_grrr": {
     "img": "grrr",
-    "kind": "fill"
-  },
-  "golpe_astral": {
-    "img": "golpe_astral",
-    "kind": "fill"
-  },
-  "golpe_astral2": {
-    "img": "golpe_astral",
     "kind": "fill"
   },
   "lamina_confiavel": {
@@ -216,6 +204,102 @@ export const CARD_ART: Record<string, { img: string; kind: 'fill' | 'icon' }> = 
   },
   "bomba": {
     "img": "bomba",
+    "kind": "icon"
+  },
+  "bomba_apetitosa": {
+    "img": "bomba_apetitosa",
+    "kind": "icon"
+  },
+  "bombastica": {
+    "img": "bombastica",
+    "kind": "icon"
+  },
+  "armadura_cavaleiro": {
+    "img": "armadura_cavaleiro",
+    "kind": "icon"
+  },
+  "amuleto_retribuicao": {
+    "img": "amuleto_retribuicao",
+    "kind": "icon"
+  },
+  "tiro_flamejante": {
+    "img": "tiro_flamejante",
+    "kind": "icon"
+  },
+  "manto_deslocamento": {
+    "img": "manto_deslocamento",
+    "kind": "icon"
+  },
+  "bastao_celeridade": {
+    "img": "bastao_celeridade",
+    "kind": "icon"
+  },
+  "raiar_dia": {
+    "img": "raiar_dia",
+    "kind": "icon"
+  },
+  "enxofre": {
+    "img": "enxofre",
+    "kind": "icon"
+  },
+  "golpe_astral": {
+    "img": "golpe_astral",
+    "kind": "fill"
+  },
+  "golpe_astral2": {
+    "img": "golpe_astral",
+    "kind": "fill"
+  },
+  "varinha_pressa": {
+    "img": "varinha_pressa",
+    "kind": "icon"
+  },
+  "armadura_lorde": {
+    "img": "armadura_lorde",
+    "kind": "icon"
+  },
+  "enxame_morte": {
+    "img": "enxame_morte",
+    "kind": "fill"
+  },
+  "livro_mortos": {
+    "img": "livro_mortos",
+    "kind": "icon"
+  },
+  "amuleto_rawr": {
+    "img": "amuleto_rawr",
+    "kind": "icon"
+  },
+  "armadura_imperador": {
+    "img": "armadura_imperador",
+    "kind": "icon"
+  },
+  "pilao": {
+    "img": "pilao",
+    "kind": "icon"
+  },
+  "tiro_certeiro": {
+    "img": "tiro_certeiro",
+    "kind": "icon"
+  },
+  "escudo_lua": {
+    "img": "escudo_lua",
+    "kind": "icon"
+  },
+  "ultima_resistencia": {
+    "img": "ultima_resistencia",
+    "kind": "icon"
+  },
+  "pedra_furia": {
+    "img": "pedra_furia",
+    "kind": "icon"
+  },
+  "caca_almas": {
+    "img": "caca_almas",
+    "kind": "icon"
+  },
+  "rouba_vidas": {
+    "img": "rouba_vidas",
     "kind": "icon"
   },
   "curse:sem_maldicao": {

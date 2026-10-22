@@ -104,7 +104,7 @@ const artImg = (a: { img: string; kind: string }, cls = '') => `<img class="ac-i
 /** Texto de carta: o ✷ vira o ícone do dado crítico. */
 export const richText = (t = '') => t.replace(/✷/g, `<span class="ic-crit" title="Crítico">${dieImg('crit', true)}</span>`);
 
-const textSize = (t = '') => t.length > 110 ? 'xs' : t.length > 80 ? 'sm' : '';
+const textSize = (t = '') => t.length > 170 ? 'xxs' : t.length > 110 ? 'xs' : t.length > 80 ? 'sm' : '';
 
 /** Carta de Maldição Mortal (mesmo tamanho das cartas de Monstro). */
 export function curseCard(id: string, extra = '', attrs = ''): string {
@@ -131,9 +131,25 @@ export function heroCard(id: string, extra = '', attrs = '', foot = '', badge = 
         <div class="ac-ribbon"><small>Habilidade</small><b>${h.abilityName}</b></div>
         <div class="ac-text ${textSize(h.abilityText)}"><p>${richText(h.abilityText)}${h.implemented === false ? ' <i>(a confirmar)</i>' : ''}</p></div>
       </div>
-      <canvas class="hc-artc" width="200" height="230" data-art="${id}"></canvas>
+      <canvas class="hc-artc" width="300" height="340" data-art="${id}"></canvas>
     </div>
     ${foot ? `<div class="ac-code">${foot}</div>` : ''}
+  </div>`;
+}
+
+/** Carta de Herói extra (só na Biblioteca, ainda não jogável): o retrato no lugar do boneco, carta mais escura. */
+export function extraHeroCard(h: { id: string; name: string; def: number; hp: number; ability: string; text: string; art: boolean }): string {
+  return `<div class="acard hero extra" title="Herói extra — ainda não jogável">
+    ${title(h.name, 'Herói Extra')}
+    <div class="hc-body">
+      <div class="hc-left">
+        <div class="hc-meds">${h.def > 0 ? medal('def', h.def, 'Defesa', 'big') : `<span class="med def big" title="Defesa"><b>0</b></span>`}${medal('hp', h.hp, 'Vida', 'big')}</div>
+        <div class="ac-ribbon"><small>Habilidade</small><b>${h.ability}</b></div>
+        <div class="ac-text ${textSize(h.text)}"><p>${richText(h.text)}</p></div>
+      </div>
+      ${h.art ? `<img class="hc-artc xh-img" src="${import.meta.env.BASE_URL}portraits/x_${h.id}.webp" alt="" draggable="false"/>` : `<div class="hc-artc xh-none">${h.name.split(' ').map(w => w[0]).join('').slice(0, 2)}</div>`}
+    </div>
+    <div class="ac-code">Extra · ainda não jogável</div>
   </div>`;
 }
 

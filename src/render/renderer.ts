@@ -454,13 +454,13 @@ export class Renderer {
         const u = this.units.get(e.id)!;
         u.wounds = e.wounds;
         u.hurtT0 = now;
-        this.floatAt(e.id, `-${e.amount}`, '#ff5a3c', 26);
+        this.floatAt(e.id, `-${e.amount}`, '#ff5a3c', 36);
         break;
       }
       case 'heal': {
         const u = this.units.get(e.id)!;
         u.wounds = e.wounds;
-        this.floatAt(e.id, `+${e.amount}`, '#6cff7a', 24);
+        this.floatAt(e.id, `+${e.amount}`, '#6cff7a', 32);
         break;
       }
       default: this.startEvent2(e, now); break;
@@ -523,25 +523,25 @@ export class Renderer {
         const u = this.units.get(e.id)!;
         u.wounds = e.wounds;
         u.hurtT0 = now;
-        this.floatAt(e.id, `-${e.amount}`, '#ff5a3c', 26);
+        this.floatAt(e.id, `-${e.amount}`, '#ff5a3c', 36);
         break;
       }
       case 'heal': {
         const u = this.units.get(e.id)!;
         u.wounds = e.wounds;
-        this.floatAt(e.id, `+${e.amount}`, '#6cff7a', 24);
+        this.floatAt(e.id, `+${e.amount}`, '#6cff7a', 32);
         break;
       }
       case 'death': {
         const u = this.units.get(e.id)!;
         u.fade = { from: 1, to: 0, t0: now, dur: 480 / this.speed };
-        if (e.exterminated) this.floatAt(e.id, 'EXTERMINADO!', '#ffd34d', 18, -18);
+        if (e.exterminated) this.floatAt(e.id, 'EXTERMINADO!', '#ffd34d', 26, -18);
         break;
       }
       case 'stun': {
         const u = this.units.get(e.id)!;
         u.stunned = e.on;
-        if (e.on) { this.floatAt(e.id, 'Atordoado!', '#ffe14d', 16, -18); play('stun', 0.8); }
+        if (e.on) { this.floatAt(e.id, 'ATORDOADO!', '#ffe14d', 26, -18); play('stun', 0.8); }
         break;
       }
       case 'pickup': {
@@ -578,7 +578,7 @@ export class Renderer {
         break;
       }
       case 'reaction': {
-        this.floatAt(e.monsterId, e.kind === 'alerta' ? 'Alerta!' : 'Vingança!', e.kind === 'alerta' ? '#ffd34d' : '#ff6b6b', 17, -14);
+        this.floatAt(e.monsterId, e.kind === 'alerta' ? 'Alerta!' : 'Vingança!', e.kind === 'alerta' ? '#ffd34d' : '#ff6b6b', 24, -14);
         break;
       }
       default:
@@ -1245,10 +1245,7 @@ export class Renderer {
     }
     drawCharacter(ctx, u.defId, { dir, flip, t: idleT, hurt, alpha: 1, stunned: u.stunned, lunge: 0, scale: L.scale * 0.66 });
     if (spinFx && spinFront) spinFx();
-    if (u.stunned) for (let i = 0; i < 3; i++) {
-      const ang = tt * 3 + (i * Math.PI * 2) / 3;
-      star(ctx, Math.cos(ang) * 16, -84 * L.scale + Math.sin(ang) * 5, 5, '#ffe14d');
-    }
+    if (u.stunned) this.drawStun(ctx, -78 * L.scale - 6, tt);
 
     // barra de vida + número
     const top = -78 * L.scale - 6;
@@ -1293,6 +1290,33 @@ export class Renderer {
       ctx.beginPath(); ctx.moveTo(-8, ay - 8); ctx.lineTo(8, ay - 8); ctx.lineTo(0, ay + 2); ctx.closePath(); ctx.fill(); ctx.stroke();
     }
     ctx.restore();
+  }
+
+  /** Atordoado: halo de estrelas grande em cima da cabeça e a placa "ATORDOADO · sem Defesa" (todos veem de longe). */
+  private drawStun(ctx: CanvasRenderingContext2D, top: number, tt: number) {
+    const cy = top - 26;
+    // halo (anel tonto) com brilho
+    ctx.save();
+    ctx.shadowColor = 'rgba(255,225,77,0.9)'; ctx.shadowBlur = 14;
+    ctx.strokeStyle = 'rgba(255,225,77,0.85)'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.ellipse(0, cy, 34, 11, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+    // estrelas girando (as de trás menores e mais apagadas)
+    for (let i = 0; i < 5; i++) {
+      const ang = tt * 3.2 + (i * Math.PI * 2) / 5;
+      const front = Math.sin(ang) > 0;
+      ctx.globalAlpha = front ? 1 : 0.55;
+      star(ctx, Math.cos(ang) * 34, cy + Math.sin(ang) * 11, front ? 11 : 8, '#ffe14d');
+    }
+    ctx.globalAlpha = 1;
+    // placa
+    const label = 'ATORDOADO · sem Defesa';
+    ctx.font = '900 14px "Baloo 2", sans-serif';
+    const w = ctx.measureText(label).width + 18, y = cy - 30;
+    ctx.fillStyle = 'rgba(70,40,0,0.88)'; ctx.strokeStyle = '#ffe14d'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.roundRect(-w / 2, y - 12, w, 22, 11); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#ffe14d'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(label, 0, y); ctx.textBaseline = 'alphabetic';
   }
 
   /** O Herói arrastado desenhado no ponteiro (por cima de tudo, levemente inclinado, como uma carta sendo segurada). */
