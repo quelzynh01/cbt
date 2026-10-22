@@ -255,7 +255,7 @@ export class Hud {
     const act = g.s.activation;
     const cur = g.currentGuild();
     const human = this.isMine(cur.id) && !g.s.winner && !g.s.deploying?.length;
-    const fresh = !act || (!act.moved && !act.attacked && act.mp === 3);
+    const fresh = g.canRest();
     ($('#dock-rest', this.root) as HTMLButtonElement).disabled = !(human && fresh);
     ($('#dock-end', this.root) as HTMLButtonElement).disabled = !human;
     $('#dock-end', this.root).classList.toggle('end-now', human && this.nothingLeft());
@@ -321,7 +321,7 @@ export class Hud {
     const cur = g.currentGuild();
     const a = g.s.activation;
     // aparece enquanto dá para escolher quem ativar: no começo do turno, antes de agir, ou com Bênção / Grito de Guerra
-    const choosing = !a || (!a.moved && !a.attacked && a.mp >= 3) || g.heroesOf(cur.id).some(h => h.id !== a.heroId && g.canBless(h.id));
+    const choosing = !a || g.activationFresh() || g.heroesOf(cur.id).some(h => h.id !== a.heroId && g.canBless(h.id));
     if (!this.isMine(cur.id) || g.s.winner || g.s.pending || !choosing) { el.classList.add('hidden'); return; }
     const done = g.s.activatedThisTurn ?? [];
     el.innerHTML = g.heroesOf(cur.id).map(h => {
@@ -726,7 +726,7 @@ export class Hud {
     const cur = g.currentGuild();
     const id = this.inspected ?? act?.heroId ?? null;
     const human = this.isMine(cur.id) && !g.s.winner && !g.s.deploying?.length;
-    const fresh = !act || (!act.moved && !act.attacked && act.mp === 3);
+    const fresh = g.canRest();
     const actions = `
       <div class="actions">
         <button id="btn-rest" ${human && fresh ? '' : 'disabled'} title="Restaurar cartas, recuperar atordoados e ressuscitar (R)">💤 Descansar Guilda</button>
@@ -783,7 +783,7 @@ export class Hud {
         ${isActive ? `<span title="Ataque">${act!.attacked ? '⚔ usado' : '⚔ disponível'}</span>` : ''}
       </div>
       <div class="ability ${u.curse === 'amnesia' ? 'off' : ''}"><b>${hd.abilityName}</b> — ${hd.abilityText}</div>
-      ${u.curse ? `<div class="tag dead hb-curse" title="${CURSES[u.curse]?.text ?? ''}">${curseArt(u.curse)}<span>☠ Maldição: <b>${CURSES[u.curse]?.name}</b> — ${CURSES[u.curse]?.text}</span></div>` : ''}
+      ${u.curse ? `<div class="ability curse-ab" title="${CURSES[u.curse]?.text ?? ''}"><b>☠ ${CURSES[u.curse]?.name}</b> — ${CURSES[u.curse]?.text}</div>` : ''}
       ${g.rerollsOf(u) ? `<div class="tag rr">↻ Rerrolagem ${g.rerollsOf(u)} ${getSettings().reroll === 'auto' ? '(automática nos dados que falharem)' : '(você escolhe os dados após cada rolagem)'}</div>` : ''}
       ${u.stunned ? '<div class="tag stun">✷ Atordoado — não rola Defesa até Descansar</div>' : ''}
       ${!u.alive ? '<div class="tag dead">☠ Morto — ressuscita quando a Guilda Descansar</div>' : ''}

@@ -324,6 +324,9 @@ export class OnlineLobby {
     }
     game.drain();
     l.campaign = st.mode === 'campaign';
+    // roleta de quem começa: partida avulsa ou 1º cenário da campanha (nos outros começa quem está à esquerda do vencedor)
+    l.scenario = st.mode === 'campaign' ? (st.camp?.played.length ?? 0) + 1 : 1;
+    l.roulette = st.mode !== 'campaign' || l.scenario === 1;
     l.setup = undefined;
     host.startGame(game.s);
     this.close();
@@ -390,7 +393,8 @@ export class OnlineLobby {
       const inv = Object.fromEntries(heroes.map(h => [h, items.filter(x => x.to === h).map(x => x.id)]));
       const errs = [...equipErrors(st, me, inv), ...poolErrors(items, false)];
       const ready = !!st.equip[me];
-      const eqOpts: InvOptions = { heroes, color: GUILDS[me].color, discard: false, ready, slots: (_h, cards) => ({ used: cards.length, max: 4, magicExtra: cards.reduce((s, id) => s + (CARDS[id]?.fx.magicSlots ?? 0), 0) }) };
+      // mesmo depois de "Pronto" dá para reorganizar enquanto alguém ainda escolhe (cada mudança é enviada de novo)
+      const eqOpts: InvOptions = { heroes, color: GUILDS[me].color, discard: false, slots: (_h, cards) => ({ used: cards.length, max: 4, magicExtra: cards.reduce((s, id) => s + (CARDS[id]?.fx.magicSlots ?? 0), 0) }) };
       this.invBind = { items, opts: eqOpts };
       center = `<h3>Equipamento inicial — ${MAPS[st.map!].name}</h3>
         ${st.tie ? `<p>Empate entre ${st.tie.map(id => MAPS[id].name).join(' e ')}: sorteado <b>${MAPS[st.map!].name}</b>.</p>` : ''}
@@ -399,7 +403,7 @@ export class OnlineLobby {
         ${invEditorHtml(items, eqOpts)}
         ${errs.length ? `<div class="lb-warn">${errs.join('<br/>')}</div>` : ''}
         <div class="tb-actions">${ready
-          ? `<span class="tb-wait">✓ Pronto! Aguardando: ${st.order.filter(g => !st.equip[g]).map(g => esc(name(g))).join(', ')}</span>`
+          ? `<span class="tb-wait">✓ Pronto! Aguardando: ${st.order.filter(g => !st.equip[g]).map(g => esc(name(g))).join(', ')} — você ainda pode trocar as cartas até todos terminarem.</span>`
           : `<button class="primary" id="tb-equip" ${errs.length ? 'disabled' : ''}>✔ Pronto</button>`}</div>`;
     } else if (st.step.startsWith('upgrade') && me && camp?.upgrade) {
       center = this.upgradeHtml(st, me);
@@ -448,7 +452,18 @@ export class OnlineLobby {
     this.page.querySelectorAll<HTMLElement>('[data-v]').forEach(el => {
       el.onclick = () => this.send({ t: 'vote', map: el.dataset.v! });
     });
-    if (this.invBind) { bindInvEditor(this.page, this.invBind.items, this.invBind.opts, () => this.renderTable()); this.invBind = null; }
+    if (this.invBind) {
+      bindInvEditor(this.page, this.invBind.items, this.invBind.opts, () => {
+        // já estava pronto: a nova arrumação vale (se estiver válida)
+        if (st.step === 'equip' && me && st.equip[me] && this.equipDraft) {
+          const heroes = st.picks[me] ?? [];
+          const inv = Object.fromEntries(heroes.map(h => [h, this.equipDraft!.filter(x => x.to === h).map(x => x.id)]));
+          if (!equipErrors(st, me, inv).length && !poolErrors(this.equipDraft, false).length) this.send({ t: 'equip', inv });
+        }
+        this.renderTable();
+      });
+      this.invBind = null;
+    }
     const eq = this.page.querySelector('#tb-equip') as HTMLElement | null;
     if (eq && me) eq.onclick = () => {
       const heroes = st.picks[me] ?? [];

@@ -97,6 +97,8 @@ export interface Activation {
   attacked: boolean;
   /** Cartas ativáveis já usadas nesta ativação. */
   used?: string[];
+  /** Algo já aconteceu nesta ativação (ex.: as Botas moveram um Aliado): não dá mais para trocar de Herói nem Descansar. */
+  committed?: boolean;
 }
 
 export interface MissionDef {
@@ -168,8 +170,10 @@ export interface GameState {
   current: number;
   activation: Activation | null;
   extraTurn: boolean;
-  /** Turno adicional (Poção): só este Herói (o que usou a poção) é reativado (p.25). */
+  /** Turno adicional (Poção): o Herói que usou a poção — ele NÃO joga o turno adicional; joga outro Herói. */
   extraHero?: string | null;
+  /** Estamos num turno adicional (não dá para Descansar). */
+  extraTurnOn?: boolean;
   floor: Record<string, Token[]>;
   entryBoard: string[];
   entryMarkers: EntryMarker[];

@@ -682,23 +682,23 @@ export class Game {
 
   /** Ativar um Herói (p.14). Pode trocar de Herói enquanto nada foi feito. */
   activate(heroId: string): boolean {
-    // turno adicional: só o Herói que usou a poção joga
-    if (this.s.extraHero && heroId !== this.s.extraHero && !this.freeMode) return false;
+    // turno adicional: joga outro Herói (não o que usou a poção)
+    if (this.s.extraTurnOn && heroId === this.s.extraHero && !this.freeMode) return false;
     if (!this.canAct()) return false;
     const h = this.unit(heroId);
     if (!h || h.kind !== 'hero' || h.guild !== this.currentGuild().id || !h.alive || !h.cell) return false;
     if (h.spent && !this.freeMode) return false;
     const a = this.s.activation;
     const done = this.s.activatedThisTurn ?? [];
-    if (a && a.heroId !== heroId && !this.freeMode && (a.moved || a.attacked || a.mp < 3)) {
+    if (a && a.heroId !== heroId && !this.freeMode && !this.activationFresh()) {
       if (!this.canBless(heroId)) return false;
       this.log(this.s.warCry === h.guild && !this.s.blessing ? `Grito de Guerra: ${this.name(h)} é ativado!` : `Bênção de Hobsbawm: ${this.name(h)} é ativado!`);
       this.s.blessing = null;
       this.s.warCry = null;
     } else if (a?.heroId === heroId) return true;
-    else if (!this.freeMode && done.includes(heroId) && !(a && !a.moved && !a.attacked)) return false;
+    else if (!this.freeMode && done.includes(heroId) && !this.activationFresh()) return false;
     // trocar de uma ativação ainda sem ações não conta como ativação
-    const prevFresh = a && a.heroId !== heroId && !a.moved && !a.attacked && a.mp >= 3 ? a.heroId : null;
+    const prevFresh = a && a.heroId !== heroId && this.activationFresh() ? a.heroId : null;
     this.s.activation = { heroId, mp: 3, moved: false, moveLocked: false, attacked: false };
     this.s.activatedThisTurn = [...done.filter(x => x !== prevFresh && x !== heroId), heroId];
     // ao ser ativado, pega o que ficou no seu Espaço (ex.: o Inimigo que estava ali morreu)
@@ -706,6 +706,20 @@ export class Game {
     this.checkEscort(h);
     this.applyFree();
     return true;
+  }
+
+  /** A ativação atual ainda não fez nada (dá para trocar de Herói ou Descansar). */
+  activationFresh(): boolean {
+    const a = this.s.activation;
+    return !!a && !a.moved && !a.attacked && a.mp >= 3 && !a.committed;
+  }
+
+  /** Dá para Descansar agora? Só se nenhum Herói fez nada neste turno (Bênção/Grito de Guerra, Botas e turno adicional contam). */
+  canRest(): boolean {
+    if (this.s.extraTurnOn) return false;
+    const a = this.s.activation;
+    if (a && !this.activationFresh()) return false;
+    return (this.s.activatedThisTurn ?? []).filter(id => id !== a?.heroId).length === 0;
   }
 
   /** Pode ativar `heroId` pela Bênção? (outro Aliado, não ativado neste turno, em Linha de Visão de Hobsbawm). */
@@ -1333,7 +1347,7 @@ export class Game {
       if (a.heroId === h.id) return no(label, 'Funciona quando outro Herói está ativado');
       if (usedAct) return no(label, 'Já usado nesta ativação');
       // "Quando você ativa um Herói diferente": só logo ao ativar, antes de o Herói ativado mover ou atacar
-      if (a.moved || a.attacked || a.mp < 3) return no(label, 'Só logo ao ativar outro Herói');
+      if (a.moved || a.attacked || a.mp < 3 || a.committed) return no(label, 'Só logo ao ativar outro Herói');
       if (!h.alive || !h.cell) return no(label, 'Herói fora do tabuleiro');
       return { label, ok: true, pick: 'cell' };
     }
@@ -1419,6 +1433,9 @@ export class Game {
       const nd = nodes.get(key(cell));
       if (!nd || !nd.canEnd || nd.prev === null) return false;
       markAct();
+      // usou as Botas: não dá mais para trocar de Herói, e o Herói das Botas não pode ser ativado neste turno
+      if (this.s.activation) this.s.activation.committed = true;
+      if (!(this.s.activatedThisTurn ?? []).includes(h.id)) this.s.activatedThisTurn = [...(this.s.activatedThisTurn ?? []), h.id];
       for (const st of this.pathTo(nodes, cell)) {
         if (!h.alive) break;
         const from = h.cell!;
@@ -1477,9 +1494,7 @@ export class Game {
   /** Descansar (p.18): restaura cartas, recupera atordoados, reorganiza itens e marcadores e ressuscita os mortos. */
   rest(o: RestOptions = {}): boolean {
     if (!this.canAct()) return false;
-    if (this.s.extraHero) return false; // turno adicional: é do Herói que usou a poção
-    const a = this.s.activation;
-    if (a && (a.moved || a.attacked || a.mp < 3)) return false;
+    if (!this.canRest()) return false;
     const g = this.currentGuild();
     if (this.validateRest(g.id, o)) return false;
     const heroes = this.heroesOf(g.id);
@@ -1583,22 +1598,20 @@ export class Game {
       return true;
     }
     if (this.s.extraTurn) {
-      // Poção de Turno Adicional (p.25): um turno completo novo, e só o Herói que usou a poção é reativado
+      // Poção de Turno Adicional: um turno novo para OUTRO Herói da Guilda (o que usou a poção não joga) e sem Descanso
       this.s.extraTurn = false;
-      const hero = this.s.extraHero ? this.s.units[this.s.extraHero] : prevHero;
+      this.s.extraTurnOn = true;
+      if (!this.s.extraHero && prevHero) this.s.extraHero = prevHero.id;
       this.s.activatedThisTurn = [];
       this.s.blessing = null;
       this.s.warCry = null;
       this.s.turnUsed = [];
-      this.log('Turno adicional!');
+      this.log('Turno adicional! Ative outro Herói.');
       this.emit({ t: 'turn', guild: this.currentGuild().id, turn: this.s.turn });
-      if (hero && hero.alive && hero.cell) {
-        this.activate(hero.id);
-        this.s.extraHero = hero.id; // trava a ativação neste Herói até o fim do turno adicional
-      } else this.s.extraHero = null;
       return true;
     }
     this.s.extraHero = null;
+    this.s.extraTurnOn = false;
     this.s.current = (this.s.current + 1) % this.s.guildOrder.length;
     if (this.s.current === 0) this.s.turn++;
     this.s.activatedThisTurn = [];

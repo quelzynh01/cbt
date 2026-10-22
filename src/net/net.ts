@@ -29,6 +29,10 @@ export interface Lobby {
   setup?: OnlineSetup;
   /** Campanha online em andamento (6 cenários). */
   campaign?: boolean;
+  /** Mostrar a roleta de quem começa (partida avulsa ou 1º cenário da campanha). */
+  roulette?: boolean;
+  /** Número do cenário (para a roleta não repetir ao reconectar). */
+  scenario?: number;
 }
 
 /** Jogadas da preparação. */

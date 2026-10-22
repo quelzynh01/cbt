@@ -220,6 +220,7 @@ export class Controller {
     if (info.roulette) this.rouletteFor(this.game);
   }
 
+  private rouletteShown = '';
   /** Roleta com as Guildas (cores e nomes), parando em quem joga primeiro. */
   private rouletteFor(g: Game) {
     const gs = g.guilds();
@@ -399,14 +400,16 @@ export class Controller {
       return true;
     }
     if (this.deciding) return false;
-    const snap = this.mode === 'local' ? JSON.stringify(this.game.s) : '';
+    // jogadas guardadas para "Desfazer jogada" (no computador e pelo anfitrião online)
+    const snap = JSON.stringify(this.game.s);
     const guild = (a.type === 'place' || a.type === 'placeMany' || a.type === 'ready') ? this.myDeployGuild() : actingGuild(this.game);
     if (!guild) return false;
     let result: boolean | null = null;
     this.withDecisions(() => applyAction(this.game, guild, a), ok => {
       result = ok;
-      if (ok && this.mode === 'local') {
-        this.history.push({ label, state: snap });
+      if (ok && this.mode !== 'client') {
+        const names: Record<string, string> = { move: 'movimento', attack: 'ataque', activate: 'ativação', door: 'porta', token: 'marcador', card: 'carta', rest: 'descanso', end: 'fim do turno', vengeance: 'Vingança' };
+        this.history.push({ label: label === 'jogada' ? names[a.type] ?? label : label, state: snap });
         if (this.history.length > 60) this.history.shift();
       }
       const ev = this.game.drain();
@@ -427,10 +430,10 @@ export class Controller {
     const u = g.unit(id);
     const a = g.s.activation;
     if (!this.isHumanTurn() || !u || u.kind !== 'hero' || u.guild !== g.currentGuild().id || !u.alive || !u.cell || u.spent) return false;
-    if (g.s.extraHero && u.id !== g.s.extraHero && !g.freeMode) return false; // turno adicional: só quem usou a poção
+    if (g.s.extraTurnOn && u.id === g.s.extraHero && !g.freeMode) return false; // turno adicional: outro Herói, não quem usou a poção
     if (u.id === a?.heroId) return false;
-    if ((g.s.activatedThisTurn ?? []).includes(u.id) && !(a && !a.moved && !a.attacked)) return g.freeMode;
-    return !a || (!a.moved && !a.attacked && a.mp >= 3) || g.canBless(u.id) || g.freeMode;
+    if ((g.s.activatedThisTurn ?? []).includes(u.id) && !g.activationFresh()) return g.freeMode;
+    return !a || g.activationFresh() || g.canBless(u.id) || g.freeMode;
   }
 
   /** Clique no seu Herói: só seleciona — o botão "▶ Ativar" confirma. */
@@ -525,8 +528,12 @@ export class Controller {
     this.waitingNet = false;
     this.stopped = false;
     this.game = new Game(getMap(state.mapId), state);
-    // partida avulsa começando agora: a roleta mostra quem foi sorteado para começar (todos veem a mesma)
-    if (!lobby.campaign && state.turn === 1 && (state.deploying?.length ?? 0) > 0) this.rouletteFor(this.game);
+    // começo da partida (avulsa ou 1º cenário da campanha): a roleta mostra quem foi sorteado (todos veem a mesma, uma vez só)
+    const rk = `${lobby.code}:${lobby.scenario ?? 1}:${state.mapId}`;
+    if (lobby.roulette && state.turn === 1 && (state.deploying?.length ?? 0) > 0 && this.rouletteShown !== rk) {
+      this.rouletteShown = rk;
+      this.rouletteFor(this.game);
+    }
     this.ais = {};
     this.history = [];
     this.turnStart = null;
@@ -663,7 +670,10 @@ export class Controller {
     if (this.game.guild(guild).controller !== 'human') return 'A IA está controlando sua Guilda.';
     this.autoDecide = true;
     let ok = false;
+    const snap = JSON.stringify(this.game.s);
     try { ok = applyAction(this.game, guild, a); } finally { this.autoDecide = false; }
+    // jogada de outro jogador também pode ser desfeita pelo anfitrião
+    if (ok) { this.history.push({ label: `jogada de ${this.hud.nameOf(guild) ?? guildShort(guild)}`, state: snap }); if (this.history.length > 60) this.history.shift(); }
     const ev = this.game.drain();
     if (ok || ev.length) {
       (this.net as HostSession).update(ev, this.game.s);
@@ -1393,7 +1403,13 @@ export class Controller {
       const r = el.getBoundingClientRect();
       this.renderer.cam.y += (r.bottom - 50) / 2;
     }
-    (el.querySelector('#dp-ok') as HTMLElement).onclick = () => { this.deploySel = null; this.hud.inspected = null; this.act({ type: 'ready' }); };
+    // confirma antes: depois de pronto não dá mais para mudar (o pessoal clicava sem organizar)
+    (el.querySelector('#dp-ok') as HTMLElement).onclick = async () => {
+      const where = heroes.map(h => `<li><b>${HEROES[h.defId].name}</b> — ${sameCell(h.cell, this.game.startCellsByExit(gid)[0]) ? 'na porta' : 'na Área Inicial'}</li>`).join('');
+      if (!await gameConfirm({ icon: '📍', title: 'Terminar o posicionamento?', body: `<ul class="gd-list">${where}</ul>Depois de confirmar não dá para mudar os lugares. Arraste os Heróis no mapa se quiser trocar.`, yes: 'Sim, terminar', no: 'Continuar arrumando' })) return;
+      if (this.myDeployGuild() !== gid) return;
+      this.deploySel = null; this.hud.inspected = null; this.act({ type: 'ready' });
+    };
     this.renderer.hl.activeUnit = this.deploySel;
     this.hud.setHint('Posicionamento: escolha o Herói e o Espaço da Área Inicial');
   }
@@ -1451,7 +1467,7 @@ export class Controller {
   private openRest() {
     if (!this.isHumanTurn() || this.renderer.busy) return;
     const a = this.game.s.activation;
-    if (a && (a.moved || a.attacked || a.mp < 3)) { this.hud.toast('Só é possível Descansar antes de mover ou atacar.', '#c0392b'); return; }
+    if (!this.game.canRest()) { this.hud.toast(this.game.s.extraTurnOn ? 'No turno adicional não dá para Descansar.' : 'Só é possível Descansar se nenhum Herói agiu neste turno.', '#c0392b'); return; }
     const g = this.game.currentGuild();
     const heroes = this.game.heroesOf(g.id);
     const res: Record<string, Cell> = {};
@@ -1648,6 +1664,7 @@ export class Controller {
       <div class="gm-head"><span class="gm-badge">${where}</span><b>${this.game.map.name}</b><small>Rodada ${this.game.s.turn}</small></div>
       ${item('gm-continue', '▶', 'Continuar', 'Voltar para o jogo', 'primary')}
       <div class="gm-grid">
+        ${item('gm-undo', '↶', 'Desfazer jogada', host ? (this.history.length ? `Volta: ${this.history[this.history.length - 1].label}` : 'Nenhuma jogada para desfazer') : 'Só o anfitrião', '', !(host && this.history.length))}
         ${item('gm-turn', '⏮', 'Reiniciar turno', host ? 'Volta para o começo deste turno' : 'Só o anfitrião', '', !(host && this.turnStart))}
         ${item('gm-restart', '🔄', 'Reiniciar partida', host ? 'Começa este mapa de novo' : 'Só o anfitrião', '', !host)}
         ${item('gm-lib', '📚', 'Biblioteca', 'Heróis, cartas, regras')}
@@ -1665,6 +1682,7 @@ export class Controller {
       this.restartMatch();
     };
     (el.querySelector('#gm-turn') as HTMLElement).onclick = () => { close(); this.restartTurn(); };
+    (el.querySelector('#gm-undo') as HTMLElement).onclick = () => { close(); this.undoMove(); };
     (el.querySelector('#gm-lib') as HTMLElement).onclick = () => { close(); this.openLibrary(); };
     (el.querySelector('#gm-set') as HTMLElement).onclick = () => { close(); this.openSettings(); };
     (el.querySelector('#gm-exit') as HTMLElement).onclick = async () => {
@@ -1687,6 +1705,15 @@ export class Controller {
     if (this.campaignEnd) { this.campaignRestart?.(); return; }
     if (this.mode === 'host') { this.restartOnline(); return; }
     this.startTest();
+  }
+
+  /** Desfazer a última jogada (anfitrião online: todos voltam junto). */
+  private undoMove() {
+    if (!this.history.length) { this.hud.toast('Nada para desfazer.', '#c0392b'); return; }
+    this.closeRestSilently();
+    this.undo();
+    if (this.mode === 'host') (this.net as HostSession).startGame(this.game.s);
+    this.refresh();
   }
 
   private restartTurn() {
