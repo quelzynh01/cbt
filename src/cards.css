@@ -170,3 +170,6 @@
 /* extras: o retrato fica dentro da área azul (não vaza pela moldura) */
 .acard.hero.extra .hc-body { overflow: hidden; }
 .acard.hero.extra .hc-artc.xh-img { height: 100%; right: 0; bottom: 0; max-width: 46%; }
+/* Herói extra com modelo: corpo inteiro como nas cartas do jogo */
+.acard.hero.extra .hc-body:has(.xh-full) { overflow: visible; }
+.acard.hero.extra .hc-artc.xh-full { height: calc(100% + 34px); max-width: 52%; right: -10px; bottom: -6px; object-fit: contain; object-position: bottom right; border: none; border-radius: 0; }

@@ -1,374 +1,416 @@
 // Gerado por tools/build_extra_heroes.py — Heróis extras (só na Biblioteca; ainda não jogáveis).
-// art: tem retrato em public/portraits/x_<id>.webp
-export interface ExtraHero { id: string; name: string; def: number; hp: number; ability: string; text: string; art: boolean }
+// art: retrato em public/portraits/x_<id>.webp · model: corpo inteiro em public/extras/x_<id>.webp
+export interface ExtraHero { id: string; name: string; def: number; hp: number; ability: string; text: string; art: boolean; model: boolean; rr?: number }
 export const EXTRA_HEROES: ExtraHero[] = [
-  {
-    "id": "black_newt",
-    "name": "Black Newt",
-    "def": 3,
-    "hp": 2,
-    "ability": "Scent of Blood",
-    "text": "Rolls +1 die in attack rolls against a wounded target.",
-    "art": true
-  },
   {
     "id": "bob",
     "name": "Bob",
     "def": 2,
     "hp": 3,
-    "ability": "Wiz Bang",
-    "text": "If he rolls any CRIT on a Magic attack, any living Hero of his Guild may be placed Close to the target.",
-    "art": true
+    "ability": "Zás-Trás",
+    "text": "Se rolar algum ✷ num ataque Mágico, qualquer Herói vivo da sua Guilda pode ser colocado Perto do alvo.",
+    "art": true,
+    "model": true
+  },
+  {
+    "id": "black_newt",
+    "name": "Black Newt",
+    "def": 3,
+    "hp": 2,
+    "ability": "Cheiro de Sangue",
+    "text": "Rola +1 dado nas rolagens de ataque contra um alvo ferido.",
+    "art": true,
+    "model": true
   },
   {
     "id": "bowie",
     "name": "Bowie",
     "def": 4,
     "hp": 2,
-    "ability": "Hit and Run",
-    "text": "Right after attacking with a Bow attack card, he gets 2 extra Movement Points to use immediately.",
-    "art": true
+    "ability": "Bate e Corre",
+    "text": "Logo depois de atacar com uma carta de ataque de Arco, ganha 2 Pontos de Movimento extras para usar na hora.",
+    "art": true,
+    "model": true
   },
   {
     "id": "chooloo",
     "name": "Chooloo",
     "def": 3,
     "hp": 3,
-    "ability": "Mind Assault",
-    "text": "May exhaust his Hero card to Daze one Enemy in Line of Sight.",
-    "art": true
+    "ability": "Ataque Mental",
+    "text": "Pode exaustar a carta de Herói para Atordoar um Inimigo em Linha de Visão.",
+    "art": true,
+    "model": true
   },
   {
     "id": "elysia",
     "name": "Elysia",
     "def": 3,
     "hp": 3,
-    "ability": "Petrifying Gaze",
-    "text": "For each CRIT she rolls on an attack, place 1 of her Guild tokens on the target's figure. Target loses 1 Movement Point per token. Resting removes these tokens. No effect on Villains.",
-    "art": true
+    "ability": "Olhar Petrificante",
+    "text": "Para cada ✷ que rolar num ataque, coloca 1 marcador da sua Guilda no alvo. O alvo perde 1 Ponto de Movimento por marcador. Descansar remove os marcadores. Sem efeito em Vilões.",
+    "art": true,
+    "model": true
   },
   {
     "id": "frowny_faceless",
     "name": "Frowny Faceless",
     "def": 3,
     "hp": 3,
-    "ability": "Tenacious Spell",
-    "text": "Does not exhaust a Magic attack card when attacking a wounded target.",
-    "art": true
+    "ability": "Feitiço Tenaz",
+    "text": "Não exausta a carta de ataque Mágica ao atacar um alvo ferido.",
+    "art": true,
+    "model": true
   },
   {
     "id": "hitch",
     "name": "Hitch",
     "def": 2,
     "hp": 4,
-    "ability": "Braindrain",
-    "text": "While sharing a Space with a Hero, may attack with one of that Hero's unexhausted Attack cards without exhausting it.",
-    "art": true
+    "ability": "Suga-Mente",
+    "text": "Dividindo o Espaço com um Herói, pode atacar com uma carta de Ataque não exaustada desse Herói, sem exaustá-la.",
+    "art": true,
+    "model": true
   },
   {
     "id": "king_of_thieves",
     "name": "King of Thieves",
     "def": 2,
     "hp": 4,
-    "ability": "Coveting",
-    "text": "Rolls +2 attack dice if his target has any Exploration tokens.",
-    "art": true
+    "ability": "Cobiça",
+    "text": "Rola +2 dados de ataque se o alvo tiver algum marcador de Exploração.",
+    "art": true,
+    "model": true
   },
   {
     "id": "koba",
     "name": "Koba",
     "def": 2,
     "hp": 4,
-    "ability": "Teleport",
-    "text": "May exhaust her Hero card to place her figure Close to any Allied Hero.",
-    "art": true
+    "ability": "Teleporte",
+    "text": "Pode exaustar a carta de Herói para se colocar Perto de qualquer Herói Aliado.",
+    "art": true,
+    "model": true
   },
   {
     "id": "lilith",
     "name": "Lilith",
     "def": 2,
     "hp": 4,
-    "ability": "Blood Ritual",
-    "text": "For each Wound she deals with a Magic attack, she heals 1 of her Wounds.",
-    "art": true
+    "ability": "Ritual de Sangue",
+    "text": "Para cada Ferimento que causar com um ataque Mágico, cura 1 dos seus Ferimentos.",
+    "art": true,
+    "model": true
   },
   {
     "id": "lord_fang",
     "name": "Lord Fang",
     "def": 5,
     "hp": 2,
-    "ability": "Beckoning",
-    "text": "May exhaust his Hero card to place a Hero in Line of Sight in a Space Close to him.",
-    "art": true
+    "ability": "Chamado",
+    "text": "Pode exaustar a carta de Herói para colocar um Herói em Linha de Visão num Espaço Perto dele.",
+    "art": true,
+    "model": true
   },
   {
     "id": "lydia",
     "name": "Lydia",
     "def": 2,
     "hp": 4,
-    "ability": "Drainblade",
-    "text": "For each Wound she deals with a Sword, Axe or Lance attack, she heals 1 of her Wounds.",
-    "art": true
+    "ability": "Lâmina Sugadora",
+    "text": "Para cada Ferimento que causar com um ataque de Espada, Machado ou Lança, cura 1 dos seus Ferimentos.",
+    "art": true,
+    "model": true
   },
   {
     "id": "monkey_king",
     "name": "Monkey King",
     "def": 2,
     "hp": 4,
-    "ability": "Trickster",
-    "text": "Each CRIT on his Defense roll scores an additional save. If he rolls any CRIT, may place his figure in a Close Space.",
-    "art": true
+    "ability": "Trapaceiro",
+    "text": "Cada ✷ na rolagem de Defesa conta um bloqueio extra. Se rolar algum ✷, pode se colocar num Espaço Perto.",
+    "art": true,
+    "model": true
   },
   {
     "id": "monkey_queen",
     "name": "Monkey Queen",
     "def": 3,
     "hp": 3,
-    "ability": "Monkey See Monkey Do",
-    "text": "At any point during her activation, she may copy the natural ability of a single Hero in Line of Sight for this turn.",
-    "art": true
+    "ability": "Macaco Vê, Macaco Faz",
+    "text": "A qualquer momento da ativação, pode copiar a Habilidade Natural de um Herói em Linha de Visão até o fim do turno.",
+    "art": true,
+    "model": true
   },
   {
     "id": "montoya",
     "name": "Montoya",
     "def": 1,
     "hp": 5,
-    "ability": "Swordmaster",
-    "text": "May exhaust his Hero card to add +2 dice to a Sword attack card.",
-    "art": true
+    "ability": "Mestre Espadachim",
+    "text": "Pode exaustar a carta de Herói para somar +2 dados a uma carta de ataque de Espada.",
+    "art": true,
+    "model": true
   },
   {
     "id": "morgan",
     "name": "Morgan",
     "def": 1,
     "hp": 1,
-    "ability": "Mystic Aura",
-    "text": "+1 Defense Die and +1 Life for each equipped Magic attack card.",
-    "art": true
+    "ability": "Aura Mística",
+    "text": "+1 dado de Defesa e +1 de Vida para cada carta de ataque Mágica equipada.",
+    "art": true,
+    "model": true
   },
   {
     "id": "pigsy",
     "name": "Pigsy",
     "def": 2,
     "hp": 4,
-    "ability": "Snack Break",
-    "text": "He may heal all of his Wounds whenever he Rests.",
-    "art": true
+    "ability": "Hora do Lanche",
+    "text": "Cura todos os seus Ferimentos sempre que a Guilda Descansa.",
+    "art": true,
+    "model": true
   },
   {
     "id": "pluck",
     "name": "Pluck",
     "def": 3,
     "hp": 3,
-    "ability": "Explosive Shot",
-    "text": "If he rolls any hits with a non-Magic Ranged attack, may move any figures in the target's Space up to 2 Spaces. This does not trigger Guard Reaction.",
-    "art": true
+    "ability": "Tiro Explosivo",
+    "text": "Se acertar um ataque a Distância não Mágico, pode mover os personagens do Espaço do alvo até 2 Espaços. Não aciona Reação de Alerta.",
+    "art": true,
+    "model": true
   },
   {
     "id": "prince_aaron",
     "name": "Prince Aaron",
     "def": 3,
     "hp": 3,
-    "ability": "Mighty Presence",
-    "text": "All Enemies Close to him have -2 Defense against attacks made by him or his Allies.",
-    "art": true
+    "ability": "Presença Poderosa",
+    "text": "Todos os Inimigos Perto dele têm −2 de Defesa contra ataques dele ou dos seus Aliados.",
+    "art": true,
+    "model": true
   },
   {
     "id": "queen_of_beggars",
     "name": "Queen of Beggars",
     "def": 1,
     "hp": 4,
-    "ability": "Trick or Treat",
-    "text": "If she ends her movement Close to an Enemy Hero, he must give her an Exploration token or take 1 Wound. Limit 1 Hero per turn.",
-    "art": true
+    "ability": "Doces ou Travessuras",
+    "text": "Se terminar o movimento Perto de um Herói Inimigo, ele precisa lhe dar um marcador de Exploração ou sofrer 1 Ferimento. Limite de 1 Herói por turno.",
+    "art": true,
+    "model": true
   },
   {
     "id": "serious_faceless",
     "name": "Serious Faceless",
     "def": 3,
     "hp": 3,
-    "ability": "Haste Spell",
-    "text": "Right after attacking with a Magic attack card, he gets 2 extra Movement Points to use immediately.",
-    "art": true
+    "ability": "Feitiço da Pressa",
+    "text": "Logo depois de atacar com uma carta de ataque Mágica, ganha 2 Pontos de Movimento extras para usar na hora.",
+    "art": true,
+    "model": true
   },
   {
     "id": "smiley_faceless",
     "name": "Smiley Faceless",
     "def": 3,
     "hp": 3,
-    "ability": "Swindling Spell",
-    "text": "+1 Reroll. When attacking with a Magic attack card, he may use every Reroll in his Guild.",
-    "art": true
+    "ability": "Feitiço Trapaceiro",
+    "text": "Ao atacar com uma carta de ataque Mágica, pode usar todas as Rerrolagens da sua Guilda.",
+    "art": true,
+    "model": true,
+    "rr": 1
   },
   {
     "id": "sonja",
     "name": "Sonja",
     "def": 1,
     "hp": 4,
-    "ability": "Frenzy",
-    "text": "Rolls +1 die per Close Enemy on non-Magic Melee attack rolls.",
-    "art": true
+    "ability": "Frenesi",
+    "text": "Rola +1 dado por Inimigo Perto nas rolagens de ataque Próximo não Mágico.",
+    "art": true,
+    "model": true
   },
   {
     "id": "sting",
     "name": "Sting",
     "def": 1,
     "hp": 5,
-    "ability": "Outcast",
-    "text": "Rolls +1 die when attacking Monsters.",
-    "art": true
+    "ability": "Pária",
+    "text": "Rola +1 dado ao atacar Monstros.",
+    "art": true,
+    "model": true
   },
   {
     "id": "surprised_faceless",
     "name": "Surprised Faceless",
     "def": 3,
     "hp": 3,
-    "ability": "Banshee Spell",
-    "text": "If his Magic attack deals a Wound, the target is Dazed.",
-    "art": true
+    "ability": "Feitiço da Banshee",
+    "text": "Se o ataque Mágico causar Ferimento, o alvo fica Atordoado.",
+    "art": true,
+    "model": true
   },
   {
     "id": "the_heartless",
     "name": "The Heartless",
     "def": 1,
     "hp": 4,
-    "ability": "Sheer Heart Attack",
-    "text": "When attacking with a Sword attack card, the target does not roll Defense dice.",
-    "art": true
+    "ability": "Ataque Cardíaco",
+    "text": "Ao atacar com uma carta de ataque de Espada, o alvo não rola dados de Defesa.",
+    "art": true,
+    "model": true
   },
   {
     "id": "the_nameless",
     "name": "The Nameless",
     "def": 0,
     "hp": 6,
-    "ability": "Mastermind",
-    "text": "If his Magic attack rolls any CRIT, another Allied Hero may activate and perform his Movement only.",
-    "art": true
+    "ability": "Mente Brilhante",
+    "text": "Se o ataque Mágico rolar algum ✷, outro Herói Aliado pode ser ativado só para fazer o Movimento.",
+    "art": true,
+    "model": true
   },
   {
     "id": "tomrick",
     "name": "Tomrick",
     "def": 2,
     "hp": 4,
-    "ability": "Gambler's Luck",
-    "text": "After rolling a Magic Attack, he may exhaust his Hero card to change a single failed die to a CRIT.",
-    "art": true
+    "ability": "Sorte de Apostador",
+    "text": "Depois de rolar um ataque Mágico, pode exaustar a carta de Herói para trocar um dado que falhou por um ✷.",
+    "art": true,
+    "model": true
   },
   {
     "id": "viktor",
     "name": "Viktor",
     "def": 3,
     "hp": 3,
-    "ability": "Hunter",
-    "text": "If his attack kills its target, he may activate another attack card this turn.",
-    "art": true
+    "ability": "Caçador",
+    "text": "Se o ataque matar o alvo, pode usar outra carta de ataque neste turno.",
+    "art": true,
+    "model": true
   },
   {
     "id": "aeric",
     "name": "Aeric",
     "def": 1,
     "hp": 5,
-    "ability": "Panda Resilience",
-    "text": "Rolls +2 dice on defense rolls against Ranged attacks.",
-    "art": true
+    "ability": "Resistência do Panda",
+    "text": "Rola +2 dados de Defesa contra ataques a Distância.",
+    "art": true,
+    "model": true
   },
   {
     "id": "brenna",
     "name": "Brenna",
     "def": 2,
     "hp": 4,
-    "ability": "Lightning Strike",
-    "text": "Once per activation, she may take 1 Wound to deal 1 Wound to all Close Enemies.",
-    "art": true
+    "ability": "Relâmpago",
+    "text": "Uma vez por ativação, pode sofrer 1 Ferimento para causar 1 Ferimento em todos os Inimigos Perto.",
+    "art": true,
+    "model": true
   },
   {
     "id": "farfalla",
     "name": "Farfalla",
     "def": 2,
     "hp": 4,
-    "ability": "Butterfly Effect",
-    "text": "When using one of her Attack cards, she may exhaust any Close Hero's Attack card instead.",
-    "art": true
+    "ability": "Efeito Borboleta",
+    "text": "Ao usar uma das suas cartas de Ataque, pode exaustar a carta de Ataque de um Herói Perto no lugar dela.",
+    "art": true,
+    "model": true
   },
   {
     "id": "haldor",
     "name": "Haldor",
     "def": 1,
     "hp": 5,
-    "ability": "Body Count",
-    "text": "Rolls +1 die on all non-Magic Melee attacks for each Enemy Hero he has killed this scenario.",
-    "art": true
+    "ability": "Contagem de Corpos",
+    "text": "Rola +1 dado em todos os ataques Próximos não Mágicos para cada Herói Inimigo que matou neste cenário.",
+    "art": true,
+    "model": true
   },
   {
     "id": "hassan",
     "name": "Hassan",
     "def": 3,
     "hp": 3,
-    "ability": "Charmed",
-    "text": "No Reroll can be used when attacking him or defending from his attack.",
-    "art": true
+    "ability": "Encantado",
+    "text": "Nenhuma Rerrolagem pode ser usada ao atacá-lo ou ao se defender do ataque dele.",
+    "art": true,
+    "model": true
   },
   {
     "id": "leeroy",
     "name": "Leeroy",
     "def": 2,
     "hp": 4,
-    "ability": "Lone Wolf",
-    "text": "Gets a +1 die bonus to all rolls as long as he has no Allies in Line of Sight.",
-    "art": true
+    "ability": "Lobo Solitário",
+    "text": "+1 dado em todas as rolagens enquanto não tiver Aliados em Linha de Visão.",
+    "art": true,
+    "model": true
   },
   {
     "id": "mchammer",
     "name": "McHammer",
     "def": 1,
     "hp": 5,
-    "ability": "Scuffle",
-    "text": "For each CRIT he rolls on a non-Magic Melee attack, he may deal a Wound to any other Close Enemy.",
-    "art": true
+    "ability": "Briga",
+    "text": "Para cada ✷ que rolar num ataque Próximo não Mágico, pode causar 1 Ferimento a outro Inimigo Perto.",
+    "art": true,
+    "model": true
   },
   {
     "id": "mittens",
     "name": "Mittens",
     "def": 2,
     "hp": 4,
-    "ability": "Kitty Claws",
-    "text": "Deals 1 Wound to any Enemy that leaves a Space Close to him. Limit 1 Wound per Enemy per turn.",
-    "art": true
+    "ability": "Garras de Gatinho",
+    "text": "Causa 1 Ferimento a qualquer Inimigo que saia de um Espaço Perto dele. Limite de 1 Ferimento por Inimigo por turno.",
+    "art": true,
+    "model": true
   },
   {
     "id": "nibbles",
     "name": "Nibbles",
     "def": 1,
     "hp": 5,
-    "ability": "Devour",
-    "text": "Whenever he kills an Enemy, he heals all of his own Wounds.",
-    "art": true
+    "ability": "Devorar",
+    "text": "Sempre que mata um Inimigo, cura todos os seus Ferimentos.",
+    "art": true,
+    "model": true
   },
   {
     "id": "tiaret",
     "name": "Tiaret",
     "def": 1,
     "hp": 5,
-    "ability": "Savage Throw",
-    "text": "May use Lance and Exotic attack cards as Ranged attack cards. Melee icons are still required to hit.",
-    "art": true
+    "ability": "Arremesso Selvagem",
+    "text": "Pode usar cartas de ataque de Lança e Exóticas como ataques a Distância (ainda precisa de ícones ⚔ Próximo para acertar).",
+    "art": true,
+    "model": true
   },
   {
     "id": "yun",
     "name": "Yun",
     "def": 2,
     "hp": 4,
-    "ability": "Relentless",
-    "text": "If he rolls any CRIT on a Defense roll, he may unexhaust one of his cards.",
-    "art": true
+    "ability": "Implacável",
+    "text": "Se rolar algum ✷ na Defesa, pode restaurar uma das suas cartas.",
+    "art": true,
+    "model": true
   },
   {
     "id": "zahra",
     "name": "Zahra",
     "def": 2,
     "hp": 4,
-    "ability": "Acrobat",
-    "text": "During Movement, moving into a Space occupied by a Hero does not cost her a Movement Point.",
-    "art": true
+    "ability": "Acrobata",
+    "text": "No Movimento, entrar num Espaço ocupado por um Herói não lhe custa Ponto de Movimento.",
+    "art": true,
+    "model": true
   }
 ];

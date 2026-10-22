@@ -138,16 +138,17 @@ export function heroCard(id: string, extra = '', attrs = '', foot = '', badge = 
 }
 
 /** Carta de Herói extra (só na Biblioteca, ainda não jogável): o retrato no lugar do boneco, carta mais escura. */
-export function extraHeroCard(h: { id: string; name: string; def: number; hp: number; ability: string; text: string; art: boolean }): string {
+export function extraHeroCard(h: { id: string; name: string; def: number; hp: number; ability: string; text: string; art: boolean; model?: boolean; rr?: number }): string {
   return `<div class="acard hero extra" title="Herói extra — ainda não jogável">
     ${title(h.name, 'Herói Extra')}
     <div class="hc-body">
       <div class="hc-left">
-        <div class="hc-meds">${h.def > 0 ? medal('def', h.def, 'Defesa', 'big') : `<span class="med def big" title="Defesa"><b>0</b></span>`}${medal('hp', h.hp, 'Vida', 'big')}</div>
+        <div class="hc-meds">${h.def > 0 ? medal('def', h.def, 'Defesa', 'big') : `<span class="med def big" title="Defesa"><b>0</b></span>`}${medal('hp', h.hp, 'Vida', 'big')}${h.rr ? medal('rr', h.rr, `Rerrolagem ${h.rr}`, 'big') : ''}</div>
         <div class="ac-ribbon"><small>Habilidade</small><b>${h.ability}</b></div>
         <div class="ac-text ${textSize(h.text)}"><p>${richText(h.text)}</p></div>
       </div>
-      ${h.art ? `<img class="hc-artc xh-img" src="${import.meta.env.BASE_URL}portraits/x_${h.id}.webp" alt="" draggable="false"/>` : `<div class="hc-artc xh-none">${h.name.split(' ').map(w => w[0]).join('').slice(0, 2)}</div>`}
+      ${h.model ? `<img class="hc-artc xh-full" src="${import.meta.env.BASE_URL}extras/x_${h.id}.webp" alt="" draggable="false"/>`
+        : h.art ? `<img class="hc-artc xh-img" src="${import.meta.env.BASE_URL}portraits/x_${h.id}.webp" alt="" draggable="false"/>` : `<div class="hc-artc xh-none">${h.name.split(' ').map(w => w[0]).join('').slice(0, 2)}</div>`}
     </div>
     <div class="ac-code">Extra · ainda não jogável</div>
   </div>`;

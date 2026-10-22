@@ -25,7 +25,8 @@ ITEMS = {
     'boodthirst': ['sede_sangue'],
     'twinbolt': ['raio_duplo'],
     'mon-ring': ['anel_lua', 'anel_lua2', 'anel_lua3'],
-    'heart-of-the-gryphon': ['coracao_grifo'],
+    # os outros corações (Unicórnio, Fênix, Dragão, Anjos) usam a mesma arte do Grifo
+    'heart-of-the-gryphon': ['coracao_grifo', 'coracao_unicornio', 'coracao_fenix', 'coracao_dragao', 'coracao_anjos'],
     'apocalypse-crown': ['apocalipse'],
     'hate': ['odio', 'odio2'],
     'wind-blast': ['rajada_vento', 'rajada_vento2'],

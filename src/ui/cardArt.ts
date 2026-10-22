@@ -58,6 +58,22 @@ export const CARD_ART: Record<string, { img: string; kind: 'fill' | 'icon' }> = 
     "img": "coracao_grifo",
     "kind": "icon"
   },
+  "coracao_unicornio": {
+    "img": "coracao_grifo",
+    "kind": "icon"
+  },
+  "coracao_fenix": {
+    "img": "coracao_grifo",
+    "kind": "icon"
+  },
+  "coracao_dragao": {
+    "img": "coracao_grifo",
+    "kind": "icon"
+  },
+  "coracao_anjos": {
+    "img": "coracao_grifo",
+    "kind": "icon"
+  },
   "apocalipse": {
     "img": "apocalipse",
     "kind": "icon"
