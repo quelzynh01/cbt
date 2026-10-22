@@ -173,3 +173,4 @@
 /* Herói extra com modelo: corpo inteiro como nas cartas do jogo */
 .acard.hero.extra .hc-body:has(.xh-full) { overflow: visible; }
 .acard.hero.extra .hc-artc.xh-full { height: calc(100% + 34px); max-width: 52%; right: -10px; bottom: -6px; object-fit: contain; object-position: bottom right; border: none; border-radius: 0; }
+.ic-rr { display: inline-block; width: 1.9em; height: 1.9em; vertical-align: -0.6em; margin: 0 2px; filter: drop-shadow(0 1px 2px rgba(0,0,0,.5)); }

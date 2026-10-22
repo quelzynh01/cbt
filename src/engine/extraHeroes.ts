@@ -1,6 +1,6 @@
 // Gerado por tools/build_extra_heroes.py — Heróis extras (só na Biblioteca; ainda não jogáveis).
 // art: retrato em public/portraits/x_<id>.webp · model: corpo inteiro em public/extras/x_<id>.webp
-export interface ExtraHero { id: string; name: string; def: number; hp: number; ability: string; text: string; art: boolean; model: boolean; rr?: number }
+export interface ExtraHero { id: string; name: string; def: number; hp: number; ability: string; text: string; art: boolean; model: boolean }
 export const EXTRA_HEROES: ExtraHero[] = [
   {
     "id": "bob",
@@ -218,10 +218,9 @@ export const EXTRA_HEROES: ExtraHero[] = [
     "def": 3,
     "hp": 3,
     "ability": "Feitiço Trapaceiro",
-    "text": "Ao atacar com uma carta de ataque Mágica, pode usar todas as Rerrolagens da sua Guilda.",
+    "text": "{rr1} Ao atacar com uma carta de ataque Mágica, pode usar todas as Rerrolagens da sua Guilda.",
     "art": true,
-    "model": true,
-    "rr": 1
+    "model": true
   },
   {
     "id": "sonja",

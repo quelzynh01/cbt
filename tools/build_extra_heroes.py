@@ -83,14 +83,11 @@ def main():
             if r:
                 h['ability'] = r['Habilidade'].strip()
                 h['text'] = r['Efeito'].strip()
-        # "+N Rerrolagem." no começo do texto vira o medalhão de Rerrolagem da carta
-        for h in heroes:
-            m = re.match(r'\+(\d+) Rerrolagem\.\s*', h['text'])
-            if m:
-                h['rr'] = int(m.group(1))
-                h['text'] = h['text'][m.end():]
             else:
                 print('sem tradução', h['name'])
+        # "+N Rerrolagem" vira o símbolo de Rerrolagem dentro do texto ({rrN}, trocado pela imagem na carta)
+        for h in heroes:
+            h['text'] = re.sub(r'\+(\d+) Rerrolagem\.?', lambda m: '{rr' + m.group(1) + '}', h['text'])
     os.makedirs(OUT, exist_ok=True)
     os.makedirs(ART, exist_ok=True)
     # modelos: pose de frente (olhando para a direita, como a carta do jogo)
@@ -126,7 +123,7 @@ def main():
     with open(TS, 'w', encoding='utf-8') as f:
         f.write('// Gerado por tools/build_extra_heroes.py — Heróis extras (só na Biblioteca; ainda não jogáveis).\n')
         f.write('// art: retrato em public/portraits/x_<id>.webp · model: corpo inteiro em public/extras/x_<id>.webp\n')
-        f.write('export interface ExtraHero { id: string; name: string; def: number; hp: number; ability: string; text: string; art: boolean; model: boolean; rr?: number }\n')
+        f.write('export interface ExtraHero { id: string; name: string; def: number; hp: number; ability: string; text: string; art: boolean; model: boolean }\n')
         f.write('export const EXTRA_HEROES: ExtraHero[] = ' + json.dumps(heroes, ensure_ascii=False, indent=2) + ';\n')
     print(len(heroes), 'heróis extras')
 

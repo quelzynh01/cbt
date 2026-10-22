@@ -102,7 +102,9 @@ export function itemArt(id: string): string {
 const artImg = (a: { img: string; kind: string }, cls = '') => `<img class="ac-img ${a.kind} ${cls}" src="${import.meta.env.BASE_URL}cards/${a.img}.webp" alt="" draggable="false"/>`;
 
 /** Texto de carta: o ✷ vira o ícone do dado crítico. */
-export const richText = (t = '') => t.replace(/✷/g, `<span class="ic-crit" title="Crítico">${dieImg('crit', true)}</span>`);
+export const richText = (t = '') => t.replace(/✷/g, `<span class="ic-crit" title="Crítico">${dieImg('crit', true)}</span>`)
+  // {rrN}: o medalhão de Rerrolagem dentro do texto
+  .replace(/\{rr(\d+)\}/g, (_, n) => `<img class="ic-rr" src="${import.meta.env.BASE_URL}bonus/rr${n}.webp" title="+${n} Rerrolagem" alt="+${n} Rerrolagem"/>`);
 
 const textSize = (t = '') => t.length > 170 ? 'xxs' : t.length > 110 ? 'xs' : t.length > 80 ? 'sm' : '';
 
@@ -138,12 +140,12 @@ export function heroCard(id: string, extra = '', attrs = '', foot = '', badge = 
 }
 
 /** Carta de Herói extra (só na Biblioteca, ainda não jogável): o retrato no lugar do boneco, carta mais escura. */
-export function extraHeroCard(h: { id: string; name: string; def: number; hp: number; ability: string; text: string; art: boolean; model?: boolean; rr?: number }): string {
+export function extraHeroCard(h: { id: string; name: string; def: number; hp: number; ability: string; text: string; art: boolean; model?: boolean }): string {
   return `<div class="acard hero extra" title="Herói extra — ainda não jogável">
     ${title(h.name, 'Herói Extra')}
     <div class="hc-body">
       <div class="hc-left">
-        <div class="hc-meds">${h.def > 0 ? medal('def', h.def, 'Defesa', 'big') : `<span class="med def big" title="Defesa"><b>0</b></span>`}${medal('hp', h.hp, 'Vida', 'big')}${h.rr ? medal('rr', h.rr, `Rerrolagem ${h.rr}`, 'big') : ''}</div>
+        <div class="hc-meds">${h.def > 0 ? medal('def', h.def, 'Defesa', 'big') : `<span class="med def big" title="Defesa"><b>0</b></span>`}${medal('hp', h.hp, 'Vida', 'big')}</div>
         <div class="ac-ribbon"><small>Habilidade</small><b>${h.ability}</b></div>
         <div class="ac-text ${textSize(h.text)}"><p>${richText(h.text)}</p></div>
       </div>
