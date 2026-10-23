@@ -54,6 +54,8 @@ export const DISTRITO_DO_ALQUIMISTA: MapDef = {
     [C(0, 6), C(0, 7)], [C(0, 7), C(1, 7)], [C(2, 7), C(2, 8)], [C(2, 8), C(3, 8)],
     [C(3, 8), C(4, 8)], [C(5, 7), C(5, 8)],
     [C(7, 7), C(8, 7)], [C(8, 6), C(8, 7)],
+    // revisão dos mapas
+    [C(7, 8), C(8, 8)], [C(0, 2), C(1, 2)],
   ],
 
   doors: [

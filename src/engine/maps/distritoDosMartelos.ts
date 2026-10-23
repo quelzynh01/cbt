@@ -32,7 +32,7 @@ export const DISTRITO_DOS_MARTELOS: MapDef = {
   ],
 
   // Espaços sem ponto central (salas fechadas/decoração) — bloqueiam Movimento e Linha de Visão.
-  pillars: [C(3, 1), C(6, 0), C(6, 2), C(7, 5), C(2, 6)],
+  pillars: [C(3, 1), C(6, 0), C(6, 2), C(7, 5), C(2, 6), C(8, 5)],
 
   // Espaços internos (apenas visual: piso de madeira).
   rooms: [C(5, 2), C(8, 1), C(8, 2), C(6, 3), C(3, 3), C(5, 5), C(2, 5), C(3, 6), C(0, 6), C(0, 7), C(0, 8), C(1, 8), C(2, 8)],
@@ -41,7 +41,7 @@ export const DISTRITO_DOS_MARTELOS: MapDef = {
   walls: [
     // Área inicial J1 / 8A
     [C(5, 0), C(5, 1)],
-    [C(4, 1), C(5, 1)], [C(5, 1), C(5, 2)], [C(4, 2), C(5, 2)], [C(3, 2), C(3, 3)],
+    [C(5, 1), C(5, 2)], [C(4, 2), C(5, 2)], [C(3, 2), C(3, 3)],
     // 4B
     [C(8, 0), C(8, 1)], [C(7, 2), C(8, 2)], [C(8, 2), C(8, 3)],
     // 3B
@@ -88,7 +88,7 @@ export const DISTRITO_DOS_MARTELOS: MapDef = {
     [C(3, 0), C(4, 0), C(5, 0)],
     [C(3, 8), C(4, 8), C(5, 8)],
     [C(0, 3), C(0, 4), C(0, 5)],
-    [C(8, 3), C(8, 4), C(8, 5)],
+    [C(8, 3), C(8, 4)],
   ],
 
   entryMarkers: [C(8, 2), C(5, 3), C(3, 5), C(0, 6)],

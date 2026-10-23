@@ -24,7 +24,7 @@ export const MANSAO: MapDef = {
   ],
 
   // sala de jantar (mesa comprida)
-  pillars: [C(0, 4), C(0, 5)],
+  pillars: [C(0, 4), C(0, 5), C(8, 5)],
   rooms: [C(3, 0), C(4, 0), C(5, 0), C(0, 2), C(2, 2), C(3, 2), C(4, 2), C(5, 2), C(6, 2), C(8, 2), C(2, 3), C(3, 3), C(4, 3), C(5, 3), C(6, 3), C(4, 4), C(8, 3), C(8, 4)],
 
   walls: [

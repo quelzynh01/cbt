@@ -22,7 +22,7 @@ export const VIVEIRO_DAS_AGUIAS: MapDef = {
   ],
 
   // fonte com as luzes coloridas no canto (decoração)
-  pillars: [C(8, 4), C(8, 5)],
+  pillars: [C(8, 4), C(8, 5), C(6, 0), C(3, 5)],
   rooms: [C(0, 0), C(6, 0), C(5, 2), C(7, 2), C(3, 3), C(3, 5)],
 
   walls: [

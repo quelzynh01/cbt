@@ -42,6 +42,12 @@ Rerrolar, empurrão, alvo extra, qual marcador pegar, recompensa com inventário
 - Online: só o anfitrião salva (`src/net/onlineSaves.ts`, `localStorage['cbt.onlineSaves']`): sala + preparação/campanha (`stash`) + `GameState`. `OnlineLobby.persist()` grava na mesa e durante a partida; apaga quando acaba.
 - Reabrir: `HostSession(..., restore)` tenta o mesmo código; a sala fica `restored` (sala de espera) até o anfitrião apertar "Continuar". Jogador volta pela `clientId` (mesmo navegador) ou pelo mesmo nome.
 
+## Revisão dos mapas
+
+- O usuário revisa os mapas em `/#paredes` (`src/ui/wallEditor.ts`): paredes, Espaços bloqueados, decks de madeira e portas.
+- Ele manda um texto `PAREDES {...}`: salve num arquivo e rode `python tools/apply_map_review.py <arquivo>`.
+- Depois: `sh tools/tests/run-engine.sh mapitems` (nada em cima de Espaço bloqueado), `ALL=1 sh tools/tests/run-engine.sh reach2` e `xsim`.
+
 ## Cuidados
 
 - O cliente online **não roda as regras**: recebe o `GameState` + eventos do anfitrião. Toda decisão do jogador precisa ir pela rede.
