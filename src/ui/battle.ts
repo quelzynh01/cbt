@@ -6,6 +6,7 @@ import { CARDS, GUILDS, HEROES, MONSTERS } from '../engine/data';
 import type { Game } from '../engine/game';
 import type { RerollInfo, DieFace, GameEvent, GuildId, Unit } from '../engine/types';
 import { charScale, drawCharacter } from '../render/chibi';
+import { diceSync } from './diceSync';
 
 type AttackEvent = Extract<GameEvent, { t: 'attack' }>;
 
@@ -254,6 +255,10 @@ export class BattlePanel {
     // Reação de Monstro: quem rola é o jogador que controla os Monstros (com o botão de ✷, igual ao Herói)
     const humanAtk = atk.kind === 'hero' ? this.deps.isHuman(atk) : !!e.ctl && this.deps.isMineGuild(e.ctl);
     const humanInvolved = humanAtk || e.targets.some(t => { const u = g.unit(t.id); return u.kind === 'hero' && this.deps.isHuman(u); });
+    // online: dados de quem joga em outro computador esperam o clique dele (aparecem juntos para todos)
+    diceSync.begin(e);
+    const atkOwner = atk.kind === 'hero' ? atk.guild : e.ctl;
+    const atkRemote = !humanAtk && diceSync.remote(atkOwner);
     const reason = { heroi: 'Ataque', alerta: 'Reação de Alerta!', vinganca: 'Reação de Vingança!', armadilha: 'Armadilha', lapide: 'Lápide: Monstro ativado!' }[e.reason];
     const before = new Map(e.targets.map(t => [t.id, this.deps.viewWounds(t.id)]));
     const atkWounds = this.deps.viewWounds(atk.id);
@@ -271,6 +276,12 @@ export class BattlePanel {
     if (notesEl) notesEl.innerHTML = e.notes.join(' · ');
     for (const t of e.targets) this.defWrap(t.id);
     const btns = this.el.querySelector('.bt-btns') as HTMLElement;
+    const waitRemote = async (who: GuildId, step: string, what: string) => {
+      const b = this.el.querySelector('.bt-btns') as HTMLElement;
+      b.innerHTML = `<span class="bt-wait">⏳ Aguardando ${diceSync.net?.name(who) ?? ''} ${what}…</span>`;
+      await diceSync.wait(step);
+      b.innerHTML = '';
+    };
     const button = (label: string, primary = true) => new Promise<void>(res => {
       btns.innerHTML = `<button class="${primary ? 'primary' : ''} bt-act">${label}</button>`;
       const b = btns.querySelector('.bt-act') as HTMLButtonElement;
@@ -289,10 +300,12 @@ export class BattlePanel {
       await wait(350);
     } else if (!c) {
       if (humanAtk && atk.kind === 'monster') await button(`🎲 Rolar ataque de ${g.name(atk)} (${e.baseDice ?? e.dice.length} dado${(e.baseDice ?? e.dice.length) > 1 ? 's' : ''})`);
+      else if (atkRemote && !e.rr?.asked) await waitRemote(atkOwner!, 'atk', 'rolar o ataque');
       else if (!humanAtk || e.reason !== 'heroi') await wait(450);
+      if (humanAtk && !e.rr?.asked) diceSync.mine('atk');
       const f = this.fighter(atk.id);
       if (f) f.lungeT = performance.now() + 500 / sp;
-      await this.rollWithReroll(atkTray, e.dice, e.attackType, ATK_FACES, sp, e.rr, e.baseDice, humanAtk);
+      await this.rollWithReroll(atkTray, e.dice, e.attackType, ATK_FACES, sp, e.rr, e.baseDice, humanAtk, atkRemote, 'atk');
     }
     (this.el.querySelector('.bt-count.atk') as HTMLElement).innerHTML = `<b>${e.hits}</b> acerto${e.hits === 1 ? '' : 's'}${e.crits ? ` <span class="crit">(${e.crits} crítico${e.crits > 1 ? 's' : ''})</span>` : ''}`;
 
@@ -314,9 +327,13 @@ export class BattlePanel {
       if (t.stunnedNoDefense) { tray.innerHTML = '<span class="muted">✷ Atordoado — não rola Defesa</span>'; }
       else if (!t.defense.length) { tray.innerHTML = '<span class="muted">Sem dados de Defesa</span>'; }
       else {
-        if (tu.kind === 'hero' && this.deps.isHuman(tu)) await button(`🛡 Defender ${HEROES[tu.defId].name} (${t.defense.length - t.defense.filter(x => x === 'crit').length} dado${t.defense.length > 1 ? 's' : ''})`);
+        const mineDef = tu.kind === 'hero' && this.deps.isHuman(tu);
+        const defRemote = !mineDef && tu.kind === 'hero' && diceSync.remote(tu.guild);
+        if (mineDef) await button(`🛡 Defender ${HEROES[tu.defId].name} (${t.defense.length - t.defense.filter(x => x === 'crit').length} dado${t.defense.length > 1 ? 's' : ''})`);
+        else if (defRemote && !t.rr?.asked) await waitRemote(tu.guild!, `def:${t.id}`, 'rolar a defesa');
         else await wait(400);
-        await this.rollWithReroll(tray, t.defense, 'shield', DEF_FACES, sp, t.rr, undefined, tu.kind === 'hero' && this.deps.isHuman(tu));
+        if (mineDef && !t.rr?.asked) diceSync.mine(`def:${t.id}`);
+        await this.rollWithReroll(tray, t.defense, 'shield', DEF_FACES, sp, t.rr, undefined, mineDef, defRemote, `def:${t.id}`);
         count.innerHTML = `<b>${t.blocks}</b> bloqueio${t.blocks === 1 ? '' : 's'}`;
       }
     }
@@ -514,28 +531,29 @@ export class BattlePanel {
   }
 
   /** Rolagem com Rerrolagem: primeiro o resultado original; depois os dados escolhidos giram de novo. */
-  private async rollWithReroll(tray: HTMLElement, faces: DieFace[], success: DieFace, pool: DieFace[], sp: number, rr?: RerollInfo, base?: number, mine = false) {
-    if (!rr) { await this.rollTray(tray, faces, success, pool, sp, false, base, mine); return; }
-    const dice = await this.rollTray(tray, rr.before, success, pool, sp, rr.asked, base, mine);
+  private async rollWithReroll(tray: HTMLElement, faces: DieFace[], success: DieFace, pool: DieFace[], sp: number, rr?: RerollInfo, base?: number, mine = false, remote = false, tag = '') {
+    if (!rr) { await this.rollTray(tray, faces, success, pool, sp, false, base, mine, remote, tag); return; }
+    const dice = await this.rollTray(tray, rr.before, success, pool, sp, rr.asked, base, mine, remote, tag);
     if (!rr.idx.length) return;
     await new Promise(r => setTimeout(r, 450 / sp));
     await rerollDice(tray, dice, rr, faces, success, pool === ATK_FACES, sp, () => this.newDie(tray, pool === ATK_FACES), undefined, n => this.critAsk(tray, n, mine, sp));
   }
 
   /** ✷ Crítico: o seu = botão "Rolar +N dado" (você rola o extra); dos outros = aviso "✷ +N" e o dado rola sozinho. */
-  private async critAsk(tray: HTMLElement, next: number, mine: boolean, sp: number) {
-    if (mine) { await this.ask(`✷ Crítico! Rolar +${next} dado${next > 1 ? 's' : ''}`, 'bt-crit'); return; }
+  private async critAsk(tray: HTMLElement, next: number, mine: boolean, sp: number, remote = false, step = '') {
+    if (mine) { await this.ask(`✷ Crítico! Rolar +${next} dado${next > 1 ? 's' : ''}`, 'bt-crit'); if (step) diceSync.mine(step); return; }
     const tag = document.createElement('span');
     tag.className = 'bt-crittag';
     tag.textContent = `✷ +${next}`;
     tray.append(tag);
-    await new Promise(r => setTimeout(r, 650 / sp));
+    // online: o dado extra só rola quando o dono clicar no ✷ na tela dele
+    if (remote && step) await diceSync.wait(step); else await new Promise(r => setTimeout(r, 650 / sp));
     tag.remove();
   }
 
   /** Dados girando e parando um a um. Primeiro só os dados rolados de verdade (`base`);
    *  cada ✷ dá direito a +1 dado, rolado depois (o seu com clique). `instant`: já mostra o resultado. */
-  private async rollTray(tray: HTMLElement, faces: DieFace[], success: DieFace, pool: DieFace[], sp: number, instant = false, base?: number, mine = false): Promise<HTMLElement[]> {
+  private async rollTray(tray: HTMLElement, faces: DieFace[], success: DieFace, pool: DieFace[], sp: number, instant = false, base?: number, mine = false, remote = false, tag = ''): Promise<HTMLElement[]> {
     const cls = pool === ATK_FACES ? 'black' : 'white';
     const dice: HTMLElement[] = [];
     const add = () => { const d = this.newDie(tray, cls === 'black'); dice.push(d); return d; };
@@ -560,10 +578,11 @@ export class BattlePanel {
       shown += n;
     };
     if (faces.length) await rollWave(wave, 750);
+    let k = 0;
     while (shown < faces.length) {
       const c = faces.slice(shown - wave, shown).filter(f => f === 'crit').length;
       const next = Math.min(faces.length - shown, c || faces.length - shown);
-      await this.critAsk(tray, next, mine, sp);
+      await this.critAsk(tray, next, mine, sp, remote, `${tag}:crit${++k}`);
       wave = next;
       await rollWave(next, 500);
     }

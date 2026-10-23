@@ -6,6 +6,7 @@ import { loadGame } from './mapLoading';
 import { showRoulette } from './roulette';
 import { actingGuild, applyAction, type Action } from '../engine/actions';
 import type { GameState } from '../engine/types';
+import { diceSync } from './diceSync';
 import type { ClientSession, HostSession, Lobby, Session, SessionEvents, UndoPoll } from '../net/net';
 import { key, parseKey, sameCell } from '../engine/board';
 import { setCursor } from '../render/cursors';
@@ -716,6 +717,7 @@ export class Controller {
     this.setUnread(0);
     this.hud.setModeBadge(session.isHost ? 'ONLINE · ANFITRIÃO' : 'ONLINE');
     session.ev = this.sessionEvents();
+    diceSync.net = { send: id => (this.net as HostSession | ClientSession | null)?.sendDiceStep(id), remote: g => this.remotePlayer(g), name: g => this.hud.nameOf(g) ?? guildShort(g) };
     if (session.isHost) {
       const host = session as HostSession;
       host.getState = () => this.game.s;
@@ -757,6 +759,7 @@ export class Controller {
       ping: (guild, cell) => this.showPing(guild, cell),
       undoPoll: (poll, result) => this.showUndoPoll(poll, result),
       decide: (req, id) => this.decideForHost(req, id),
+      diceStep: id => diceSync.receive(id),
     };
   }
 
@@ -935,7 +938,17 @@ export class Controller {
     if (changed) { this.pushLocal([]); this.onIdle(); }
   }
 
+  /** Online: a Guilda é de um jogador humano conectado em OUTRO computador (os dados dele esperam o clique dele). */
+  private remotePlayer(g: GuildId | null | undefined): boolean {
+    if (!g || this.mode === 'local' || !this.game?.s.guilds[g]) return false;
+    if (this.mode === 'host') return this.remoteHuman(g);
+    if (g === this.myGuild || this.game.guild(g).controller !== 'human') return false;
+    const seat = this.lobby?.seats.find(s => s.guild === g);
+    return !!seat && !seat.ai && seat.connected;
+  }
+
   leaveOnline(close = true) {
+    diceSync.net = null;
     if (close) this.net?.close();
     this.net = null;
     this.lobby = null;

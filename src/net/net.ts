@@ -66,6 +66,8 @@ export type Msg =
   /** Decisão no meio de uma jogada (Rerrolagem, alvo adicional…): anfitrião -> dono da Guilda, e a resposta de volta. */
   | { t: 'decide'; id: number; req: DecisionRequest }
   | { t: 'decision'; id: number; pick: number[] | null }
+  /** Dados sincronizados: quem rola avisa cada passo (anfitrião repassa a todos). */
+  | { t: 'diceStep'; id: string }
   /** Votação para voltar o turno: jogador -> anfitrião (abrir ou votar). */
   | { t: 'undoVote'; open?: boolean; yes?: boolean }
   /** Votação para voltar o turno: anfitrião -> todos (situação atual; null = encerrada). */
@@ -122,6 +124,8 @@ export interface SessionEvents {
   undoPoll?(poll: UndoPoll | null, result?: string): void;
   /** O anfitrião pede uma decisão minha no meio de uma jogada (Rerrolagem, alvo adicional…). */
   decide?(req: DecisionRequest, id: number): void;
+  /** Outro jogador rolou um passo dos dados. */
+  diceStep?(id: string): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -280,6 +284,9 @@ export class HostSession {
         if (w && w.guild === seat.guild) { this.waiting.delete(m.id); clearTimeout(w.timer); w.res(m.pick); }
       } else if (m.t === 'undoVote' && this.lobby.started) {
         if (m.open) this.openUndoVote(cid); else this.castUndo(cid, !!m.yes);
+      } else if (m.t === 'diceStep') {
+        for (const [id, c] of this.conns) if (id !== cid && c.open) c.send(m);
+        this.ev.diceStep?.(m.id);
       } else if (m.t === 'ping' && this.lobby.started) {
         const out: Msg = { t: 'ping', guild: seat.guild, cell: m.cell };
         for (const [id, c] of this.conns) if (id !== cid && c.open) c.send(out);
@@ -447,6 +454,7 @@ export class HostSession {
     this.broadcast({ t: 'view', guild: this.lobby.seats[0].guild, c, m, sel });
   }
   sendPing(cell: { c: number; r: number }) { this.broadcast({ t: 'ping', guild: this.lobby.seats[0].guild, cell }); }
+  sendDiceStep(id: string) { this.broadcast({ t: 'diceStep', id }); }
 
   /** A sala foi fechada (o anfitrião saiu). */
   closed = false;
@@ -555,6 +563,7 @@ export class ClientSession {
         case 'ping': if (m.guild) this.ev.ping?.(m.guild, m.cell); break;
         case 'undoPoll': this.ev.undoPoll?.(m.poll, m.result); break;
         case 'decide': this.ev.decide?.(m.req, m.id); break;
+        case 'diceStep': this.ev.diceStep?.(m.id); break;
         case 'kicked': this.shutdown(); this.ev.status(m.reason, 'error'); break;
       }
     });
@@ -577,6 +586,7 @@ export class ClientSession {
     this.send({ t: 'pick', ...p });
   }
   chat(text: string) { this.send({ t: 'chat', from: this.name, text }); }
+  sendDiceStep(id: string) { this.send({ t: 'diceStep', id }); }
   /** Resposta a um pedido de decisão do anfitrião (null = automática). */
   sendDecision(id: number, pick: number[] | null) { this.send({ t: 'decision', id, pick }); }
   /** Votação para voltar o turno: abrir (open) ou votar. */

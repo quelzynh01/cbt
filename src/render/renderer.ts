@@ -1283,30 +1283,41 @@ export class Renderer {
     }
 
     // Espaços bloqueados (plataformas com decoração)
-    g.map.pillars.forEach((c, i) => {
-      const fade = behind({ c: c.c - 1, r: c.r }) || behind({ c: c.c, r: c.r - 1 }) || behind({ c: c.c - 1, r: c.r - 1 });
+    g.map.pillars.forEach(c => {
       list.push({
         d: K(c.c + c.r, 2),
         draw: () => {
           ctx.save();
-          if (fade) ctx.globalAlpha = 0.55;
-          isoBox(ctx, c.c + 0.02, c.r + 0.02, c.c + 0.98, c.r + 0.98, 0, 30, '#8cbf45', '#8a6237', '#6e4a26', 'rgba(40,25,10,0.6)');
-          for (let k = 0; k < 18; k++) {
-            const p = g2s(c.c + 0.12 + hash(c.c, c.r, k) * 0.76, c.r + 0.12 + hash(c.r, c.c, k + 9) * 0.76, 30);
-            ctx.fillStyle = 'rgba(70,120,30,0.5)';
-            ctx.beginPath(); ctx.ellipse(p.x, p.y, 10, 4, 0, 0, Math.PI * 2); ctx.fill();
+          // Espaço bloqueado: plataforma cinza meio transparente (o piso aparece por baixo); as paredes em volta vêm abaixo
+          ctx.globalAlpha = 0.5;
+          isoBox(ctx, c.c + 0.02, c.r + 0.02, c.c + 0.98, c.r + 0.98, 0, 30, '#c9c6c0', '#a8a49c', '#8f8b84', 'rgba(60,55,50,0.8)');
+          // "X" fino e tracejado em cima: ninguém passa por aqui
+          {
+            ctx.globalAlpha = 0.7;
+            // ligando os meios dos lados do losango: na tela fica um "X"
+            const i0 = 0.1, i1 = 0.9;
+            const p1 = g2s(c.c + 0.5, c.r + i0, 30), p2 = g2s(c.c + 0.5, c.r + i1, 30), p3 = g2s(c.c + i0, c.r + 0.5, 30), p4 = g2s(c.c + i1, c.r + 0.5, 30);
+            ctx.strokeStyle = 'rgba(70,64,58,0.9)'; ctx.lineWidth = 2; ctx.setLineDash([10, 8]); ctx.lineCap = 'round';
+            ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.moveTo(p3.x, p3.y); ctx.lineTo(p4.x, p4.y); ctx.stroke();
+            ctx.setLineDash([]);
           }
-          // só caixotes (sem cogumelos nem arbustos)
-          if (i % 2 === 0) { drawCrates(ctx, c.c + 0.38, c.r + 0.42, 30); drawCrates(ctx, c.c + 0.66, c.r + 0.62, 30); }
-          else drawCrates(ctx, c.c + 0.55, c.r + 0.55, 30);
           ctx.restore();
         },
       });
     });
 
     // paredes: pertencem ao Espaço da frente (maior c+r)
-    for (const [a, b] of g.map.walls) {
-      if (!g.board.playable(a) || !g.board.playable(b)) continue;
+    // paredes do mapa + paredes em volta dos Espaços bloqueados (onde não há porta)
+    const wallEdges = new Map<string, [Cell, Cell]>();
+    const ek = (a: Cell, b: Cell) => [key(a), key(b)].sort().join('|');
+    for (const [a, b] of g.map.walls) if (g.board.exist(a) && g.board.exist(b) && (g.board.playable(a) || g.board.playable(b))) wallEdges.set(ek(a, b), [a, b]);
+    const doorAt = new Set(g.s.doors.map(d => ek(d.a, d.b)));
+    for (const p of g.map.pillars) {
+      for (const n of [{ c: p.c + 1, r: p.r }, { c: p.c - 1, r: p.r }, { c: p.c, r: p.r + 1 }, { c: p.c, r: p.r - 1 }]) {
+        if (g.board.playable(n) && !doorAt.has(ek(p, n))) wallEdges.set(ek(p, n), [p, n]);
+      }
+    }
+    for (const [a, b] of wallEdges.values()) {
       const [back, front] = a.c + a.r < b.c + b.r ? [a, b] : [b, a];
       const box = edgeBox(a, b, 0.03);
       const fade = behind(back);
@@ -1852,7 +1863,12 @@ export class Renderer {
       if (art) ctx.globalAlpha = 0; // o piso já veio da arte: só o tapete, o contorno e o ponto central
       diamondPath(ctx, c.c, c.r, 1, 1);
       ctx.clip();
-      if (room || area !== undefined) {
+      if (g.board.isPillar(c)) {
+        // Espaço bloqueado: chão liso (sem pedras), a plataforma cinza vai por cima
+        diamondPath(ctx, c.c, c.r, 1, 1);
+        ctx.fillStyle = '#9d968a';
+        ctx.fill();
+      } else if (room || area !== undefined) {
         // assoalho de tábuas
         const base = area !== undefined ? '#d08a40' : '#c08a52';
         diamondPath(ctx, c.c, c.r, 1, 1);
@@ -1937,9 +1953,11 @@ export class Renderer {
       ctx.strokeStyle = 'rgba(70,45,20,0.55)';
       ctx.lineWidth = 2.6;
       ctx.stroke();
-      const m = g2s(c.c + 0.5, c.r + 0.5);
-      ctx.fillStyle = 'rgba(70,45,20,0.35)';
-      ctx.beginPath(); ctx.ellipse(m.x, m.y, 4, 2, 0, 0, Math.PI * 2); ctx.fill();
+      if (!g.board.isPillar(c)) {
+        const m = g2s(c.c + 0.5, c.r + 0.5);
+        ctx.fillStyle = 'rgba(70,45,20,0.35)';
+        ctx.beginPath(); ctx.ellipse(m.x, m.y, 4, 2, 0, 0, Math.PI * 2); ctx.fill();
+      }
     }
 
     // sombra de contato no chão junto às paredes, portas e blocos
@@ -2075,15 +2093,9 @@ function drawWall(ctx: CanvasRenderingContext2D, b: EdgeBox) {
       ctx.strokeStyle = 'rgba(70,55,38,0.45)'; ctx.lineWidth = 1; ctx.stroke();
     }
   }
-  // musgo no topo
+  // acabamento no topo: pedra da mesma cor da parede
   const ex = 0.015;
-  isoBox(ctx, b.x0 - ex, b.y0 - (b.vertical ? 0 : ex), b.x1 + ex, b.y1 + (b.vertical ? 0 : ex), WALL_H, 6, '#a3cc5a', '#7ea33f', '#6b8f33', 'rgba(40,60,20,0.5)');
-  for (let k = 0; k < 4; k++) {
-    const u = 0.1 + k * 0.27;
-    const p = b.vertical ? g2s(b.x1 + ex, b.y0 + u, WALL_H + 2) : g2s(b.x0 + u, b.y1 + ex, WALL_H + 2);
-    ctx.fillStyle = '#6b8f33';
-    ctx.beginPath(); ctx.ellipse(p.x, p.y + 5, 5, 3.5, 0, 0, Math.PI * 2); ctx.fill();
-  }
+  isoBox(ctx, b.x0 - ex, b.y0 - (b.vertical ? 0 : ex), b.x1 + ex, b.y1 + (b.vertical ? 0 : ex), WALL_H, 6, '#ece4ce', '#c2b597', '#a69a7c', 'rgba(50,35,20,0.6)');
 }
 
 function drawDoor(ctx: CanvasRenderingContext2D, b: EdgeBox, open: boolean, small: boolean, locked = false) {

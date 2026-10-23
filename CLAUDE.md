@@ -79,6 +79,7 @@ node tools/tests/browser/vote.mjs <pasta-prints>                    # votação 
 node tools/tests/browser/curse.mjs <pasta-prints>                   # Maldições Mortais na campanha online
 node tools/tests/browser/saveon.mjs <pasta-prints>                  # partida online salva: sair e voltar (partida e Fase de Melhorias)
 node tools/tests/browser/savecamp.mjs <pasta-prints>                # campanha local: sair no meio do cenário e continuar
+node tools/tests/browser/dicesync.mjs <pasta-prints>                # online: dados sincronizados (o outro só vê depois do clique de quem rola)
 ```
 
 O jogo expõe `window.cbt` (o controller) para os testes manipularem o estado. Modo Teste via `localStorage['cbt.test']`.

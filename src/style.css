@@ -1432,3 +1432,6 @@ html.touch :is(.cd-roll, .bt-act, #rr-roll, #rr-go, #cd-rr, #bt-rr)::after { con
 .hb-cursetxt.can-cover { cursor: pointer; }
 .hb-cursetxt.can-cover:hover { background: rgba(120,40,180,.4); }
 .hb-cursetxt u { color: #fff; }
+
+/* online: esperando o outro jogador rolar */
+.cd-wait, .bt-wait { display: inline-block; padding: 6px 12px; border-radius: 10px; background: rgba(0,0,0,.35); color: #ffe7a8; font-weight: 700; animation: pulse 1s infinite alternate; }

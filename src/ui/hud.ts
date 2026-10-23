@@ -1,4 +1,5 @@
 import { TITLES, TITLE_TEXT } from '../engine/titles';
+import { diceSync } from './diceSync';
 import { CARDS, GUILDS, GUILD_NAMES, HEROES, MONSTERS, TOKEN_INFO, setGuildNames, teamName } from '../engine/data';
 import type { Game } from '../engine/game';
 import type { CardInst, DieFace, GameEvent, GuildId, RerollInfo, Token, Unit } from '../engine/types';
@@ -608,8 +609,8 @@ export class Hud {
           ${atk.notes.length ? `<div class="muted">${atk.notes.join(' · ')}</div>` : ''}
         </div>
         <h4>Cartas</h4>
-        <div class="cv-items">${u.cards.map(c => itemCard(c.defId, c.exhausted ? 'disc' : '', '', false, atk.n)).join('') || '<i class="muted">Sem cartas</i>'}</div>
-        ${u.curse && CURSES[u.curse] ? `<div class="hb-cursetxt">☠ <b>${CURSES[u.curse].name}</b> — ${CURSES[u.curse].text}${u.covered ? ` · cobre <b>${CARDS[u.covered.defId].name}</b>` : ''}</div>` : ''}`;
+        ${u.curse && CURSES[u.curse] ? `<div class="hb-cursetxt">☠ <b>${CURSES[u.curse].name}</b> — ${CURSES[u.curse].text}${u.covered ? ` · cobre <b>${CARDS[u.covered.defId].name}</b>` : ''}</div>` : ''}
+        <div class="cv-items">${u.cards.map(c => itemCard(c.defId, c.exhausted ? 'disc' : '', '', false, atk.n)).join('') || '<i class="muted">Sem cartas</i>'}</div>`;
     }
     box.innerHTML = `<div class="cv-box"><button class="cv-x" title="Fechar (Esc)">✕</button>${body}</div>`;
     box.classList.remove('hidden');
@@ -1148,6 +1149,7 @@ export class Hud {
     for (const t of this.centerTimers) clearTimeout(t);
     this.centerTimers = [];
     const token = ++this.centerRun;
+    diceSync.begin(e);
     const sp = Math.max(1, this.speed);
     const wait = (ms: number) => new Promise<void>(r => this.centerTimers.push(window.setTimeout(r, ms / sp)));
     const atk = g.unit(e.attackerId);
@@ -1191,8 +1193,15 @@ export class Hud {
       b.focus();
     });
 
+    /** Online: espera o jogador de outro computador clicar em "Rolar" (os dados aparecem juntos para todos). */
+    const waitRemote = async (holder: Element | null, who: GuildId, step: string, what: string) => {
+      if (holder) holder.innerHTML = `<span class="cd-wait">⏳ Aguardando ${diceSync.net?.name(who) ?? ''} ${what}…</span>`;
+      await diceSync.wait(step);
+      if (holder) holder.innerHTML = '';
+    };
+
     /** Rola uma fileira: gira, para um a um; se houver Rerrolagem, gira de novo os escolhidos. */
-    const rollRow = async (row: Element, final: DieFace[], black: boolean, success: string, rr?: RerollInfo, already = false, base?: number, mine = false, holder?: Element | null) => {
+    const rollRow = async (row: Element, final: DieFace[], black: boolean, success: string, rr?: RerollInfo, already = false, base?: number, mine = false, holder?: Element | null, remote = false, tag = '') => {
       const pool: DieFace[] = black ? ['crit', 'melee', 'ranged', 'blank'] : ['crit', 'shield', 'blank', 'blank'];
       const first = rr && !already ? rr.before : final;
       const instant = !!rr?.asked || already; // já rolado nesta mesma tela (decisão de Rerrolagem)
@@ -1200,7 +1209,7 @@ export class Hud {
       const settle = (d: HTMLElement, f: DieFace) => { d.classList.remove('rolling', 'rerolling'); d.innerHTML = dieImg(f, black); d.classList.toggle('hit', ok(f, success)); d.classList.toggle('crit', f === 'crit'); };
       let dice: HTMLElement[];
       if (instant) { dice = first.map(() => mk()); first.forEach((f, i) => settle(dice[i], f)); }
-      else dice = await this.rollWaves(row, first, base, black, success, mine, holder ?? null, wait);
+      else dice = await this.rollWaves(row, first, base, black, success, mine, holder ?? null, wait, remote, tag);
       const spin = window.setInterval(() => row.querySelectorAll<HTMLElement>('.cd-die.rolling').forEach(d => { d.innerHTML = dieImg(pool[Math.floor(Math.random() * pool.length)], black); }), 70);
       this.centerTimers.push(spin);
       if (rr && rr.idx.length && !already) {
@@ -1226,11 +1235,17 @@ export class Hud {
       } else if (!carry) {
         if (!e.dice.length) atkRow.innerHTML = '<span class="muted">sem dados</span>';
         else {
-          if (mineAtk && !e.rr?.asked && !e.spread) await askClick(box.querySelector('.cd-btn.atk')!, 'Rolar ataque', e.reason === 'heroi');
+          // quem rola: o dono do Herói (ou quem controla o Monstro na Reação)
+          const atkOwner = atk.kind === 'hero' ? atk.guild : e.ctl;
+          const atkRemote = !mineAtk && diceSync.remote(atkOwner);
+          if (!e.rr?.asked && !e.spread) {
+            if (mineAtk) { await askClick(box.querySelector('.cd-btn.atk')!, 'Rolar ataque', e.reason === 'heroi'); diceSync.mine('atk'); }
+            else if (atkRemote) await waitRemote(box.querySelector('.cd-btn.atk'), atkOwner!, 'atk', 'rolar o ataque');
+          }
           if (!alive()) return;
           // dano espalhado: mesmos dados do ataque anterior, já rolados
           if (e.spread) await rollRow(atkRow, e.dice, true, e.attackType, undefined, true);
-          else await rollRow(atkRow, e.dice, true, e.attackType, e.rr, false, e.baseDice, mineAtk, box.querySelector('.cd-btn.atk'));
+          else await rollRow(atkRow, e.dice, true, e.attackType, e.rr, false, e.baseDice, mineAtk, box.querySelector('.cd-btn.atk'), atkRemote, 'atk');
         }
       }
       if (!alive()) return;
@@ -1252,9 +1267,14 @@ export class Hud {
         if (t.stunnedNoDefense) row.innerHTML = '<span class="muted">Atordoado: sem Defesa</span>';
         else if (!t.defense.length) row.innerHTML = '<span class="muted">sem dados de Defesa</span>';
         else {
-          if (mineHero(g.unit(t.id)) && !t.rr?.asked) await askClick(wrap.querySelector('.cd-btn')!, 'Rolar defesa');
+          const tu = g.unit(t.id);
+          const defRemote = !mineHero(tu) && tu.kind === 'hero' && diceSync.remote(tu.guild);
+          if (!t.rr?.asked) {
+            if (mineHero(tu)) { await askClick(wrap.querySelector('.cd-btn')!, 'Rolar defesa'); diceSync.mine(`def:${t.id}`); }
+            else if (defRemote) await waitRemote(wrap.querySelector('.cd-btn'), tu.guild!, `def:${t.id}`, 'rolar a defesa');
+          }
           if (!alive()) return;
-          await rollRow(row, t.defense, false, 'shield', t.rr, false, undefined, mineHero(g.unit(t.id)), wrap.querySelector('.cd-btn'));
+          await rollRow(row, t.defense, false, 'shield', t.rr, false, undefined, mineHero(tu), wrap.querySelector('.cd-btn'), defRemote, `def:${t.id}`);
           wrap.querySelector('.cd-sum')!.innerHTML = `<b>${t.blocks}</b> bloqueio${t.blocks === 1 ? '' : 's'}${t.rr?.idx.length ? ' <span class="rrtag">↻ rerrolado</span>' : ''}`;
         }
         if (!alive()) return;
@@ -1309,7 +1329,7 @@ export class Hud {
   }
 
   /** Rola em ondas: primeiro os dados normais; cada ✷ dá direito a +1 dado, rolado depois (você clica; Monstros e IA rolam sozinhos). */
-  private async rollWaves(row: Element, faces: DieFace[], base: number | undefined, black: boolean, success: string, mine: boolean, holder: Element | null, wait: (ms: number) => Promise<void>): Promise<HTMLElement[]> {
+  private async rollWaves(row: Element, faces: DieFace[], base: number | undefined, black: boolean, success: string, mine: boolean, holder: Element | null, wait: (ms: number) => Promise<void>, remote = false, tag = ''): Promise<HTMLElement[]> {
     const pool: DieFace[] = black ? ['crit', 'melee', 'ranged', 'blank'] : ['crit', 'shield', 'blank', 'blank'];
     const ok = (f: DieFace) => f === 'crit' || f === success;
     const box = $('#dicecenter', this.root);
@@ -1333,10 +1353,11 @@ export class Hud {
       shown += n;
     };
     if (faces.length) await rollWave(wave);
+    let k = 0;
     while (shown < faces.length) {
       const c = faces.slice(shown - wave, shown).filter(f => f === 'crit').length;
       const next = Math.min(faces.length - shown, c || faces.length - shown);
-      await this.critPrompt(row, holder, next, mine, wait);
+      await this.critPrompt(row, holder, next, mine, wait, remote, `${tag}:crit${++k}`);
       wave = next;
       await rollWave(next);
     }
@@ -1345,7 +1366,7 @@ export class Hud {
   }
 
   /** ✷ Crítico: o seu = botão "Rolar +N dado" (você rola); dos outros = aviso "✷ +N" e o dado rola sozinho. */
-  private async critPrompt(row: Element, holder: Element | null, next: number, mine: boolean, wait: (ms: number) => Promise<void>) {
+  private async critPrompt(row: Element, holder: Element | null, next: number, mine: boolean, wait: (ms: number) => Promise<void>, remote = false, step = '') {
     const box = $('#dicecenter', this.root);
     const label = `✷ Crítico! Rolar +${next} dado${next > 1 ? 's' : ''}`;
     if (mine && holder) {
@@ -1359,12 +1380,14 @@ export class Hud {
         this.diceKey(key);
         (holder.querySelector('button') as HTMLButtonElement).onclick = go;
       });
+      if (step) diceSync.mine(step);
     } else {
       const tag = document.createElement('span');
       tag.className = 'cd-crittag';
       tag.textContent = `✷ +${next}`;
       row.append(tag);
-      await wait(650);
+      // online: o dado extra só rola quando o dono clicar no ✷ na tela dele
+      if (remote && step) await diceSync.wait(step); else await wait(650);
       tag.remove();
     }
   }
