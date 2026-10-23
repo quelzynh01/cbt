@@ -15,7 +15,7 @@ import { TITLES, TITLE_TEXT } from '../engine/titles';
 import { drawFace } from '../render/chibi';
 import { curseCard, heroCard, itemCard, paintCardArt } from './cardview';
 import { CARD_ART } from './cardArt';
-import { buyHint, buySummaryHtml, curseRevealHtml, curseSummaryHtml } from './upgradeViews';
+import { buyHint, buySummaryHtml, curseRevealHtml, curseSummaryHtml, rankingHtml } from './upgradeViews';
 import { attachMapPeek, closeMapPeek, mapChoiceCard } from './mapInfo';
 import { bindInvEditor, invEditorHtml, poolErrors, type InvItem, type InvOptions } from './inventoryEditor';
 import { fmtTime, getSettings } from './settings';
@@ -386,6 +386,7 @@ export class CampaignUI {
       <table><tr><th>Guilda</th><th>Missões</th><th>Mortes</th><th>Moedas</th></tr>
       ${last.guilds.map(r => `<tr class="${r.id === last.winner ? 'win' : ''}"><td><span class="dot" style="background:${GUILDS[r.id].color}"></span> ${guildName(r.id)}${r.id === last.winner ? ' 🏆' : ''}</td><td>${r.missions}</td><td>${r.deaths}</td><td>${r.coins}</td></tr>`).join('')}</table>
       ${up.cursesDrawn.length ? `<h4>Maldições Mortais</h4><div class="cp-curses">${up.cursesDrawn.map(x => `<div><span class="dot" style="background:${GUILDS[x.guild].color}"></span> ${HEROES[x.hero].name}: comprou ${x.drawn.map(d => CURSES[d].name).join(', ')} → <b>${CURSES[x.kept].name}</b> <small>${esc(CURSES[x.kept].text)}</small></div>`).join('')}</div>` : ''}
+      ${rankingHtml(c, guildName)}
     </div>`;
     // antes das Melhorias: as Maldições Mortais (cartas viradas na mesa, um Herói de cada vez)
     if (!up.curseDone) { this.curses(); return; }

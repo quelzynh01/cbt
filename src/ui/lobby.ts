@@ -1,7 +1,7 @@
 import { play } from '../audio/sfx';
 import { BANS_EACH } from '../engine/heroBan';
 import { GUILDS, HEROES, HERO_SETS, heroSetName, starterCards, type HeroSet } from '../engine/data';
-import { buyHint, buySummaryHtml, curseRevealHtml, curseSummaryHtml } from './upgradeViews';
+import { buyHint, buySummaryHtml, curseRevealHtml, curseSummaryHtml, rankingHtml } from './upgradeViews';
 import { draftRounds, picksPerRound, titleHolders, type CampaignState } from '../campaign/campaign';
 import { gameConfirm } from './dialog';
 import { Game } from '../engine/game';
@@ -529,7 +529,7 @@ export class OnlineLobby {
       <table><tr><th>Guilda</th><th>Missões</th><th>Mortes</th><th>Moedas</th></tr>
       ${last.guilds.map(r => `<tr class="${r.id === last.winner ? 'win' : ''}"><td><span class="dot" style="background:${GUILDS[r.id].color}"></span> ${esc(this.seatName(r.id))}${r.id === last.winner ? ' 🏆' : ''}</td><td>${r.missions}</td><td>${r.deaths}</td><td>${r.coins}</td></tr>`).join('')}</table>
       ${up.cursesDrawn.filter(x => x.guild === me && CURSES[x.kept]).map(x => `<div class="cp-curse">☠ ${HEROES[x.hero].name}: <b>${CURSES[x.kept].name}</b> — ${CURSES[x.kept].text}</div>`).join('')}
-      ${this.rankingHtml(c)}</div>`;
+      ${rankingHtml(c, g => this.seatName(g))}</div>`;
     const name = (x: GuildId) => this.seatName(x);
     // Maldições Mortais: as cartas viradas na mesa, um Herói de cada vez (todos veem); depois o resumo
     if (st.step === 'upgrade-curses') {
@@ -584,16 +584,6 @@ export class OnlineLobby {
       ${invEditorHtml(arr, arOpts)}
       ${errs.length ? `<div class="lb-warn">${errs.join('<br/>')}</div>` : ''}
       <div class="tb-actions"><button class="primary" id="up-go" ${errs.length ? 'disabled' : ''}>✔ Pronto</button></div>`;
-  }
-
-  /** Ranking da campanha até agora (Medalhas do Livro de Campanha: quem lidera cada Conquista) e total por Guilda. */
-  private rankingHtml(c: CampaignState): string {
-    const ms = medals(c);
-    const total = (g: GuildId) => ms.filter(m => m.winners.includes(g)).length;
-    const rows = c.guilds.slice().sort((a, b) => total(b.id) - total(a.id)).map((g, i) => `<tr><td>${i + 1}º</td><td><span class="dot" style="background:${GUILDS[g.id].color}"></span> ${esc(this.seatName(g.id))}</td>
-      ${ms.map(m => `<td>${m.winners.includes(g.id) ? '🏅' : '·'}</td>`).join('')}<td><b>${total(g.id)}</b></td></tr>`).join('');
-    return `<div class="cp-rank"><h4>🏆 Ranking da campanha <small>(${c.played.length} de 6 cenários)</small></h4>
-      <table><tr><th></th><th>Guilda</th>${ms.map(m => `<th>${m.name}</th>`).join('')}<th>Medalhas</th></tr>${rows}</table></div>`;
   }
 
   private bindUpgrade(st: OnlineSetup, me: GuildId | null) {

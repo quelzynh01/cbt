@@ -1,7 +1,7 @@
 import { CARDS, CURSES } from '../engine/cards';
 import { GUILDS, HEROES } from '../engine/data';
 import type { GuildId } from '../engine/types';
-import type { CampaignState } from '../campaign/campaign';
+import { medals, type CampaignState } from '../campaign/campaign';
 import { curseCard, itemCard } from './cardview';
 
 // Telas da Fase de Melhorias usadas igual na campanha (neste computador) e na campanha online:
@@ -9,6 +9,16 @@ import { curseCard, itemCard } from './cardview';
 
 const esc = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 const who = (g: GuildId, name: (g: GuildId) => string) => `<span class="dot" style="background:${GUILDS[g].color}"></span> ${esc(name(g))}`;
+
+/** Ranking da campanha até agora (Medalhas do Livro de Campanha: quem lidera cada Conquista) e total por Guilda. */
+export function rankingHtml(c: CampaignState, name: (g: GuildId) => string): string {
+  const ms = medals(c);
+  const total = (g: GuildId) => ms.filter(m => m.winners.includes(g)).length;
+  const rows = c.guilds.slice().sort((a, b) => total(b.id) - total(a.id)).map((g, i) => `<tr><td>${i + 1}º</td><td>${who(g.id, name)}</td>
+    ${ms.map(m => `<td>${m.winners.includes(g.id) ? '🏅' : '·'}</td>`).join('')}<td><b>${total(g.id)}</b></td></tr>`).join('');
+  return `<div class="cp-rank"><h4>🏆 Ranking da campanha <small>(${c.played.length} de 6 cenários)</small></h4>
+    <table><tr><th></th><th>Guilda</th>${ms.map(m => `<th>${m.name}</th>`).join('')}<th>Medalhas</th></tr>${rows}</table></div>`;
+}
 
 /** Herói da vez nas Maldições: as cartas na mesa (viradas ou não). `canFlip`: quem está olhando pode virar a próxima. */
 /** Cartas de Maldição já animadas (para não virarem de novo a cada atualização da tela). */
