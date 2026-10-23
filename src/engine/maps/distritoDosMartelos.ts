@@ -56,6 +56,8 @@ export const DISTRITO_DOS_MARTELOS: MapDef = {
     [C(3, 6), C(4, 6)], [C(3, 6), C(3, 7)], [C(3, 7), C(3, 8)], [C(5, 7), C(5, 8)],
     // revisão dos mapas
     [C(3, 1), C(4, 1)], [C(3, 1), C(3, 2)],
+    // revisão dos mapas
+    [C(1, 6), C(2, 6)],
   ],
 
   doors: [
@@ -107,13 +109,11 @@ export const DISTRITO_DOS_MARTELOS: MapDef = {
 
   monsters: [
     // Saqueador Orc x8
-    { type: 'orc', cell: C(4, 1) },
     { type: 'orc', cell: C(8, 2) },
     { type: 'orc', cell: C(3, 3) },
     { type: 'orc', cell: C(2, 4) },
     { type: 'orc', cell: C(6, 4) },
     { type: 'orc', cell: C(5, 5) },
-    { type: 'orc', cell: C(1, 6) },
     { type: 'orc', cell: C(4, 6) },
     // Arqueiro Goblin x6
     { type: 'goblin', cell: C(5, 2) },
@@ -122,6 +122,8 @@ export const DISTRITO_DOS_MARTELOS: MapDef = {
     { type: 'goblin', cell: C(2, 5) },
     { type: 'goblin', cell: C(3, 6) },
     { type: 'goblin', cell: C(0, 6) },
+    // revisão dos mapas
+    { type: 'orc', cell: C(0, 6) }, { type: 'orc', cell: C(4, 2) },
   ],
 
   missions: {
