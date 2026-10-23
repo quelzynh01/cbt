@@ -215,7 +215,12 @@ export function drawMinimap(cv: HTMLCanvasElement, m: MapDef) {
   // Áreas Iniciais
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   m.startAreas.forEach((cells, i) => {
-    const cx = cells.reduce((s, c) => s + c.c + 0.5, 0) / cells.length, cy = cells.reduce((s, c) => s + c.r + 0.5, 0) / cells.length;
+    if (!cells.length) return;
+    const ax = cells.reduce((s, c) => s + c.c + 0.5, 0) / cells.length, ay = cells.reduce((s, c) => s + c.r + 0.5, 0) / cells.length;
+    // no meio da área; se a área estiver separada, no Espaço dela mais perto do meio
+    const near = cells.reduce((b, c) => Math.hypot(c.c + 0.5 - ax, c.r + 0.5 - ay) < Math.hypot(b.c + 0.5 - ax, b.r + 0.5 - ay) ? c : b);
+    const inside = cells.some(c => ax >= c.c && ax <= c.c + 1 && ay >= c.r && ay <= c.r + 1);
+    const cx = inside ? ax : near.c + 0.5, cy = inside ? ay : near.r + 0.5;
     const x = ox + cx * S, y = oy + cy * S, rr = S * 0.2;
     ctx.fillStyle = '#5a3410'; ctx.beginPath(); ctx.arc(x, y, rr, 0, 7); ctx.fill();
     ctx.strokeStyle = '#ffe2a0'; ctx.lineWidth = 2; ctx.stroke();

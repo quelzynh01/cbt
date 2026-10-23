@@ -46,7 +46,14 @@ const toCells = (k: string): [Cell, Cell] => k.split('|').map(s => { const [c, r
 const cellOf = (k: string): Cell => { const [c, r] = k.split(',').map(Number); return { c, r }; };
 const doorType = (d: MapDef['doors'][number]): DoorType => d.locked ? 'trancada' : d.small ? 'pequena' : d.open ? 'aberta' : 'fechada';
 
-function load(): Edits { try { return JSON.parse(localStorage.getItem(STORE) ?? '{}'); } catch { return {}; } }
+function load(): Edits {
+  let e: Edits;
+  try { e = JSON.parse(localStorage.getItem(STORE) ?? '{}'); } catch { return {}; }
+  // versão antiga: as Áreas Iniciais editadas antes da correção do Distrito dos Martelos ficaram erradas — descarta
+  const v = e as unknown as { __v?: number };
+  if (!v.__v) { for (const ed of Object.values(e)) if (ed && typeof ed === 'object') delete (ed as MapEdits).areas; v.__v = 2; }
+  return e;
+}
 function save(e: Edits) { try { localStorage.setItem(STORE, JSON.stringify(e)); } catch { /* sem armazenamento */ } }
 
 /** Tira as alterações que o mapa já tem (ex.: uma revisão que já foi aplicada no jogo). */
