@@ -30,7 +30,7 @@ export const DISTRITO_DO_ALQUIMISTA: MapDef = {
   ],
 
   // (1,0)-(2,0): Esconderijo do Troll — a porta trancada só abre para o "Caçador de Trolls" (A Mansão).
-  pillars: [C(2, 2), C(0, 3), C(6, 2), C(2, 6), C(6, 6), C(6, 8)],
+  pillars: [C(2, 2), C(0, 3), C(6, 2), C(2, 6), C(6, 6), C(6, 8), C(8, 7), C(8, 8)],
 
   rooms: [
     C(0, 1), C(0, 2), C(5, 0), C(7, 0), C(8, 0), C(8, 1), C(8, 2), C(8, 3), C(8, 4), C(8, 5),
@@ -53,9 +53,8 @@ export const DISTRITO_DO_ALQUIMISTA: MapDef = {
     [C(0, 5), C(1, 5)], [C(0, 5), C(0, 6)],
     [C(0, 6), C(0, 7)], [C(0, 7), C(1, 7)], [C(2, 7), C(2, 8)], [C(2, 8), C(3, 8)],
     [C(3, 8), C(4, 8)], [C(5, 7), C(5, 8)],
-    [C(7, 7), C(8, 7)], [C(8, 6), C(8, 7)],
     // revisão dos mapas
-    [C(7, 8), C(8, 8)], [C(0, 2), C(1, 2)],
+    [C(0, 2), C(1, 2)],
   ],
 
   doors: [

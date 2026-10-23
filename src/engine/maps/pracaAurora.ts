@@ -27,7 +27,7 @@ export const PRACA_AURORA: MapDef = {
 
   // estátua do rei (centro) e a sala de jantar
   pillars: [C(4, 4), C(0, 7), C(0, 8), C(5, 0), C(3, 0), C(0, 3), C(8, 6), C(8, 7), C(8, 8), C(0, 0), C(8, 0)],
-  rooms: [C(0, 0), C(8, 0), C(2, 2), C(3, 2), C(5, 2), C(6, 2), C(0, 3), C(8, 3), C(2, 4), C(6, 4), C(7, 4), C(0, 5), C(2, 6), C(3, 6), C(5, 6), C(6, 6)],
+  rooms: [C(0, 0), C(8, 0), C(2, 2), C(3, 2), C(5, 2), C(6, 2), C(0, 3), C(8, 3), C(2, 4), C(6, 4), C(0, 5), C(2, 6), C(3, 6), C(5, 6), C(6, 6), C(2, 5), C(2, 3), C(6, 5), C(6, 3)],
 
   walls: [
     // Áreas Iniciais
@@ -42,7 +42,6 @@ export const PRACA_AURORA: MapDef = {
     [C(2, 6), C(2, 5)], [C(2, 6), C(2, 7)], [C(3, 6), C(3, 7)], [C(3, 6), C(4, 6)],
     [C(5, 6), C(4, 6)], [C(5, 6), C(5, 7)], [C(6, 6), C(6, 5)], [C(6, 6), C(6, 7)],
     // destinos da Resistência ("!")
-    [C(2, 4), C(2, 3)], [C(2, 4), C(2, 5)],
     // sala do marcador Verde
     [C(7, 4), C(7, 5)],
     // Esconderijo do Troll
