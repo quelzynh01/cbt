@@ -210,6 +210,8 @@ export interface GameState {
   winner: GuildId | null;
   turn: number;
   pending?: PendingVengeance | null;
+  /** Cartas sem Herói da Guilda (Recompensa recebida com o inventário cheio): equipadas no próximo Descanso. */
+  spare?: Partial<Record<GuildId, CardInst[]>>;
   /** Lápide "ativar um Monstro" esperando o jogador (humano): escolhe o Monstro e o move/ataca como um Herói. */
   puppet?: { by: string; guild: GuildId; cat: string; source: string; monsterId: string | null } | null;
   /** Tempo de jogo da partida (ms). */
@@ -304,7 +306,7 @@ export type GameEvent =
   /** Título de campanha conquistado. */
   | { t: 'title'; guild: GuildId; title: string; name: string }
   /** Carta de Recompensa recebida (mostrada para todos). */
-  | { t: 'reward'; heroId: string; cardId: string }
+  | { t: 'reward'; heroId: string; cardId: string; /** ficou com as cartas sem Herói (inventário cheio) */ spare?: boolean }
   /** Habilidade Natural ativada (Furtividade do Vapor, Vingança do Espetado…). */
   | { t: 'skill'; id: string; skill: string; name: string }
   /** Aviso na tela de todos (ex.: a Lápide não tem Monstro para ativar). */

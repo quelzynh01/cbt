@@ -13,6 +13,8 @@ export type Action =
   | { type: 'power'; heroId: string; target?: string; cell?: Cell }
   /** Revelar a carta de Lápide do Espaço do Herói ativo (1 PM). */
   | { type: 'tomb' }
+  /** Maldição que ocupa um espaço: escolhe qual carta do Herói fica debaixo dela (indisponível). */
+  | { type: 'cover'; heroId: string; cardUid: string }
   | { type: 'rest'; opts?: RestOptions }
   | { type: 'end' }
   /** doors: portas Perto do Monstro que ele abre/fecha antes de mover (1 ponto de Movimento cada). */
@@ -52,6 +54,7 @@ export function applyAction(g: Game, by: GuildId, a: Action): boolean {
     case 'card': return g.useCard(a.heroId, a.cardUid, a.target, a.cell);
     case 'power': return g.usePower(a.heroId, a.target, a.cell);
     case 'tomb': return g.revealTomb();
+    case 'cover': return g.setCurseCover(a.heroId, a.cardUid);
     case 'rest': return g.rest(a.opts ?? {});
     case 'end': return g.endTurn();
   }

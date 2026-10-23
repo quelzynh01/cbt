@@ -1,5 +1,6 @@
 import Peer, { type DataConnection } from 'peerjs';
 import type { Action } from '../engine/actions';
+import type { DecisionRequest } from '../engine/game';
 import type { GameEvent, GameState, GuildId } from '../engine/types';
 import { loadMapId } from '../engine/maps';
 import { type OnlineSetup, redact } from './onlineSetup';
@@ -60,6 +61,9 @@ export type Msg =
   | { t: 'ping'; guild?: GuildId; cell: { c: number; r: number } }
   /** Batimento: mostra que a conexão continua viva (anfitrião <-> jogadores). */
   | { t: 'hb' }
+  /** Decisão no meio de uma jogada (Rerrolagem, alvo adicional…): anfitrião -> dono da Guilda, e a resposta de volta. */
+  | { t: 'decide'; id: number; req: DecisionRequest }
+  | { t: 'decision'; id: number; pick: number[] | null }
   /** Votação para voltar o turno: jogador -> anfitrião (abrir ou votar). */
   | { t: 'undoVote'; open?: boolean; yes?: boolean }
   /** Votação para voltar o turno: anfitrião -> todos (situação atual; null = encerrada). */
@@ -114,6 +118,8 @@ export interface SessionEvents {
   ping?(guild: GuildId, cell: { c: number; r: number }): void;
   /** Votação para voltar o turno mudou (null = encerrada; `result` = como terminou). */
   undoPoll?(poll: UndoPoll | null, result?: string): void;
+  /** O anfitrião pede uma decisão minha no meio de uma jogada (Rerrolagem, alvo adicional…). */
+  decide?(req: DecisionRequest, id: number): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -252,6 +258,9 @@ export class HostSession {
         if (why) conn.send({ t: 'reject', reason: why } satisfies Msg);
       } else if (m.t === 'chat') {
         this.chatAll(seat.name, m.text.slice(0, 200), colorOf(seat.guild));
+      } else if (m.t === 'decision') {
+        const w = this.waiting.get(m.id);
+        if (w && w.guild === seat.guild) { this.waiting.delete(m.id); clearTimeout(w.timer); w.res(m.pick); }
       } else if (m.t === 'undoVote' && this.lobby.started) {
         if (m.open) this.openUndoVote(cid); else this.castUndo(cid, !!m.yes);
       } else if (m.t === 'ping' && this.lobby.started) {
@@ -282,6 +291,8 @@ export class HostSession {
   }
 
   send(to: string, m: Msg) { const c = this.conns.get(to); if (c?.open) c.send(m); }
+  /** Avisa o jogador da Guilda que a jogada dele não valeu. */
+  rejectGuild(guild: GuildId, reason: string) { const s = this.lobby.seats.find(x => x.guild === guild); if (s) this.send(s.clientId, { t: 'reject', reason }); }
   broadcast(m: Msg) { for (const c of this.conns.values()) if (c.open) c.send(m); }
   /** Sala para um jogador: na preparação, as cartas e escolhas dos outros vão escondidas. */
   lobbyFor(guild: GuildId | null): Lobby {
@@ -294,6 +305,22 @@ export class HostSession {
       c.send({ t: 'lobby', lobby: this.lobbyFor(seat?.guild ?? null) } satisfies Msg);
     }
     this.ev.lobby(this.lobbyFor(this.lobby.seats[0].guild));
+  }
+
+  // ---------------------------------------------------------------- decisões dos outros jogadores no meio da jogada
+  private waiting = new Map<number, { guild: GuildId; res: (pick: number[] | null) => void; timer: number }>();
+  private nextAsk = 1;
+  /** Pede a decisão ao jogador dono da Guilda (null = automática: desconectou ou demorou demais). */
+  askDecision(guild: GuildId, req: DecisionRequest, timeoutMs = 60000): Promise<number[] | null> {
+    const seat = this.lobby.seats.find(s => s.guild === guild);
+    const conn = seat ? this.conns.get(seat.clientId) : undefined;
+    if (!seat || seat.ai || !conn?.open) return Promise.resolve(null);
+    const id = this.nextAsk++;
+    return new Promise(res => {
+      const timer = window.setTimeout(() => { this.waiting.delete(id); res(null); }, timeoutMs);
+      this.waiting.set(id, { guild, res, timer });
+      conn.send({ t: 'decide', id, req } satisfies Msg);
+    });
   }
 
   // ---------------------------------------------------------------- votação para voltar o turno
@@ -314,7 +341,7 @@ export class HostSession {
     const who = voters.find(v => v.id === cid);
     if (!who) return;
     this.poll = { by: who.name, voters, yes: [cid], no: [], ends: Date.now() + POLL_MS };
-    this.chatAll('Sistema', `🗳️ ${who.name} abriu uma votação para voltar o turno.`);
+    this.chatAll('Sistema', `🗳️ ${who.name} abriu uma votação para voltar a última jogada.`);
     clearTimeout(this.pollTimer);
     this.pollTimer = window.setTimeout(() => this.closePoll(false, 'tempo esgotado'), POLL_MS);
     this.checkPoll();
@@ -339,8 +366,8 @@ export class HostSession {
     const p = this.poll;
     this.poll = null;
     const done = ok && this.onUndoPassed();
-    const result = done ? `✅ Votação aprovada (${p.yes.length}/${p.voters.length}): o turno voltou ao começo.`
-      : ok ? '⚠️ Votação aprovada, mas não há turno para voltar.' : `❌ Votação recusada (${why}). A partida continua.`;
+    const result = done ? `✅ Votação aprovada (${p.yes.length}/${p.voters.length}): a última jogada foi desfeita.`
+      : ok ? '⚠️ Votação aprovada, mas não há jogada para voltar.' : `❌ Votação recusada (${why}). A partida continua.`;
     this.chatAll('Sistema', result);
     this.pushPoll(result);
   }
@@ -508,6 +535,7 @@ export class ClientSession {
         case 'view': if (m.guild) this.ev.view?.(m.guild, m.c, m.m, m.sel); break;
         case 'ping': if (m.guild) this.ev.ping?.(m.guild, m.cell); break;
         case 'undoPoll': this.ev.undoPoll?.(m.poll, m.result); break;
+        case 'decide': this.ev.decide?.(m.req, m.id); break;
         case 'kicked': this.shutdown(); this.ev.status(m.reason, 'error'); break;
       }
     });
@@ -530,6 +558,8 @@ export class ClientSession {
     this.send({ t: 'pick', ...p });
   }
   chat(text: string) { this.send({ t: 'chat', from: this.name, text }); }
+  /** Resposta a um pedido de decisão do anfitrião (null = automática). */
+  sendDecision(id: number, pick: number[] | null) { this.send({ t: 'decision', id, pick }); }
   /** Votação para voltar o turno: abrir (open) ou votar. */
   undoVote(open: boolean, yes = true) { this.send(open ? { t: 'undoVote', open: true } : { t: 'undoVote', yes }); }
   close() { this.shutdown(); }

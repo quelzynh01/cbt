@@ -320,7 +320,7 @@ export const EXPLORATION_BAG: { type: TokenType; value?: number }[] = [
 ];
 
 export const TOKEN_INFO: Record<TokenType, { name: string; text: string }> = {
-  cura: { name: 'Poção de Cura', text: 'Descarte no seu turno para remover todos os Ferimentos deste Herói.' },
+  cura: { name: 'Poção de Cura', text: 'Descarte no seu turno para remover todos os Ferimentos deste Herói e a Maldição Mortal dele.' },
   revigorante: { name: 'Poção Revigorante', text: 'Descarte no seu turno para restaurar todas as cartas deste Herói.' },
   turno: { name: 'Poção de Turno Adicional', text: 'Descarte no fim do turno para fazer um turno adicional completo.' },
   bau: { name: 'Baú de Tesouro', text: 'Ao final do cenário, vale moedas para a Guilda.' },

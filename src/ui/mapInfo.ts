@@ -104,10 +104,11 @@ export function mapSheet(m: MapDef): string {
 }
 
 /** Cartão de mapa para as telas de escolha (ilustração + nome); a lupa abre a ficha. */
-export function mapChoiceCard(m: MapDef, opts: { cls?: string; attrs?: string; level?: string; sub?: string } = {}): string {
+export function mapChoiceCard(m: MapDef, opts: { cls?: string; attrs?: string; level?: string; sub?: string; titles?: { name: string; color: string; title: string }[] } = {}): string {
   return `<div class="cp-vote mv ${opts.cls ?? ''}" ${opts.attrs ?? ''} data-peek="${m.id}">
     <div class="mv-art"><img src="${mapArtUrl(m.id)}" alt="" loading="lazy"/></div>
-    <div class="mv-cap"><b>${m.name}</b>${difficultyBadge(m, opts.level)}<small>${opts.sub ?? m.circle}</small></div></div>`;
+    <div class="mv-cap"><b>${m.name}</b>${difficultyBadge(m, opts.level)}<small>${opts.sub ?? m.circle}</small>
+      ${opts.titles?.length ? `<div class="mv-titles">${opts.titles.map(t => `<span style="--gc:${t.color}" title="${t.title}: vantagem neste mapa">🏅 <b>${t.name}</b> · ${t.title}</span>`).join('')}</div>` : ''}</div></div>`;
 }
 
 /** Canvas da disposição com a proporção do mapa (9x6, 9x9...). */

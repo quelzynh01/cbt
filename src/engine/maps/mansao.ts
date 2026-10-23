@@ -45,8 +45,8 @@ export const MANSAO: MapDef = {
     [C(2, 3), C(1, 3)], [C(2, 3), C(2, 4)], [C(2, 3), C(3, 3)],
     [C(3, 3), C(3, 4)], [C(5, 3), C(5, 4)], [C(5, 3), C(6, 3)],
     [C(6, 3), C(7, 3)], [C(6, 3), C(6, 4)],
-    // corredor do tapete vermelho
-    [C(4, 4), C(3, 4)], [C(4, 4), C(5, 4)],
+    // corredor do tapete vermelho (nicho do portal rosa: fechado embaixo, só se entra pelo depósito ou pelo portal)
+    [C(4, 4), C(3, 4)], [C(4, 4), C(5, 4)], [C(4, 4), C(4, 5)],
   ],
 
   doors: [

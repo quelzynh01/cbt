@@ -1374,6 +1374,17 @@ export class Renderer {
       ctx.beginPath(); ctx.arc(0, 0, R + 7, 0, Math.PI * 2); ctx.stroke();
       ctx.restore();
     }
+    // Maldição Mortal: névoa roxa no chão e caveirinhas girando em volta
+    const cursed = u.alive && u.kind === 'hero' && !!this.game?.s.units[u.id]?.curse;
+    if (cursed) {
+      ctx.save();
+      ctx.scale(1, 0.5);
+      const R = 40 * L.scale;
+      const mist = ctx.createRadialGradient(0, 0, R * 0.2, 0, 0, R * 1.3);
+      mist.addColorStop(0, `rgba(170,70,235,${0.6 + 0.15 * Math.sin(tt * 2.2)})`); mist.addColorStop(0.6, 'rgba(140,50,210,0.35)'); mist.addColorStop(1, 'rgba(120,40,180,0)');
+      ctx.fillStyle = mist; ctx.beginPath(); ctx.arc(0, 0, R * 1.3, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    }
     // anel da Guilda (círculo de time do Dofus)
     const ringColor = u.guild ? GUILDS[u.guild as keyof typeof GUILDS].color : '#7a2b8f';
     ctx.save();
@@ -1452,6 +1463,20 @@ export class Renderer {
     if (blink) ctx.filter = 'none';
     if (spinFx && spinFront) spinFx();
     if (u.stunned) this.drawStun(ctx, -78 * L.scale - 6, tt);
+    // Maldição: 3 caveirinhas roxas girando em volta do corpo (atrás e na frente)
+    if (cursed) {
+      ctx.save();
+      ctx.font = `900 ${Math.round(20 * L.scale)}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      for (let k = 0; k < 3; k++) {
+        const a = tt * 1.1 + k * (Math.PI * 2 / 3);
+        const x = Math.cos(a) * 34 * L.scale, y = -42 * L.scale + Math.sin(a) * 10 * L.scale - Math.sin(tt * 2 + k) * 6;
+        ctx.globalAlpha = 0.65 + 0.35 * (Math.sin(a) + 1) / 2;
+        ctx.shadowColor = '#d58bff'; ctx.shadowBlur = 10;
+        ctx.lineWidth = 3; ctx.strokeStyle = '#2a0838'; ctx.strokeText('☠', x, y);
+        ctx.fillStyle = '#d9a3ff'; ctx.fillText('☠', x, y);
+      }
+      ctx.restore();
+    }
     // Herói ativado: seta dourada pulando em cima da cabeça
     if (activated) {
       const y = -78 * L.scale - 34 - Math.abs(Math.sin(tt * 4)) * 10;
@@ -1492,19 +1517,32 @@ export class Renderer {
 
     // barra de vida + número
     const top = -78 * L.scale - 6;
-    const bw = 40;
+    // barra maior, dividida em gomos (1 por ponto de Vida, como no Dota)
+    const bw = Math.min(110, Math.max(54, u.maxHp * 12));
+    const bh = 9;
     const frac = Math.max(0, (u.maxHp - u.wounds) / u.maxHp);
-    ctx.fillStyle = 'rgba(20,10,5,0.75)';
-    roundRect(ctx, -bw / 2 - 2, top - 2, bw + 4, 9, 4); ctx.fill();
-    ctx.fillStyle = frac > 0.5 ? '#5fd04a' : frac > 0.25 ? '#f0c234' : '#e5452c';
-    roundRect(ctx, -bw / 2, top, bw * frac, 5, 2.5); ctx.fill();
-    ctx.font = 'bold 11px "Baloo 2", sans-serif';
+    ctx.fillStyle = 'rgba(20,10,5,0.8)';
+    roundRect(ctx, -bw / 2 - 2, top - 3, bw + 4, bh + 4, 4); ctx.fill();
+    ctx.fillStyle = 'rgba(70,20,15,0.9)';
+    roundRect(ctx, -bw / 2, top - 1, bw, bh, 3); ctx.fill();
+    if (frac > 0) {
+      const g = ctx.createLinearGradient(0, top - 1, 0, top - 1 + bh);
+      const col = frac > 0.5 ? ['#8df06e', '#3fa22e'] : frac > 0.25 ? ['#ffe06a', '#d39a14'] : ['#ff7a5c', '#c0261a'];
+      g.addColorStop(0, col[0]); g.addColorStop(1, col[1]);
+      ctx.fillStyle = g;
+      roundRect(ctx, -bw / 2, top - 1, bw * frac, bh, 3); ctx.fill();
+    }
+    if (u.maxHp > 1 && u.maxHp <= 20) {
+      ctx.fillStyle = 'rgba(15,8,4,0.9)';
+      for (let i = 1; i < u.maxHp; i++) ctx.fillRect(-bw / 2 + (bw * i) / u.maxHp - 1, top - 1, 2, bh);
+    }
+    ctx.font = 'bold 12px "Baloo 2", sans-serif';
     ctx.textAlign = 'center';
     ctx.lineWidth = 3; ctx.strokeStyle = '#1b0f08';
     const label = u.kind === 'hero' ? `${u.maxHp - u.wounds}/${u.maxHp}` : `${MONSTERS[u.defId].abbr} ${u.maxHp - u.wounds}/${u.maxHp}`;
-    ctx.strokeText(label, 0, top - 4);
+    ctx.strokeText(label, 0, top - 7);
     ctx.fillStyle = '#fff';
-    ctx.fillText(label, 0, top - 4);
+    ctx.fillText(label, 0, top - 7);
     if (u.kind === 'hero') {
       ctx.fillStyle = ringColor;
       ctx.beginPath(); ctx.arc(-bw / 2 - 9, top + 2, 8, 0, Math.PI * 2); ctx.fill();

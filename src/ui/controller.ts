@@ -1,6 +1,6 @@
 import { SimpleAI, type AILevel } from '../ai/ai';
 import { gameConfirm } from './dialog';
-import { bindInvEditor, invEditorHtml, poolErrors, type BagTok, type InvItem, type InvOptions } from './inventoryEditor';
+import { bindInvEditor, invEditorHtml, type BagTok, type InvItem, type InvOptions } from './inventoryEditor';
 import { tokenImageId, tokenUrl } from '../render/tokens';
 import { loadGame } from './mapLoading';
 import { showRoulette } from './roulette';
@@ -20,8 +20,11 @@ import { Hud, daTime, guildShort, toggleView } from './hud';
 import { fmtTime, getSettings, onSettings } from './settings';
 import { CURSES } from '../engine/cards';
 import { TOKEN_INFO } from '../engine/data';
-import { NeedDecision, type ChoiceRequest, type RestOptions } from '../engine/game';
-import { itemColor, medal } from './cardview';
+import { NeedDecision, type ChoiceRequest, type DecisionRequest, type RestOptions } from '../engine/game';
+
+/** Decisão automática (jogador desconectou, demorou ou deixou a Rerrolagem automática). */
+const AUTO_PICK = -999;
+import { itemCard, itemColor, medal, paintCardArt } from './cardview';
 import { play } from '../audio/sfx';
 
 /** Liga motor + renderer + HUD + IA + rede. Modos: local (teste), anfitrião e cliente (online). */
@@ -46,6 +49,7 @@ export class Controller {
   private vDest: Cell | null = null; // destino escolhido para o Monstro na Vingança
   private vDoors: string[] = []; // portas que o Monstro da Vingança abre/fecha antes de mover
   private pDest: Cell | null = null; // destino do Monstro ativado pela Lápide
+  private bootWarned = ''; // ativação em que já avisamos da bota do Aliado
   private pRepick = false; // Lápide: voltou para escolher outro Monstro (só na tela)
   private puppetShown = false; // o quadro da esquerda está mostrando o Monstro da Lápide
   // ---- online
@@ -68,6 +72,7 @@ export class Controller {
       isMineGuild: g => this.isMine(g),
       inspect: id => this.hud.showCard(id),
     });
+    this.hud.busy = () => this.renderer.busy;
     this.renderer.hooks = {
       onEvent: e => {
         this.followEvent(e);
@@ -121,7 +126,7 @@ export class Controller {
           // e a câmera vai até ele; sem nenhum disponível, a câmera mostra os seus Heróis
           if (this.isMine(e.guild) && !this.game.s.deploying?.length) {
             const g = this.game;
-            const ready = (id: string | undefined) => { const u = id ? g.s.units[id] : null; return !!u && u.alive && !!u.cell && !u.spent; };
+            const ready = (id: string | undefined) => { const u = id ? g.s.units[id] : null; return !!u && u.alive && !!u.cell; };
             const last = g.s.lastHero?.[e.guild];
             const pick = ready(last) ? last! : g.heroesOf(e.guild).find(h => ready(h.id))?.id;
             if (pick && !g.s.activation) {
@@ -187,6 +192,13 @@ export class Controller {
       endTurn: () => this.tryEndTurn(),
       rest: () => this.openRest(),
       cancelAttack: null,
+      cover: async id => {
+        const g = this.game, h = g.unit(id);
+        if (!h.covered || !this.isHumanTurn()) { this.hud.toast('Escolha no seu turno.', '#c0392b'); return; }
+        const opts = h.cards.filter(c => !c.exhausted).map(c => ({ id: c.uid, html: `🃏 ${g.cardDef(c).name}` }));
+        const pick = await this.hud.choose('☠ Debaixo da Maldição', `Hoje a Maldição cobre <b>${g.cardDef(h.covered).name}</b>. Qual carta fica debaixo dela (indisponível)?`, opts);
+        if (pick && this.game === g) this.act({ type: 'cover', heroId: id, cardUid: pick }, 'Maldição');
+      },
       inspect: id => {
         this.hud.inspected = id;
         // a câmera vai até o personagem (como quando escolhe um Herói seu)
@@ -322,19 +334,28 @@ export class Controller {
   // ------------------------------------------------------------------
   private decisionQueue: number[][] = [];
   private deciding = false;
-  private autoDecide = false;
+
+  /** Online (anfitrião): a Guilda é de um jogador conectado em outro computador (a decisão vai pela rede). */
+  private remoteHuman(gid: GuildId): boolean {
+    if (this.mode !== 'host' || this.isMine(gid) || this.game.guild(gid).controller !== 'human') return false;
+    const seat = this.lobby?.seats.find(s => s.guild === gid);
+    return !!seat && !seat.ai && seat.connected;
+  }
 
   private installHook() {
+    // decisões no meio da jogada: de quem joga neste computador (aqui) ou, no anfitrião, dos outros jogadores (pela rede)
     this.game.rerollHook = req => {
       const gid = req.guild ?? this.game.unit(req.heroId).guild;
-      if (this.autoDecide || this.mode === 'client' || !gid || !this.isMine(gid) || getSettings().reroll === 'auto') return 'auto';
-      if (this.decisionQueue.length) return this.decisionQueue.shift()!;
+      if (this.mode === 'client' || !gid) return 'auto';
+      const here = this.isMine(gid) && getSettings().reroll !== 'auto';
+      if (!here && !this.remoteHuman(gid)) return 'auto';
+      if (this.decisionQueue.length) { const d = this.decisionQueue.shift()!; return d[0] === AUTO_PICK ? 'auto' : d; }
       throw new NeedDecision(req);
     };
     // empurrão da Rajada de Vento e alvo adicional (Raio Nova, Fender): quem atacou escolhe
     this.game.choiceHook = req => {
-      if (this.autoDecide || this.mode === 'client' || !this.isMine(req.guild)) return 'auto';
-      if (this.decisionQueue.length) return this.decisionQueue.shift()![0] ?? -1;
+      if (this.mode === 'client' || (!this.isMine(req.guild) && !this.remoteHuman(req.guild))) return 'auto';
+      if (this.decisionQueue.length) { const d = this.decisionQueue.shift()!; return d[0] === AUTO_PICK ? 'auto' : d[0] ?? -1; }
       throw new NeedDecision(req);
     };
   }
@@ -363,6 +384,36 @@ export class Controller {
           <div class="mc-btns"><button class="primary" data-i="0">Sim</button><button id="ch-none">Não</button></div>
         </div>`;
       this.hud.setHint(`${req.source}: escolha Sim ou Não`);
+    } else if (req.choice === 'reward') {
+      hl.activeUnit = h.id;
+      const nc = req.newCard!;
+      const swaps = (req.cards ?? []).map((id, i) => `<button class="primary" data-i="${i}">🔁 Trocar <b>${CARDS[id]?.name ?? id}</b></button>`).join('');
+      const gives = (req.units ?? []).map((id, i) => `<button data-i="${(req.cards ?? []).length + i}">🎁 Dar para ${g.name(g.unit(id))}</button>`).join('');
+      html = `<div class="panel-h">🃏 Recompensa: ${CARDS[nc]?.name ?? nc}</div>
+        <div class="mc-body">
+          <p>${req.text ?? ''}</p>
+          <div class="rw-card">${itemCard(nc)}</div>
+          <div class="mc-btns">${swaps}${gives}<button id="ch-none">📦 Guardar sem Herói</button></div>
+        </div>`;
+      this.hud.setHint('Inventário cheio: troque uma carta, dê a um Aliado ou guarde a nova sem Herói');
+      const el1 = this.hud.monsterPanel(html);
+      paintCardArt(el1);
+      el1.querySelectorAll<HTMLElement>('[data-i]').forEach(b => { b.onclick = () => resolve(Number(b.dataset.i)); });
+      (el1.querySelector('#ch-none') as HTMLElement).onclick = () => resolve(-1);
+      return;
+    } else if (req.choice === 'loot') {
+      hl.activeUnit = h.id;
+      const opts = (req.tokens ?? []).map((t, i) => { const img = tokenImageId(t); return `<button class="primary lt-opt" data-i="${i}">${img ? `<img src="${tokenUrl(img)}"/>` : ''}${TOKEN_INFO[t.type]?.name ?? t.type}${t.type === 'bau' ? ` (${t.value})` : ''}</button>`; }).join('');
+      html = `<div class="panel-h">🎒 Saque</div>
+        <div class="mc-body">
+          <p>${req.text ?? 'Escolha 1 marcador.'}</p>
+          <div class="mc-btns lt-btns">${opts}</div>
+        </div>`;
+      this.hud.setHint('Saque: escolha qual marcador vem para o seu Herói');
+      const el0 = this.hud.monsterPanel(html);
+      el0.classList.toggle('over', this.battle.isOpen);
+      el0.querySelectorAll<HTMLElement>('[data-i]').forEach(b => { b.onclick = () => resolve(Number(b.dataset.i)); });
+      return;
     } else if (req.choice === 'push') {
       const t = g.unit(req.targetId!);
       hl.moveColor = 'purple';
@@ -420,6 +471,13 @@ export class Controller {
         this.hud.tooltip(null);
         const ask = () => {
           const req = e.req;
+          // decisão de outro jogador (online): pergunta pela rede e espera a resposta
+          const owner = 'choice' in req ? req.guild : req.guild ?? this.game.unit(req.heroId).guild;
+          if (owner && this.remoteHuman(owner)) {
+            this.hud.setHint(`Aguardando ${this.hud.nameOf(owner) ?? guildShort(owner)} decidir…`);
+            void (this.net as HostSession).askDecision(owner, req).then(pick => { decided.push(pick ?? [AUTO_PICK]); attempt(); });
+            return;
+          }
           if ('choice' in req) { this.askChoice(req).then(i => { decided.push([i]); attempt(); }); return; }
           this.hud.setHint('Escolha os dados para rerrolar');
           // Rerrolagem na própria tela de batalha (a mesma tela continua com a rolagem); sem tela de batalha, no centro
@@ -481,7 +539,7 @@ export class Controller {
     const g = this.game;
     const u = g.unit(id);
     const a = g.s.activation;
-    if (!this.isHumanTurn() || !u || u.kind !== 'hero' || u.guild !== g.currentGuild().id || !u.alive || !u.cell || u.spent) return false;
+    if (!this.isHumanTurn() || !u || u.kind !== 'hero' || u.guild !== g.currentGuild().id || !u.alive || !u.cell) return false;
     if (g.s.extraTurnOn && u.id === g.s.extraHero && !g.freeMode) return false; // turno adicional: outro Herói, não quem usou a poção
     if (u.id === a?.heroId) return false;
     if ((g.s.activatedThisTurn ?? []).includes(u.id) && !g.activationFresh()) return g.freeMode;
@@ -578,7 +636,7 @@ export class Controller {
     this.lobby = lobby;
     this.mode = session.isHost ? 'host' : 'client';
     // votação aprovada: o anfitrião volta o turno para todos
-    if (session.isHost) session.onUndoPassed = () => { if (!this.turnStart) return false; this.restartTurn(); this.refresh(); return true; };
+    if (session.isHost) session.onUndoPassed = () => { if (!this.history.length) return false; this.undoMove(); return true; };
     this.myGuild = lobby.seats.find(s => s.clientId === session.me)?.guild ?? null;
     this.waitingNet = false;
     this.stopped = false;
@@ -587,12 +645,6 @@ export class Controller {
     this.hud.resetDice();
     this.deciding = false;
     this.game = new Game(getMap(state.mapId), state);
-    // começo da partida (avulsa ou 1º cenário da campanha): a roleta mostra quem foi sorteado (todos veem a mesma, uma vez só)
-    const rk = `${lobby.code}:${lobby.scenario ?? 1}:${state.mapId}`;
-    if (lobby.roulette && state.turn === 1 && (state.deploying?.length ?? 0) > 0 && this.rouletteShown !== rk) {
-      this.rouletteShown = rk;
-      this.rouletteFor(this.game);
-    }
     this.ais = {};
     this.history = [];
     this.turnStart = null;
@@ -605,6 +657,13 @@ export class Controller {
     this.applySettings();
     this.renderer.setGame(this.game);
     this.loadAssets();
+    // começo da partida (avulsa ou 1º cenário da campanha): a roleta mostra quem foi sorteado (todos veem a mesma, uma vez só)
+    // — depois da tela de carregamento (rouletteFor espera o carregamento acabar)
+    const rk = `${lobby.code}:${lobby.scenario ?? 1}:${state.mapId}`;
+    if (lobby.roulette && state.turn === 1 && (state.deploying?.length ?? 0) > 0 && this.rouletteShown !== rk) {
+      this.rouletteShown = rk;
+      this.rouletteFor(this.game);
+    }
     document.getElementById('gameover')?.remove();
     this.setTestUI(false);
     this.onlinePanel.classList.remove('hidden');
@@ -652,7 +711,25 @@ export class Controller {
       view: (guild, c, m, sel) => this.onRemoteView(guild, c, m, sel),
       ping: (guild, cell) => this.showPing(guild, cell),
       undoPoll: (poll, result) => this.showUndoPoll(poll, result),
+      decide: (req, id) => this.decideForHost(req, id),
     };
+  }
+
+  /** Online (jogador): o anfitrião pede a minha decisão no meio de uma jogada — Rerrolagem ou alvo adicional. */
+  private decideForHost(req: DecisionRequest, id: number) {
+    const send = (pick: number[] | null) => (this.net as ClientSession).sendDecision(id, pick);
+    if (!('choice' in req) && getSettings().reroll === 'auto') { send(null); return; }
+    // primeiro termina de mostrar o que já aconteceu (o ataque), depois pergunta
+    const go = () => {
+      if (this.renderer.busy) { requestAnimationFrame(go); return; }
+      this.deciding = true;
+      this.clearHighlights();
+      const done = (pick: number[] | null) => { this.deciding = false; send(pick); };
+      if ('choice' in req) { void this.askChoice(req).then(i => done([i])); return; }
+      this.hud.setHint('Escolha os dados para rerrolar');
+      void (getSettings().battle !== 'never' ? this.battle.decide(req) : this.hud.askDecision(req)).then(idx => done(idx));
+    };
+    go();
   }
 
   // ------------------------------------------------------------------
@@ -678,8 +755,8 @@ export class Controller {
     const draw = () => {
       const left = Math.max(0, Math.ceil((poll.ends - Date.now()) / 1000));
       el!.innerHTML = `<div class="up-box">
-        <div class="up-h">🗳️ Voltar o turno?</div>
-        <p><b>${poll.by}</b> pediu para voltar ao começo deste turno. Passa com <b>${need}</b> de ${poll.voters.length} votos sim.</p>
+        <div class="up-h">🗳️ Voltar a jogada?</div>
+        <p><b>${poll.by}</b> pediu para desfazer a última jogada${this.history.length ? ` (<b>${this.history[this.history.length - 1].label}</b>)` : ''}. Passa com <b>${need}</b> de ${poll.voters.length} votos sim.</p>
         <div class="up-votes">${poll.voters.map(v => `<span class="${poll.yes.includes(v.id) ? 'y' : poll.no.includes(v.id) ? 'n' : ''}">${poll.yes.includes(v.id) ? '✔' : poll.no.includes(v.id) ? '✖' : '…'} ${v.name}</span>`).join('')}</div>
         ${poll.voters.some(v => v.id === me) ? `<div class="up-btns"><button class="primary ${mine === 'sim' ? 'on' : ''}" id="up-yes">👍 Sim</button><button class="${mine === 'não' ? 'on' : ''}" id="up-no">👎 Não</button></div>` : ''}
         <small>${mine ? `Seu voto: <b>${mine}</b> (pode mudar) · ` : ''}encerra em ${left}s</small></div>`;
@@ -765,26 +842,29 @@ export class Controller {
     if (!events.length && !this.renderer.busy) this.refresh();
   }
 
-  /** Anfitrião: jogada de um jogador remoto. */
+  /** Anfitrião: jogada de um jogador remoto (as decisões no meio dela — Rerrolagem etc. — são pedidas a quem decide). */
   private handleRemote(guild: GuildId, a: Action): string | null {
     if (this.game.guild(guild).controller !== 'human') return 'A IA está controlando sua Guilda.';
-    this.autoDecide = true;
-    let ok = false;
+    if (this.deciding) return 'Aguarde: uma decisão ainda está sendo tomada.';
     const snap = JSON.stringify(this.game.s);
-    try { ok = applyAction(this.game, guild, a); } finally { this.autoDecide = false; }
-    // jogada de outro jogador também pode ser desfeita pelo anfitrião
-    if (ok) { this.history.push({ label: `jogada de ${this.hud.nameOf(guild) ?? guildShort(guild)}`, state: snap }); if (this.history.length > 60) this.history.shift(); }
-    const ev = this.game.drain();
-    if (ok || ev.length) {
-      (this.net as HostSession).update(ev, this.game.s);
-      this.autoUninspect();
-      this.renderer.enqueue(ev);
-      this.hud.refresh();
-      if (!ev.length && !this.renderer.busy) this.refresh();
-    }
-    if (ok) return null;
-    if (a.type === 'activate') return 'Só é possível trocar de Herói antes de mover ou atacar.';
-    return 'Jogada inválida.';
+    let sync: string | null | undefined;
+    this.withDecisions(() => applyAction(this.game, guild, a), ok => {
+      // jogada de outro jogador também pode ser desfeita pelo anfitrião
+      if (ok) { this.history.push({ label: `jogada de ${this.hud.nameOf(guild) ?? guildShort(guild)}`, state: snap }); if (this.history.length > 60) this.history.shift(); }
+      const ev = this.game.drain();
+      if (ok || ev.length) {
+        (this.net as HostSession).update(ev, this.game.s);
+        this.autoUninspect();
+        this.renderer.enqueue(ev);
+        this.hud.refresh();
+        if (!ev.length && !this.renderer.busy) this.refresh();
+      }
+      const why = ok ? null : a.type === 'activate' ? 'Só é possível trocar de Herói antes de mover ou atacar.' : 'Jogada inválida.';
+      if (sync === undefined) sync = why; // respondeu na hora
+      else if (why) (this.net as HostSession).rejectGuild(guild, why); // respondeu depois de uma decisão
+    });
+    if (sync === undefined) { sync = null; return null; }
+    return sync;
   }
 
   /** Vagas marcadas como IA no lobby viram IA no jogo (anfitrião). */
@@ -1422,7 +1502,7 @@ export class Controller {
     const out: string[] = [];
     const heroes = g.heroesOf(cur.id);
     if (!a) {
-      const can = heroes.filter(h => h.alive && h.cell && !h.spent);
+      const can = heroes.filter(h => h.alive && h.cell);
       if (can.length) out.push(`Você ainda <b>não ativou nenhum Herói</b> neste turno (${can.map(h => g.name(h)).join(', ')}). Ative um ou <b>Descanse</b> a Guilda.`);
       return out;
     }
@@ -1457,6 +1537,20 @@ export class Controller {
   /** Movimento: se provocar Reação de Alerta, avisa quem vai atacar e pede confirmação. */
   private async confirmMove(cell: Cell) {
     const g = this.game;
+    // bota de um Aliado ainda disponível (só dá para usar antes do Herói ativado se mover): avisa uma vez por ativação
+    const act0 = g.s.activation;
+    const bootKey = act0 ? `${g.s.turn}:${act0.heroId}` : '';
+    if (act0 && this.bootWarned !== bootKey) {
+      const boots = g.heroesOf(g.currentGuild().id).flatMap(x => x.cards.filter(c => g.cardDef(c).fx.bootMove && g.activatable(x, c)?.ok).map(c => ({ x, c })));
+      if (boots.length) {
+        this.bootWarned = bootKey;
+        const list = boots.map(b => `<li><b>${g.name(b.x)}</b> — ${g.cardDef(b.c).name} (mover ${g.cardDef(b.c).fx.bootMove} Espaço${(g.cardDef(b.c).fx.bootMove ?? 0) > 1 ? 's' : ''})</li>`).join('');
+        const go = await this.hud.confirm('👢 Bota disponível',
+          `<p>Você ainda pode usar a bota de um Aliado — depois que <b>${g.name(g.unit(act0.heroId))}</b> andar, não dá mais:</p><ul>${list}</ul>
+           <p class="muted">Para usar, clique no ⚡ da carta na ficha do Herói que tem a bota.</p>`, 'Andar mesmo assim', 'Voltar e usar a bota');
+        if (!go || this.game !== g) return;
+      }
+    }
     const alerts = getSettings().alertConfirm === false ? [] : g.alertPreview(cell);
     if (alerts.length) {
       const h = g.unit(g.s.activation!.heroId);
@@ -1790,8 +1884,10 @@ export class Controller {
       cards: Object.fromEntries(heroes.flatMap(h => h.cards.map(c => [c.uid, h.id]))),
       tokens: Object.fromEntries(heroes.flatMap(h => h.tokens.filter(t => t.type !== 'missao').map(t => [t.id, h.id]))),
       res, picking: null, chosen: [],
-      items: heroes.flatMap(h => h.cards.map(c => ({ id: c.defId, to: h.defId, uid: c.uid }))),
+      items: [...heroes.flatMap(h => h.cards.map(c => ({ id: c.defId, to: h.defId, uid: c.uid }))),
+        ...(this.game.s.spare?.[g.id] ?? []).map(c => ({ id: c.defId, to: 'pool', uid: c.uid }))],
     };
+    for (const c of this.game.s.spare?.[g.id] ?? []) this.restDraft.cards[c.uid] = 'pool';
     this.refresh();
   }
 
@@ -1845,7 +1941,8 @@ export class Controller {
       },
       curse: hd => { const h = byDef(hd); return h.curse ? `${CURSES[h.curse]?.name}${CURSES[h.curse]?.slot ? ` (ocupa 1 espaço${h.covered ? ` · cobre ${CARDS[h.covered.defId].name}` : ''})` : ''}` : null; },
     };
-    const poolErr = poolErrors(d.items, false);
+    // cartas sem Herói podem continuar sem Herói (ficam guardadas até o próximo Descanso)
+    const poolErr: string[] = [];
     if (d.picking) {
       const h = this.game.unit(d.picking);
       const el = this.hud.panel('restbox', `<div class="panel-h">💤 Ressuscitar ${HEROES[h.defId].name}: clique num Espaço verde <button id="rb-back">Voltar</button></div>`);
@@ -1985,7 +2082,7 @@ export class Controller {
       ${item('gm-continue', '▶', 'Continuar', 'Voltar para o jogo', 'primary')}
       <div class="gm-grid">
         ${item('gm-undo', '↶', 'Desfazer jogada', host ? (this.history.length ? `Volta: ${this.history[this.history.length - 1].label}` : 'Nenhuma jogada para desfazer') : 'Só o anfitrião', '', !(host && this.history.length))}
-        ${online ? item('gm-vote', '🗳️', 'Votar: voltar o turno', this.poll ? 'Já há uma votação aberta' : 'Todos votam; a maioria decide', '', !!this.poll)
+        ${online ? item('gm-vote', '🗳️', 'Votar: voltar a jogada', this.poll ? 'Já há uma votação aberta' : 'Todos votam; a maioria decide', '', !!this.poll)
           : item('gm-turn', '⏮', 'Reiniciar turno', 'Volta para o começo deste turno', '', !this.turnStart)}
         ${item('gm-restart', '🔄', 'Reiniciar partida', host ? 'Começa este mapa de novo' : 'Só o anfitrião', '', !host)}
         ${item('gm-lib', '📚', 'Biblioteca', 'Heróis, cartas, regras')}

@@ -228,3 +228,11 @@ export class Board {
     return true;
   }
 }
+
+/** Títulos de campanha que dão vantagem neste mapa (campos *Title e o portal do Título). */
+export function mapTitlesOf(map: MapDef): string[] {
+  const m = map as unknown as Record<string, unknown>;
+  const ids = Object.keys(m).filter(k => k.endsWith('Title') && typeof m[k] === 'string').map(k => m[k] as string);
+  if (map.portalTitle) ids.push(map.portalTitle.title);
+  return [...new Set(ids)];
+}

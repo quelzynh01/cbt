@@ -3,7 +3,7 @@ import type { GuildId } from '../engine/types';
 import { play } from '../audio/sfx';
 import {
   useCampaignNames,
-  CIRCLES, CIRCLE_NEED, STARTER_CARDS, type CampaignState, aiChoice, banHeroes, draftHero, finishEquip, voteMap, availableScenarios, draftPick, finishArrange, finishBuy, guildName,
+  CIRCLES, CIRCLE_NEED, STARTER_CARDS, type CampaignState, titleHolders, aiChoice, banHeroes, draftHero, finishEquip, voteMap, availableScenarios, draftPick, finishArrange, finishBuy, guildName,
   guildOf, heroSlots, human, picksPerRound, draftRounds, loadCampaign, medals, newCampaign, nextScenario, progress, saveCampaign, scenarioLevel, scenarioNumber,
   validateInventory, victoryRank,
 } from '../campaign/campaign';
@@ -280,11 +280,11 @@ export class CampaignUI {
     const n = scenarioNumber(c);
     const why = !c.played.length ? 'Escolhido na votação.' : c.chooser === me.id ? 'Você venceu o último cenário e escolheu.' : `A ${guildName(c.chooser)} venceu o último cenário e escolheu.`;
     const nextHtml = next
-      ? `<div class="hub-nextmap">${mapChoiceCard(MAPS[next], { cls: 'big', level: scenarioLevel(c), sub: MAPS[next].missions.pve.map(m => m.name).join(' · ') })}
+      ? `<div class="hub-nextmap">${mapChoiceCard(MAPS[next], { cls: 'big', level: scenarioLevel(c), sub: MAPS[next].missions.pve.map(m => m.name).join(' · '), titles: titleHolders(c, next, guildName) })}
           <div class="hub-nextinfo"><p>${why}</p><button class="primary cp-big" id="cp-go">▶ Jogar ${MAPS[next].name}</button></div></div>`
       : myChoice
         ? `<p>Você venceu o último cenário: <b>escolha o próximo</b>. A escolha fica salva.</p>
-           <div class="cp-votes hub-choices">${av.map(id => mapChoiceCard(MAPS[id], { attrs: `data-pick="${id}"`, level: scenarioLevel(c), sub: MAPS[id].missions.pve.map(m => m.name).join(' · ') })).join('')}</div>`
+           <div class="cp-votes hub-choices">${av.map(id => mapChoiceCard(MAPS[id], { attrs: `data-pick="${id}"`, level: scenarioLevel(c), sub: MAPS[id].missions.pve.map(m => m.name).join(' · '), titles: titleHolders(c, id, guildName) })).join('')}</div>`
         : '<p class="muted">Nenhum cenário disponível.</p>';
     const curseImg = (id: string) => CARD_ART[`curse:${id}`] ? `<img src="${import.meta.env.BASE_URL}cards/${CARD_ART[`curse:${id}`].img}.webp" alt=""/>` : '💀';
     // cada Herói: retrato, Maldição e as cartas (2 em cima, 2 embaixo) — igual para a sua Guilda e as outras

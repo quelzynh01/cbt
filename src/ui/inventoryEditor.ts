@@ -1,6 +1,6 @@
 import { CARDS, HEROES } from '../engine/data';
 import { drawFace } from '../render/chibi';
-import { ITEM_LEVEL, itemCard, paintCardArt } from './cardview';
+import { ITEM_LEVEL, itemCard, medal, paintCardArt } from './cardview';
 
 // Editor de inventário da Guilda (equipamento inicial e Fase de Melhorias):
 // cada Herói mostra seus espaços; clicar num espaço vazio ou numa carta abre a lista das suas cartas para escolher.
@@ -50,6 +50,17 @@ export function poolErrors(items: InvItem[], discard: boolean): string[] {
   return [`Ainda sem Herói: ${left.map(x => CARDS[x.id]?.name ?? x.id).join(', ')} — clique num espaço para equipar${discard ? ' ou descarte' : ''}.`];
 }
 
+/** Como o Herói fica com estas cartas: Vida, Defesa, Rerrolagem e dados extras (muda na hora ao equipar). */
+function statsHtml(h: string, cards: string[]): string {
+  const hd = HEROES[h];
+  const sum = (f: (d: (typeof CARDS)[string]) => number | undefined) => cards.reduce((n, id) => n + (CARDS[id] ? f(CARDS[id]) ?? 0 : 0), 0);
+  const hp = hd.hp + sum(d => d.hpBonus), def = hd.defense + sum(d => d.defBonus), rr = sum(d => d.rerolls), atk = sum(d => d.fx.rawr);
+  const tag = (base: number, now: number) => now > base ? 'up' : now < base ? 'down' : '';
+  return `<div class="inv-stats" title="Como o Herói fica com estas cartas">
+    ${medal('hp', hp, `Vida ${hp} (carta: ${hd.hp})`, `ism ${tag(hd.hp, hp)}`)}${def > 0 ? medal('def', def, `${def} dados de Defesa (carta: ${hd.defense})`, `ism ${tag(hd.defense, def)}`) : ''}
+    ${rr > 0 ? medal('rr', rr, `Rerrolagem ${rr}`, 'ism up') : ''}${atk > 0 ? medal('melee', atk, `+${atk} dado(s) em todos os ataques`, 'ism up') : ''}</div>`;
+}
+
 export function invEditorHtml(items: InvItem[], o: InvOptions): string {
   const heroCols = o.heroes.map(h => {
     const mine = items.map((x, i) => ({ ...x, i })).filter(x => x.to === h);
@@ -61,6 +72,7 @@ export function invEditorHtml(items: InvItem[], o: InvOptions): string {
     return `<div class="inv-hero ${sl.used > sl.max ? 'over' : ''}" data-hero="${h}" style="--gc:${o.color}">
       <div class="inv-hh"><canvas width="56" height="56" data-iface="${h}"></canvas><div><b>${HEROES[h].name}</b><small>${HEROES[h].title}</small></div>
         <span class="inv-count ${sl.used > sl.max ? 'bad' : ''}">${sl.used}/${sl.max}${sl.magicExtra ? ` +${sl.magicExtra}✨` : ''}</span></div>
+      ${statsHtml(h, mine.map(x => x.id))}
       <div class="inv-ab" title="${esc(HEROES[h].abilityText)}"><b>${esc(HEROES[h].abilityName)}</b> — ${esc(HEROES[h].abilityText)}</div>
       ${curse ? `<div class="inv-curse">☠ ${esc(curse)}</div>` : ''}
       <div class="inv-slots">${slots.join('')}</div>${o.bags ? bagHtml(h, o) : ''}</div>`;

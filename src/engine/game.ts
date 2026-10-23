@@ -1,4 +1,4 @@
-import { Board, key, parseKey, sameCell, type MapDef } from './board';
+import { Board, key, parseKey, sameCell, type MapDef, mapTitlesOf } from './board';
 import {
   heroPool, ATTACK_DIE, CARDS, DEFENSE_DIE, ENTRY_PAIRS, EXPLORATION_BAG, GUILDS, HEROES, HERO_ORDER, MONSTERS, TOKEN_INFO, distributeStartingGear, levelSuffix, lowerSuffix,
 } from './data';
@@ -41,8 +41,15 @@ export interface RerollRequest { heroId: string; kind: 'attack' | 'defense'; fac
 /** Escolha do jogador no meio de um ataque: para onde empurrar (Rajada de Vento) ou quem mais atingir (Raio Nova, Fender).
  *  A resposta é o índice em `cells`/`units`, ou −1 para não fazer nada. */
 export interface ChoiceRequest {
-  /** confirm: pergunta sim (0) ou não (−1). */
-  choice: 'push' | 'extra' | 'confirm';
+  /** confirm: pergunta sim (0) ou não (−1). loot: qual marcador pegar de quem você matou (índice em `tokens`).
+   *  reward: inventário cheio — trocar uma carta do Herói (índice em `cards`), dar a um Aliado (cards.length + índice em `units`)
+   *  ou guardar sem Herói (−1). */
+  choice: 'push' | 'extra' | 'confirm' | 'loot' | 'reward';
+  /** Recompensa: a carta nova e as cartas do Herói (defIds). */
+  newCard?: string;
+  cards?: string[];
+  /** Saque: os marcadores que dá para pegar. */
+  tokens?: Token[];
   /** Texto da pergunta (confirm) ou explicação da escolha. */
   text?: string;
   guild: GuildId;
@@ -434,6 +441,11 @@ export class Game {
   }
 
   hasTitle(g: GuildId, t: string): boolean { return !!this.s.titles?.[g]?.includes(t); }
+
+  /** Títulos que dão vantagem neste mapa. */
+  mapTitles(): string[] { return mapTitlesOf(this.map); }
+  /** Títulos da Guilda que valem neste mapa. */
+  activeTitles(g: GuildId): string[] { const here = this.mapTitles(); return (this.s.titles?.[g] ?? []).filter(t => here.includes(t)); }
 
   isAttackCard(c: CardInst): boolean { return this.cardDef(c).kind === 'attack'; }
 
@@ -834,7 +846,7 @@ export class Game {
     if (!this.canAct()) return false;
     const h = this.unit(heroId);
     if (!h || h.kind !== 'hero' || h.guild !== this.currentGuild().id || !h.alive || !h.cell) return false;
-    if (h.spent && !this.freeMode) return false;
+    // Herói exausto (por carta/habilidade) continua podendo ser ativado: só não usa de novo o que exaure o Herói até Descansar
     const a = this.s.activation;
     const done = this.s.activatedThisTurn ?? [];
     if (a && a.heroId !== heroId && !this.freeMode && !this.activationFresh()) {
@@ -892,7 +904,7 @@ export class Game {
     const b = this.s.blessing;
     if (this.freeMode) return null;
     const ally0 = this.unit(heroId);
-    if (!ally0 || !ally0.alive || !ally0.cell || ally0.spent || (this.s.activatedThisTurn ?? []).includes(heroId)) return null;
+    if (!ally0 || !ally0.alive || !ally0.cell || (this.s.activatedThisTurn ?? []).includes(heroId)) return null;
     // Grito de Guerra: qualquer Aliado ainda não ativado neste turno
     if (this.s.warCry && ally0.guild === this.s.warCry) return 'war';
     if (b) {
@@ -1303,7 +1315,7 @@ export class Game {
     // Zás-Trás (Bob): ✷ num ataque Mágico -> um Herói da Guilda vai para Perto do alvo
     if (ab === 'zas_tras' && def.magic && atk.crits && h.alive) this.zasTras(h, targetCells.get(target.id)!);
     // Mente Brilhante: ✷ num ataque Mágico -> outro Aliado pode se mover
-    if (ab === 'mente_brilhante' && def.magic && atk.crits && this.heroesOf(h.guild!).some(x => x.id !== h.id && x.alive && x.cell && !x.spent && !(this.s.activatedThisTurn ?? []).includes(x.id))) {
+    if (ab === 'mente_brilhante' && def.magic && atk.crits && this.heroesOf(h.guild!).some(x => x.id !== h.id && x.alive && x.cell && !(this.s.activatedThisTurn ?? []).includes(x.id))) {
       this.s.brightMind = h.guild;
       this.emit({ t: 'skill', id: h.id, skill: 'mente_brilhante', name: 'Mente Brilhante' });
       this.log(`Mente Brilhante: ${this.guild(h.guild!).name} pode ativar outro Herói só para se mover.`);
@@ -1328,7 +1340,7 @@ export class Game {
     // Enxame da Morte: com ✷, Monstros do Cemitério voltam perto dos Inimigos
     if (fx.swarm && atk.crits > 0) this.swarm(h, fx.swarm);
     // Grito de Guerra: com ✷, pode ativar outro Aliado
-    if (this.hasPerm(h, 'warCry') && atk.crits > 0 && this.heroesOf(h.guild!).some(x => x.id !== h.id && x.alive && x.cell && !x.spent && !(this.s.activatedThisTurn ?? []).includes(x.id))) {
+    if (this.hasPerm(h, 'warCry') && atk.crits > 0 && this.heroesOf(h.guild!).some(x => x.id !== h.id && x.alive && x.cell && !(this.s.activatedThisTurn ?? []).includes(x.id))) {
       this.s.warCry = h.guild;
       this.emit({ t: 'skill', id: h.id, skill: 'grito_guerra', name: 'Grito de Guerra' });
       this.log(`Grito de Guerra: ${this.guild(h.guild!).name} pode ativar outro Herói neste turno.`);
@@ -1538,6 +1550,18 @@ export class Game {
     const magic = cards.filter(c => this.cardDef(c).magic && this.cardDef(c).kind === 'attack').length;
     const curseSlot = h.curse && CURSES[h.curse]?.slot ? 1 : 0;
     return { used: cards.length - Math.min(magic, magicExtra) + curseSlot, max: 4 };
+  }
+
+  /** Maldição que ocupa espaço com o inventário cheio: troca a carta que fica debaixo dela (antes de usar a carta). */
+  setCurseCover(heroId: string, cardUid: string): boolean {
+    const h = this.unit(heroId);
+    if (!h || h.guild !== this.currentGuild().id || !h.covered) return false;
+    const i = h.cards.findIndex(c => c.uid === cardUid);
+    if (i < 0 || h.cards[i].exhausted) return false;
+    const [c] = h.cards.splice(i, 1, h.covered);
+    h.covered = c;
+    this.log(`${this.name(h)}: a Maldição agora cobre ${this.cardDef(c).name}.`);
+    return true;
   }
 
   /** Cabe mais esta carta no inventário do Herói? (Tomo da Iluminação: +2 espaços só para Ataques Mágicos.) */
@@ -2012,8 +2036,7 @@ export class Game {
       h.spent = true;
       this.emit({ t: 'skill', id: h.id, skill: 'escudo_almas', name: 'Escudo das Almas' });
       this.resurrect(who, near);
-      this.log(`Escudo das Almas: ${this.name(h)} fica exausto e ${this.name(who)} volta à vida.`);
-      if (a?.heroId === h.id) { this.s.activation = null; }
+      this.log(`Escudo das Almas: ${this.name(h)} fica exausto (não usa o Escudo de novo até Descansar) e ${this.name(who)} volta à vida.`);
       return true;
     }
     if (fx.swapAlly) {
@@ -2063,11 +2086,11 @@ export class Game {
   validateRest(g: GuildId, o: RestOptions): string | null {
     const heroes = this.heroesOf(g);
     if (o.cards) {
-      const all = heroes.flatMap(h => h.cards.map(c => c.uid)).sort();
-      const given = Object.values(o.cards).flat().sort();
-      if (JSON.stringify(all) !== JSON.stringify(given)) return 'Cartas inválidas.';
+      const pool = [...heroes.flatMap(h => h.cards), ...(this.s.spare?.[g] ?? [])];
+      const given = Object.values(o.cards).flat();
+      if (new Set(given).size !== given.length || given.some(uid => !pool.some(c => c.uid === uid))) return 'Cartas inválidas.';
       for (const h of heroes) {
-        const cards = (o.cards[h.id] ?? []).map(uid => heroes.flatMap(x => x.cards).find(c => c.uid === uid)!);
+        const cards = (o.cards[h.id] ?? []).map(uid => pool.find(c => c.uid === uid)!);
         const sl = this.slotsUsed(h, cards);
         if (sl.used > sl.max) return `${HEROES[h.defId].name}: ${sl.used} cartas para ${sl.max} espaços.`;
         if (cards.filter(c => this.cardDef(c).fx.armor).length > 1) return `${HEROES[h.defId].name}: só 1 armadura por Herói.`;
@@ -2104,8 +2127,11 @@ export class Game {
     this.s.activation = null;
     this.emit({ t: 'rest', guild: g.id });
     if (o.cards) {
-      const pool = heroes.flatMap(h => h.cards);
+      const pool = [...heroes.flatMap(h => h.cards), ...(this.s.spare?.[g.id] ?? [])];
       for (const h of heroes) h.cards = (o.cards[h.id] ?? []).map(uid => pool.find(c => c.uid === uid)!);
+      // o que não foi equipado continua com as cartas sem Herói
+      const used = new Set(Object.values(o.cards).flat());
+      (this.s.spare ??= {})[g.id] = pool.filter(c => !used.has(c.uid));
     }
     if (o.tokens) {
       const pool = heroes.flatMap(h => h.tokens.filter(t => t.type !== 'missao'));
@@ -2498,7 +2524,12 @@ export class Game {
       if (kg !== h.guild) { (this.s.heroKills ??= {})[killer.id] = (this.s.heroKills[killer.id] ?? 0) + 1; this.devour(killer); this.masterOfDeath(killer); }
       const stealable = dropped.filter(t => { const m = t.type === 'missao' ? this.tokenMission(t) : null; return !(m?.ownOnly && t.color !== kg); });
       if (stealable.length && killer.alive) {
-        const pick = stealable.sort((p, q) => (q.value ?? 1) - (p.value ?? 1))[0];
+        stealable.sort((p, q) => (q.value ?? 1) - (p.value ?? 1));
+        // mais de um: quem matou escolhe qual marcador vem (os outros caem no Espaço)
+        const i = stealable.length > 1 && this.choiceHook
+          ? this.choiceHook({ choice: 'loot', guild: kg, heroId: killer.id, source: 'Saque', tokens: stealable.map(t => ({ ...t, faceUp: true })), text: `${this.name(killer)} matou ${this.name(h)}: escolha 1 marcador para pegar (os outros ficam no Espaço).` })
+          : 'auto';
+        const pick = i === 'auto' || i < 0 || !stealable[i] ? stealable[0] : stealable[i];
         dropped.splice(dropped.indexOf(pick), 1);
         pick.faceUp = true;
         killer.tokens.push(pick);
@@ -2881,12 +2912,33 @@ export class Game {
   private giveReward(h: Unit) {
     const defId = this.s.rewardDeck.shift();
     if (!defId) return;
-    const heroes = [h, ...this.heroesOf(h.guild!).filter(x => x.id !== h.id)];
-    const holder = heroes.find(x => this.hasRoom(x, defId)) ?? h;
-    if (!this.hasRoom(holder, defId)) holder.cards.shift();
-    holder.cards.push({ uid: `r${this.s.rewardDeck.length}-${holder.id}`, defId, exhausted: false, uses: 0 });
-    this.emit({ t: 'reward', heroId: holder.id, cardId: defId });
-    this.log(`${this.name(holder)} recebeu a carta ${CARDS[defId].name}!`);
+    const card: CardInst = { uid: `r${this.s.rewardDeck.length}-${h.id}-${this.s.turn}`, defId, exhausted: false, uses: 0 };
+    const spare = (inst: CardInst) => {
+      const g = h.guild!;
+      ((this.s.spare ??= {})[g] ??= []).push(inst);
+      this.log(`${CARDS[inst.defId].name} fica com as cartas sem Herói (equipe no próximo Descanso).`);
+    };
+    if (this.hasRoom(h, defId)) {
+      h.cards.push(card);
+    } else {
+      // inventário cheio: trocar uma carta do Herói, dar a um Aliado com espaço ou guardar sem Herói (até o Descanso)
+      const allies = this.heroesOf(h.guild!).filter(x => x.id !== h.id && this.hasRoom(x, defId));
+      const i = this.choiceHook
+        ? this.choiceHook({ choice: 'reward', guild: h.guild!, heroId: h.id, source: 'Recompensa', newCard: defId, cards: h.cards.map(c => c.defId), units: allies.map(x => x.id),
+          text: `${this.name(h)} está com o inventário cheio. Troque uma carta pela ${CARDS[defId].name} (a outra fica sem Herói até o Descanso), dê a um Aliado ou guarde a nova.` })
+        : 'auto';
+      if (i === 'auto') {
+        if (allies.length) allies[0].cards.push(card); else spare(card);
+      } else if (i >= 0 && i < h.cards.length) {
+        const [old] = h.cards.splice(i, 1, card);
+        spare(old);
+      } else if (i >= h.cards.length && allies[i - h.cards.length]) {
+        allies[i - h.cards.length].cards.push(card);
+      } else spare(card);
+    }
+    const holder = this.heroesOf(h.guild!).find(x => x.cards.includes(card));
+    this.emit({ t: 'reward', heroId: (holder ?? h).id, cardId: defId, ...(holder ? {} : { spare: true }) });
+    if (holder) this.log(`${this.name(holder)} recebeu a carta ${CARDS[defId].name}!`);
   }
 
   completeMission(g: GuildId, missionId: string, by?: Unit, victim?: Unit): boolean {

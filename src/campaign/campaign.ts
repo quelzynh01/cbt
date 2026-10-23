@@ -1,6 +1,8 @@
 import { CARDS, CURSES, curseDeck, upgradeDeck } from '../engine/cards';
 import { aiBans, afterBans, drawBanPool, validBans } from '../engine/heroBan';
-import { HEROES, distributeStartingGear, heroPool, levelForScenario, setGuildNames, starterError, teamName, type HeroSet } from '../engine/data';
+import { mapTitlesOf } from '../engine/board';
+import { TITLES } from '../engine/titles';
+import { GUILDS, HEROES, distributeStartingGear, heroPool, levelForScenario, setGuildNames, starterError, teamName, type HeroSet } from '../engine/data';
 import type { Game } from '../engine/game';
 import { MAPS, campaignList, type Edition } from '../engine/maps';
 import type { GuildId } from '../engine/types';
@@ -264,6 +266,9 @@ export function recordResult(c: CampaignState, game: Game) {
     const before = Object.values(cg.inventory).flat();
     // a carta que ficou debaixo de uma Maldição volta para o inventário
     cg.inventory = Object.fromEntries(heroes.map(h => [h.defId, [...h.cards, ...(h.covered ? [h.covered] : [])].map(x => x.defId)]));
+    // cartas sem Herói (Recompensa com o inventário cheio): vão para o primeiro Herói e são organizadas na Fase de Melhorias
+    const spare = (game.s.spare?.[cg.id] ?? []).map(x => x.defId);
+    if (spare.length && heroes[0]) cg.inventory[heroes[0].defId] = [...(cg.inventory[heroes[0].defId] ?? []), ...spare];
     const after = Object.values(cg.inventory).flat();
     const reward = after.some(id => CARDS[id]?.level === 'R' && after.filter(x => x === id).length > before.filter(x => x === id).length);
     const newTitles = (s.titles?.[cg.id] ?? []).filter(t => !cg.titles.includes(t));
@@ -568,4 +573,12 @@ export function arrangeGuild(c: CampaignState, g: CGuild, inv: Record<string, st
 export function closeUpgrade(c: CampaignState) {
   c.upgrade = undefined;
   c.phase = 'choose';
+}
+
+/** Quem tem Título com vantagem neste mapa (para mostrar na escolha do cenário). */
+export function titleHolders(c: CampaignState, mapId: string, name: (g: GuildId) => string): { name: string; color: string; title: string }[] {
+  const map = MAPS[mapId];
+  if (!map) return [];
+  const here = mapTitlesOf(map);
+  return c.guilds.flatMap(g => g.titles.filter(t => here.includes(t)).map(t => ({ name: name(g.id), color: GUILDS[g.id].color, title: TITLES[t] ?? t })));
 }

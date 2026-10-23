@@ -310,7 +310,7 @@ export class BattlePanel {
         count.innerHTML = `<b>${t.blocks}</b> bloqueio${t.blocks === 1 ? '' : 's'}`;
         continue;
       }
-      if (e.hits === 0) { tray.innerHTML = '<span class="muted">Nenhum acerto para bloquear</span>'; continue; }
+      // a Defesa rola sempre, mesmo sem acertos (regra)
       if (t.stunnedNoDefense) { tray.innerHTML = '<span class="muted">✷ Atordoado — não rola Defesa</span>'; }
       else if (!t.defense.length) { tray.innerHTML = '<span class="muted">Sem dados de Defesa</span>'; }
       else {

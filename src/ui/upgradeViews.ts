@@ -11,6 +11,9 @@ const esc = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt
 const who = (g: GuildId, name: (g: GuildId) => string) => `<span class="dot" style="background:${GUILDS[g].color}"></span> ${esc(name(g))}`;
 
 /** Herói da vez nas Maldições: as cartas na mesa (viradas ou não). `canFlip`: quem está olhando pode virar a próxima. */
+/** Cartas de Maldição já animadas (para não virarem de novo a cada atualização da tela). */
+const animatedFlips = new Set<string>();
+
 export function curseRevealHtml(c: CampaignState, canFlip: boolean, name: (g: GuildId) => string): string {
   const up = c.upgrade!;
   const list = up.cursesDrawn;
@@ -19,8 +22,10 @@ export function curseRevealHtml(c: CampaignState, canFlip: boolean, name: (g: Gu
   const flipped = Math.min(up.curseFlipped ?? 0, cur.drawn.length);
   const all = flipped >= cur.drawn.length;
   const keptAt = cur.drawn.indexOf(cur.kept);
+  // só a carta que acabou de virar anima (as já viradas ficam paradas quando a tela é redesenhada)
+  const flipKey = (i: number) => `${c.played.length}:${step}:${cur.hero}:${i}`;
   const cards = cur.drawn.map((id, i) => i < flipped
-    ? `<div class="cr-slot face ${all ? (i === keptAt ? 'kept' : 'back-deck') : ''}">${curseCard(id)}${all ? `<span class="cr-tag">${i === keptAt ? '✔ Fica com esta' : '↩ Volta ao baralho'}</span>` : ''}</div>`
+    ? `<div class="cr-slot face ${animatedFlips.has(flipKey(i)) ? 'still' : (animatedFlips.add(flipKey(i)), '')} ${all ? (i === keptAt ? 'kept' : 'back-deck') : ''}">${curseCard(id)}${all ? `<span class="cr-tag">${i === keptAt ? '✔ Fica com esta' : '↩ Volta ao baralho'}</span>` : ''}</div>`
     : `<button class="cr-slot cr-back ${canFlip && i === flipped ? 'next' : ''}" data-flip="${i}" ${canFlip && i === flipped ? '' : 'disabled'}><span class="cr-skull">💀</span><b>Maldição<br/>Mortal</b>${canFlip && i === flipped ? '<small>toque para virar</small>' : ''}</button>`).join('');
   const done = list.slice(0, step);
   return `<div class="cp-step cr-step">

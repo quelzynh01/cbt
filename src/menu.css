@@ -507,3 +507,15 @@
 .lib-eds button.on.ed-btg { background: linear-gradient(#7a5aa8, #3e2a66); border-color: #c9a8ff; color: #fff; }
 .tk-card.tomb .tomb-ic { font-size: 54px; line-height: 1.1; filter: drop-shadow(0 4px 6px rgba(0,0,0,.5)); }
 .tk-card.tomb.bad { border-color: #8a3a3a; }
+/* Maldições: carta já virada não repete a animação */
+.cr-slot.still .acard { animation: none !important; }
+
+/* editor de inventário: status do Herói com as cartas escolhidas */
+.inv-stats { display: flex; gap: 4px; align-items: center; margin: 2px 0 4px; }
+.inv-stats .ism { width: 30px; height: 30px; }
+.inv-stats .med.ism { width: 24px; height: 24px; font-size: 12px; }
+/* ranking da campanha online (entre os cenários) */
+.cp-rank { margin-top: 10px; }
+.cp-rank table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.cp-rank th, .cp-rank td { padding: 3px 6px; text-align: center; border-bottom: 1px solid rgba(255,255,255,.08); }
+.cp-rank td:nth-child(2) { text-align: left; }
