@@ -3,6 +3,7 @@ import type { MapDef } from '../engine/board';
 import { BTG_MAP_IDS, MAPS } from '../engine/maps';
 import type { Cell } from '../engine/types';
 import { drawMinimap } from './mapInfo';
+import { MONSTERS } from '../engine/data';
 
 // Revisão dos mapas (abre com /#paredes): escolha uma ferramenta (parede, Espaço bloqueado, deck de madeira, portas, borracha)
 // e clique no mapa. As alterações ficam salvas no navegador e saem num texto para copiar e mandar de volta
@@ -19,17 +20,20 @@ interface MapEdits {
   /** Áreas Iniciais alteradas: índice (0-3) -> lista completa de Espaços */
   areas?: Record<string, string[]>;
   entryAdd?: string[]; entryRemove?: string[];
+  /** Monstros: "tipo@c,r" (um por Monstro) */
+  monAdd?: string[]; monRemove?: string[];
   reviewed?: boolean; note?: string;
 }
 type Edits = Record<string, MapEdits>;
 
-type Tool = 'wall' | 'block' | 'wood' | 'area' | 'entry' | DoorType | 'erase';
+type Tool = 'wall' | 'block' | 'wood' | 'area' | 'entry' | 'monster' | DoorType | 'erase';
 const TOOLS: { id: Tool; icon: string; name: string; on: 'edge' | 'cell' | 'both' }[] = [
   { id: 'wall', icon: '🧱', name: 'Parede', on: 'edge' },
   { id: 'block', icon: '🌿', name: 'Espaço bloqueado', on: 'cell' },
   { id: 'wood', icon: '🪵', name: 'Deck de madeira', on: 'cell' },
   { id: 'area', icon: '🏁', name: 'Área Inicial', on: 'cell' },
   { id: 'entry', icon: '⚑', name: 'Entrada de Monstro', on: 'cell' },
+  { id: 'monster', icon: '👹', name: 'Monstro', on: 'cell' },
   { id: 'fechada', icon: '🚪', name: 'Porta fechada', on: 'edge' },
   { id: 'aberta', icon: '🔓', name: 'Porta aberta', on: 'edge' },
   { id: 'pequena', icon: '🔸', name: 'Porta pequena (aberta)', on: 'edge' },
@@ -64,6 +68,11 @@ function prune(e: Edits): Edits {
     const ent = new Set(m.entryMarkers.map(key));
     ed.entryAdd = (ed.entryAdd ?? []).filter(k => !ent.has(k));
     ed.entryRemove = (ed.entryRemove ?? []).filter(k => ent.has(k));
+    // Monstros: o que o mapa já tem sai da lista (conta repetidos)
+    const mons = m.monsters.map(x => `${x.type}@${key(x.cell)}`);
+    const left = mons.slice();
+    ed.monAdd = (ed.monAdd ?? []).filter(k => { const i = left.indexOf(k); if (i >= 0) { left.splice(i, 1); return false; } return true; });
+    ed.monRemove = (ed.monRemove ?? []).filter(k => mons.includes(k));
   }
   return e;
 }
@@ -92,12 +101,16 @@ function edited(m: MapDef, ed?: MapEdits): MapDef {
   const ent = new Set(m.entryMarkers.map(key));
   for (const k of ed.entryRemove ?? []) ent.delete(k);
   for (const k of ed.entryAdd ?? []) ent.add(k);
-  return { ...m, walls: [...walls].map(toCells), pillars: [...pil].map(cellOf), rooms: [...rooms].map(cellOf), doors: [...doors.values()], startAreas, entryMarkers: [...ent].map(cellOf) };
+  const monsters = m.monsters.slice();
+  for (const k of ed.monRemove ?? []) { const i = monsters.findIndex(x => `${x.type}@${key(x.cell)}` === k); if (i >= 0) monsters.splice(i, 1); }
+  for (const k of ed.monAdd ?? []) { const [type, c] = k.split('@'); monsters.push({ type, cell: cellOf(c) }); }
+  return { ...m, walls: [...walls].map(toCells), pillars: [...pil].map(cellOf), rooms: [...rooms].map(cellOf), doors: [...doors.values()], startAreas, entryMarkers: [...ent].map(cellOf), monsters };
 }
 
 const count = (ed?: MapEdits) => ed ? ed.add.length + ed.remove.length + (ed.block?.length ?? 0) + (ed.unblock?.length ?? 0)
   + (ed.wood?.length ?? 0) + (ed.unwood?.length ?? 0) + Object.keys(ed.doors ?? {}).length
-  + Object.keys(ed.areas ?? {}).length + (ed.entryAdd?.length ?? 0) + (ed.entryRemove?.length ?? 0) : 0;
+  + Object.keys(ed.areas ?? {}).length + (ed.entryAdd?.length ?? 0) + (ed.entryRemove?.length ?? 0)
+  + (ed.monAdd?.length ?? 0) + (ed.monRemove?.length ?? 0) : 0;
 
 /** Liga/desliga `k` (`orig` = o mapa original já tem; `want` = como deve ficar). */
 function toggleIn(onList: string[], offList: string[], k: string, orig: boolean, want: boolean) {
@@ -112,6 +125,7 @@ export function openWallEditor() {
   let cur = ids[0];
   let tool: Tool = 'wall';
   let area = 0; // Área Inicial escolhida (0-3)
+  let monType = ''; // Monstro escolhido para pôr no mapa
   const edits = prune(load());
   save(edits);
   let hoverEdge: string | null = null, hoverCell: string | null = null;
@@ -123,6 +137,7 @@ export function openWallEditor() {
     const out: Record<string, unknown> = {};
     const pair = (k: string) => toCells(k).map(c => `(${c.c},${c.r})`).join('-');
     const cel = (k: string) => `(${k})`;
+    const mon = (k: string) => { const [type, c] = k.split('@'); return { tipo: type, nome: MONSTERS[type]?.name ?? type, em: `(${c})` }; };
     for (const id of ids) {
       const ed = edits[id];
       if (!ed || (!count(ed) && !ed.reviewed && !ed.note)) continue;
@@ -137,6 +152,7 @@ export function openWallEditor() {
         ...(tirar.length ? { tirar_portas: tirar } : {}), ...(novas.length ? { portas: novas } : {}),
         ...(Object.keys(ed.areas ?? {}).length ? { areas_iniciais: Object.fromEntries(Object.entries(ed.areas!).map(([i, l]) => [String(+i + 1), l.map(cel)])) } : {}),
         ...(ed.entryAdd?.length ? { entradas: ed.entryAdd.map(cel) } : {}), ...(ed.entryRemove?.length ? { tirar_entradas: ed.entryRemove.map(cel) } : {}),
+        ...(ed.monAdd?.length ? { monstros: ed.monAdd.map(mon) } : {}), ...(ed.monRemove?.length ? { tirar_monstros: ed.monRemove.map(mon) } : {}),
         ...(ed.note ? { obs: ed.note } : {}),
       };
     }
@@ -214,7 +230,16 @@ export function openWallEditor() {
   const use = (edge: string | null, cell: string | null) => {
     const m = MAPS[cur];
     const ed = (edits[cur] ??= { add: [], remove: [] });
-    ed.block ??= []; ed.unblock ??= []; ed.wood ??= []; ed.unwood ??= []; ed.doors ??= {}; ed.areas ??= {}; ed.entryAdd ??= []; ed.entryRemove ??= [];
+    ed.block ??= []; ed.unblock ??= []; ed.wood ??= []; ed.unwood ??= []; ed.doors ??= {}; ed.areas ??= {}; ed.entryAdd ??= []; ed.entryRemove ??= []; ed.monAdd ??= []; ed.monRemove ??= [];
+    /** Tira 1 Monstro (o último posto, ou um do mapa original) do Espaço; `type` = só desse tipo */
+    const removeMonster = (c: string, type?: string) => {
+      const here = now.monsters.filter(x => key(x.cell) === c && (!type || x.type === type));
+      if (!here.length) return false;
+      const k = `${here[here.length - 1].type}@${c}`;
+      const ai = ed.monAdd!.lastIndexOf(k);
+      if (ai >= 0) ed.monAdd!.splice(ai, 1); else ed.monRemove!.push(k);
+      return true;
+    };
     /** Áreas Iniciais: põe/tira o Espaço da área `idx` (null = tira de todas) */
     const setArea = (c: string, idx: number | null) => {
       const lists = [0, 1, 2, 3].map(i => now.startAreas[i]?.map(key) ?? []);
@@ -239,15 +264,34 @@ export function openWallEditor() {
       if (tool === 'block') toggleIn(ed.block, ed.unblock, cell, pilOrig, !pilNow);
       else if (tool === 'wood') toggleIn(ed.wood, ed.unwood, cell, roomOrig, !roomNow);
       else if (tool === 'area') setArea(cell, area);
+      else if (tool === 'monster') {
+        // o mesmo tipo de novo tira; outro tipo põe (até 2 por Espaço)
+        if (!removeMonster(cell, monType)) {
+          if (now.monsters.filter(x => key(x.cell) === cell).length >= 2) { alert('Já tem 2 Monstros nesse Espaço. Tire um com a Borracha.'); return; }
+          const k = `${monType}@${cell}`;
+          const ri = ed.monRemove.indexOf(k);
+          if (ri >= 0) ed.monRemove.splice(ri, 1); else ed.monAdd.push(k);
+        }
+      }
       else if (tool === 'entry') { const eo = m.entryMarkers.some(p => key(p) === cell), en = now.entryMarkers.some(p => key(p) === cell); toggleIn(ed.entryAdd, ed.entryRemove, cell, eo, !en); }
       else if (tool === 'erase') {
         toggleIn(ed.block, ed.unblock, cell, pilOrig, false); toggleIn(ed.wood, ed.unwood, cell, roomOrig, false);
         setArea(cell, null);
         toggleIn(ed.entryAdd, ed.entryRemove, cell, m.entryMarkers.some(p => key(p) === cell), false);
+        while (removeMonster(cell)) { /* tira todos os Monstros do Espaço */ }
       }
     }
     save(edits);
     render();
+  };
+
+  /** Lista de Monstros: os deste mapa primeiro, depois os outros. */
+  const monOptions = (m: MapDef) => {
+    const here = [...new Set(m.monsters.map(x => x.type))].filter(t => MONSTERS[t]);
+    const rest = Object.keys(MONSTERS).filter(t => !here.includes(t)).sort((a, b) => MONSTERS[a].name.localeCompare(MONSTERS[b].name));
+    if (!monType || !MONSTERS[monType]) monType = here[0] ?? rest[0];
+    const opt = (t: string) => `<option value="${t}" ${t === monType ? 'selected' : ''}>${MONSTERS[t].abbr} · ${MONSTERS[t].name}</option>`;
+    return `<optgroup label="Deste mapa">${here.map(opt).join('')}</optgroup><optgroup label="Outros">${rest.map(opt).join('')}</optgroup>`;
   };
 
   const render = () => {
@@ -260,8 +304,9 @@ export function openWallEditor() {
         <span class="we-prog">${done}/${ids.length} revisados</span>
         <button id="we-close">✕ Fechar</button></div>
       <div class="we-tools">${TOOLS.map(t => `<button class="we-tool ${t.id === tool ? 'on' : ''}" data-tool="${t.id}" title="${t.name}"><span>${t.icon}</span>${t.name}</button>`).join('')}
+        ${tool === 'monster' ? `<select id="we-mon">${monOptions(m)}</select>` : ''}
         ${tool === 'area' ? `<span class="we-areas">Jogador: ${[0, 1, 2, 3].map(i => `<button class="${i === area ? 'on' : ''}" data-area="${i}">${i + 1}</button>`).join('')}</span>` : ''}</div>
-      <p class="we-help">${tool === 'area' ? `Clique <b>num Espaço</b> para pôr/tirar da Área Inicial do <b>Jogador ${area + 1}</b> (é onde os Heróis começam e ressuscitam)` : tool === 'entry' ? 'Clique <b>num Espaço</b> para pôr/tirar uma Entrada de Monstro (⚑, onde os Monstros voltam)' : tool === 'block' || tool === 'wood' ? 'Clique <b>num Espaço</b>' : tool === 'erase' ? 'Clique <b>numa borda</b> (tira parede/porta) ou <b>no meio de um Espaço</b> (tira bloqueio/deck)' : 'Clique <b>entre dois Espaços</b>'}${tool === 'erase' ? '.' : ' — clicar de novo no mesmo lugar desfaz.'}
+      <p class="we-help">${tool === 'monster' ? 'Escolha o Monstro e clique <b>num Espaço</b> para pôr (até 2 por Espaço); clicar de novo com o mesmo Monstro tira. A Borracha tira todos do Espaço' : tool === 'area' ? `Clique <b>num Espaço</b> para pôr/tirar da Área Inicial do <b>Jogador ${area + 1}</b> (é onde os Heróis começam e ressuscitam)` : tool === 'entry' ? 'Clique <b>num Espaço</b> para pôr/tirar uma Entrada de Monstro (⚑, onde os Monstros voltam)' : tool === 'block' || tool === 'wood' ? 'Clique <b>num Espaço</b>' : tool === 'erase' ? 'Clique <b>numa borda</b> (tira parede/porta) ou <b>no meio de um Espaço</b> (tira bloqueio/deck)' : 'Clique <b>entre dois Espaços</b>'}${tool === 'erase' ? '.' : ' — clicar de novo no mesmo lugar desfaz.'}
         Marcas: <span style="color:#36e07a">verde</span> = novo · <span style="color:#ff5cf0">rosa tracejado</span> = tirado · <span style="color:#4db8ff">azul</span> = porta nova/trocada.
         Espaço bloqueado (verde listrado) funciona como parede. Compare com o Livro de Campanha e, no fim, copie o texto e me mande.</p>
       <div class="we-main"><div class="we-edit"><canvas id="we-cv" width="${m.cols * 110 + 50}" height="${m.rows * 110 + 50}"></canvas></div></div>
@@ -284,6 +329,8 @@ export function openWallEditor() {
     cv.onmouseleave = () => { hoverEdge = hoverCell = null; draw(); };
     cv.onclick = ev => { const p = pick(cv, ev); if (p.edge || p.cell) use(p.edge, p.cell); };
     el.querySelectorAll<HTMLElement>('[data-tool]').forEach(b => { b.onclick = () => { tool = b.dataset.tool as Tool; render(); }; });
+    const ms = el.querySelector('#we-mon') as HTMLSelectElement | null;
+    if (ms) ms.onchange = () => { monType = ms.value; };
     el.querySelectorAll<HTMLElement>('[data-area]').forEach(b => { b.onclick = () => { area = Number(b.dataset.area); render(); }; });
     const ensure = () => (edits[cur] ??= { add: [], remove: [] });
     (el.querySelector('#we-map') as HTMLSelectElement).onchange = ev => { cur = (ev.target as HTMLSelectElement).value; hoverEdge = hoverCell = null; render(); };
@@ -291,7 +338,7 @@ export function openWallEditor() {
     (el.querySelector('#we-note') as HTMLInputElement).onchange = ev => { ensure().note = (ev.target as HTMLInputElement).value.trim(); save(edits); render(); };
     (el.querySelector('#we-undo') as HTMLElement).onclick = () => {
       const e = edits[cur];
-      if (e) { e.add = []; e.remove = []; e.block = []; e.unblock = []; e.wood = []; e.unwood = []; e.doors = {}; e.areas = {}; e.entryAdd = []; e.entryRemove = []; }
+      if (e) { e.add = []; e.remove = []; e.block = []; e.unblock = []; e.wood = []; e.unwood = []; e.doors = {}; e.areas = {}; e.entryAdd = []; e.entryRemove = []; e.monAdd = []; e.monRemove = []; }
       save(edits); render();
     };
     const step = (d: number) => { cur = ids[(ids.indexOf(cur) + d + ids.length) % ids.length]; hoverEdge = hoverCell = null; render(); };

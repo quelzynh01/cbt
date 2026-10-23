@@ -9,6 +9,7 @@ O arquivo pode começar com "PAREDES" (como o editor copia). Para cada mapa:
   tirar_portas               portas removidas  "(c,r)-(c,r)"
   areas_iniciais             {"1": ["(c,r)", ...]}: lista completa da Área Inicial do Jogador 1 (2, 3, 4)
   entradas / tirar_entradas  Entradas de Monstro (bueiros)  "(c,r)"
+  monstros / tirar_monstros  {"tipo": "orc", "em": "(c,r)"} (um por Monstro)
 """
 import glob
 import json
@@ -131,6 +132,31 @@ def apply(id_, ed):
         body = '\n    ' + ',\n    '.join(new) + ',\n  ' if '\n' in src[i:j] else ', '.join(new)
         src = src[:i] + body + src[j:]
         n += len(areas)
+    # Monstros: {"tipo": "orc", "em": "(c,r)"}
+    for mo in ed.get('tirar_monstros', []):
+        t, c = mo['tipo'], cells(mo['em'])[0]
+        i, j = block(src, start, 'monsters')
+        body = src[i:j]
+        cel = rf'C\({c[0]},\s*{c[1]}\)'
+        new = re.sub(rf"[ \t]*\{{\s*type:\s*'{t}',\s*cell:\s*{cel}\s*\}},?[ \t]*\n?", '', body, count=1)
+        if new == body:
+            # formato many('tipo', C(..), C(..))
+            mm = re.search(rf"many\('{t}'((?:,\s*C\(\d+,\s*\d+\))*)\)", body)
+            if mm and re.search(cel, mm.group(1)):
+                args = re.sub(rf',\s*{cel}', '', mm.group(1), count=1)
+                new = body[:mm.start()] + f"many('{t}'{args})" + body[mm.end():]
+        if new == body:
+            print(f"  ! {id_}: Monstro {t} em {mo['em']} não encontrado")
+        src = src[:i] + new + src[j:]
+        n += 1
+    mons = ed.get('monstros', [])
+    if mons:
+        i, j = block(src, start, 'monsters')
+        body = src[i:j].rstrip()
+        sep = '' if body.endswith(',') or not body.strip() else ','
+        lines = ', '.join(f"{{ type: '{mo['tipo']}', cell: {c_txt(cells(mo['em'])[0])} }}" for mo in mons)
+        src = src[:i] + body + sep + '\n    // revisão dos mapas\n    ' + lines + ',\n  ' + src[j:]
+        n += len(mons)
     # portas
     for s in ed.get('tirar_portas', []):
         a, b = cells(s)
