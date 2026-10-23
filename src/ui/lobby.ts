@@ -20,6 +20,7 @@ import { type MenuPages } from './menu';
 import { attachMapPeek, closeMapPeek, mapChoiceCard } from './mapInfo';
 import { bindInvEditor, invEditorHtml, poolErrors, type InvItem, type InvOptions } from './inventoryEditor';
 import { getSettings, saveSettings } from './settings';
+import { listSaves, newSaveId, putSave, removeSave, type OnlineSave } from '../net/onlineSaves';
 
 /** Tela do modo online: criar/entrar numa sala, preparar a partida na "mesa" (como na campanha) e começar. */
 export class OnlineLobby {
@@ -37,6 +38,12 @@ export class OnlineLobby {
   /** Editor de inventário desenhado nesta tela (liga os cliques depois de montar o HTML). */
   private invBind: { items: InvItem[]; opts: InvOptions } | null = null;
   private mode: 'single' | 'campaign' = 'campaign';
+  /** Partida salva desta sala (anfitrião): atualizada sozinha na mesa e durante a partida. */
+  private saveId: string | null = null;
+  /** Partida salva reaberta: o estado do jogo para continuar quando o anfitrião apertar "Continuar". */
+  private restoredState: GameState | null = null;
+  /** Estado atual da partida (o controlador liga isto no anfitrião). */
+  getGameState: () => GameState | null = () => null;
   /** Configurações da partida (padrão: Limite de dados, Pegar 1 carta e Apenas Core Heroes). */
   private diceCap = true;
   private pickOne = true;
@@ -85,6 +92,8 @@ export class OnlineLobby {
 
   /** Abre a tela inicial do online. `code` pré-preenche "Entrar" (link ?sala=CODE). */
   open(code = '') {
+    // a sala da partida que acabou de sair já foi fechada: volta para a entrada (com as partidas salvas)
+    if (this.session?.closed) { this.session = null; this.lobby = null; this.chatLog = []; }
     if (this.session && this.lobby) { this.renderRoom(); return; }
     this.show(`
       <div class="mp-head"><button class="mp-back">← Voltar</button><h2>Multiplayer Online</h2></div>
@@ -97,6 +106,7 @@ export class OnlineLobby {
             <input id="lb-code" maxlength="5" value="${esc(code)}" placeholder="CÓDIGO" class="lb-code-in"/>
             <button class="primary" id="lb-join">🚪 Entrar</button></div>
         </div>
+        ${this.savesHtml()}
         <p class="lb-note">Até 4 jogadores, cada um no seu computador. Vagas vazias podem ser preenchidas pela IA.
           Na mesa, como na campanha: cada um recruta seus Heróis escolhendo 1 por rodada e passando o resto, todos votam no mapa e distribuem as cartas iniciais.</p>
         <div class="lb-status" id="lb-status"></div>
@@ -112,10 +122,22 @@ export class OnlineLobby {
       const n = name();
       if (!n) return;
       const host = new HostSession(n, [], this.events());
-      host.onSetupMsg = (g, m) => this.hostSetupMsg(g, m);
-      host.onSeatsChanged = () => { if (host.lobby.setup && !host.lobby.started) this.hostAdvance(); };
+      this.hostHooks(host);
       this.session = host;
+      this.saveId = newSaveId();
+      this.stash = null;
+      this.restoredState = null;
     };
+    this.page.querySelectorAll<HTMLElement>('[data-load]').forEach(b => { b.onclick = () => {
+      const n = name();
+      const sv = listSaves().find(x => x.id === b.dataset.load);
+      if (n && sv) this.restore(sv, n);
+    }; });
+    this.page.querySelectorAll<HTMLElement>('[data-del]').forEach(b => { b.onclick = async () => {
+      if (!await gameConfirm({ icon: '🗑', title: 'Apagar a partida salva?', body: 'Não dá para desfazer.', yes: 'Apagar', no: 'Voltar', danger: true })) return;
+      removeSave(b.dataset.del!);
+      this.open();
+    }; });
     (this.page.querySelector('#lb-join') as HTMLElement).onclick = () => {
       const n = name();
       const c = (this.page.querySelector('#lb-code') as HTMLInputElement).value.trim().toUpperCase();
@@ -123,6 +145,108 @@ export class OnlineLobby {
       if (c.length < 5) { this.setStatus('Código inválido.', 'error'); return; }
       this.session = new ClientSession(c, n, [], this.events());
     };
+  }
+
+  private hostHooks(host: HostSession) {
+    host.onSetupMsg = (g, m) => this.hostSetupMsg(g, m);
+    host.onSeatsChanged = () => { if (host.lobby.restored) host.pushLobby(); else if (host.lobby.setup && !host.lobby.started) this.hostAdvance(); };
+  }
+
+  // ------------------------------------------------------------------ partidas salvas (anfitrião)
+  private savesHtml(): string {
+    const all = listSaves();
+    if (!all.length) return '';
+    const when = (t: number) => new Date(t).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    const rows = all.map(sv => {
+      const l = sv.lobby;
+      const camp = !!(l.campaign || sv.stash?.mode === 'campaign' || l.setup?.mode === 'campaign');
+      const where = sv.state ? `${MAPS[sv.state.mapId]?.name ?? sv.state.mapId} · rodada ${sv.state.turn}` : l.setup?.step?.startsWith('upgrade') ? 'Fase de Melhorias' : 'Na mesa (preparação)';
+      const who = l.seats.map(s => `<span class="dot" style="background:${GUILDS[s.guild].color}"></span>${esc(s.ai ? 'IA' : s.name)}`).join(' ');
+      return `<div class="lb-save"><div><b>${camp ? `🏰 Campanha${l.scenario ? ` · cenário ${l.scenario}/6` : ''}` : '⚔ Partida única'}</b> — ${esc(where)}
+          <small>${who} · salvo ${when(sv.savedAt)} · sala ${esc(l.code)}</small></div>
+        <button class="primary" data-load="${sv.id}">▶ Continuar</button><button data-del="${sv.id}" title="Apagar">🗑</button></div>`;
+    }).join('');
+    return `<div class="lb-box lb-saves"><h3>💾 Partidas salvas</h3><p>Você é o anfitrião delas: reabra a sala e seus amigos entram com o mesmo código (ou link) e o mesmo nome.</p>${rows}</div>`;
+  }
+
+  /** Anfitrião: grava a partida desta sala (mesa ou partida em andamento). Acabou? Apaga. */
+  persist(stateJson?: string) {
+    if (!this.session?.isHost || !this.saveId) return;
+    const host = this.session as HostSession;
+    const l = host.lobby;
+    if (l.restored || (!l.setup && !l.started)) return;
+    const state: GameState | null = l.started ? (stateJson ? JSON.parse(stateJson) : this.getGameState()) : null;
+    const st = l.setup ?? this.stash;
+    const over = st?.step === 'final' || (!!state?.winner && st?.mode !== 'campaign');
+    if (over) { removeSave(this.saveId); return; }
+    // campanha: o cenário acabou, mas a mesa ainda não voltou (a Fase de Melhorias é gravada quando voltar)
+    if (state?.winner) return;
+    putSave({ id: this.saveId, savedAt: Date.now(), lobby: JSON.parse(JSON.stringify({ ...l, restored: undefined })), stash: this.stash ? JSON.parse(JSON.stringify(this.stash)) : null, state });
+  }
+
+  /** Reabre uma partida salva: a sala espera os jogadores voltarem. */
+  private restore(sv: OnlineSave, name: string) {
+    const l: Lobby = JSON.parse(JSON.stringify(sv.lobby));
+    l.started = false;
+    l.roulette = false;
+    const host = new HostSession(name, [], this.events(), l);
+    this.hostHooks(host);
+    this.session = host;
+    this.saveId = sv.id;
+    this.stash = sv.stash;
+    this.restoredState = sv.state;
+  }
+
+  /** Anfitrião: continua a partida salva (quem não voltou fica desconectado; dá para passar a vaga para a IA). */
+  private continueSaved() {
+    const host = this.session as HostSession;
+    const l = host.lobby;
+    l.restored = false;
+    for (const s of l.seats) if (!s.connected && !s.ai) s.lostAt = Date.now();
+    const state = this.restoredState;
+    this.restoredState = null;
+    if (state) {
+      for (const s of l.seats) { const gs = state.guilds[s.guild]; if (gs) gs.controller = s.ai ? 'ai' : 'human'; }
+      host.startGame(state);
+      this.close();
+      this.onStart(state, l, host);
+    } else this.hostAdvance();
+  }
+
+  /** Sala de uma partida salva reaberta: quem já voltou e o botão de continuar. */
+  private restoredRoom() {
+    const l = this.lobby!;
+    const host = this.session?.isHost;
+    const link = `${location.origin}${location.pathname}?sala=${l.code}`;
+    const humans = l.seats.filter(s => !s.ai);
+    const back = humans.filter(s => s.connected).length;
+    const seats = l.seats.map(s => `<div class="lb-seat" style="--gc:${GUILDS[s.guild].color}">
+        <div class="lb-seat-h"><span class="dot" style="background:${GUILDS[s.guild].color}"></span><b>${esc(s.ai ? 'IA' : s.name)}</b>${s.host ? '<span class="tag-host">👑 anfitrião</span>' : ''}</div>
+        <div class="lb-seat-g">${s.team ? `<b>${esc(s.team)}</b> · ` : ''}${GUILDS[s.guild].name}</div>
+        <div class="lb-seat-hero">${s.ai ? '<i>IA</i>' : s.connected ? '✅ voltou' : '⏳ aguardando…'}
+          ${host && !s.host && (!s.ai || s.name !== 'IA') ? `<button data-seatai="${s.guild}" data-v="${s.ai ? 0 : 1}">${s.ai ? 'Devolver ao jogador' : 'IA assume'}</button>` : ''}</div>
+      </div>`).join('');
+    this.show(`
+      <div class="mp-head"><button class="mp-back">← Sair da sala</button><h2>💾 Partida salva</h2></div>
+      <div class="lb-room">
+        <div class="lb-codebox"><span>Código da sala</span><b>${l.code}</b>
+          <button id="lb-copy">📋 Copiar link</button><small>${esc(link)}</small></div>
+        <p class="lb-note">Os jogadores entram com este código (ou link) usando <b>o mesmo nome de antes</b> e voltam para a vaga deles.</p>
+        <div class="lb-seats">${seats}</div>
+        <div class="lb-actions">${host ? `<span class="lb-sum">${back} de ${humans.length} jogadores na sala</span>
+          <button class="primary" id="lb-continue">▶ Continuar partida</button>` : '<span class="lb-wait">Aguardando o anfitrião continuar a partida…</span>'}</div>
+        <p class="lb-note">Quem não voltar fica desconectado: na partida, o anfitrião pode passar a vaga para a IA, e ela volta para o jogador quando ele entrar.</p>
+        ${this.chatHtml()}
+        <div class="lb-status ${this.status.kind}" id="lb-status">${esc(this.status.text)}</div>
+      </div>`);
+    this.bindChat();
+    (this.page.querySelector('.mp-back') as HTMLElement).onclick = () => this.leave();
+    (this.page.querySelector('#lb-copy') as HTMLElement).onclick = () => {
+      navigator.clipboard?.writeText(link).then(() => this.setStatus('Link copiado! Envie para seus amigos.', 'ok'), () => this.setStatus(link));
+    };
+    this.page.querySelectorAll<HTMLElement>('[data-seatai]').forEach(b => { b.onclick = () => (this.session as HostSession).setSeatAI(b.dataset.seatai as GuildId, b.dataset.v === '1'); });
+    const go = this.page.querySelector('#lb-continue') as HTMLElement | null;
+    if (go) go.onclick = () => this.continueSaved();
   }
 
   private events(): SessionEvents {
@@ -150,6 +274,7 @@ export class OnlineLobby {
   // ------------------------------------------------------------------ sala (antes da preparação)
   private renderRoom() {
     const l = this.lobby!;
+    if (l.restored) { this.restoredRoom(); return; }
     if (l.setup) { this.renderTable(); return; }
     const host = this.session?.isHost;
     const me = this.session!.me;
@@ -237,7 +362,7 @@ export class OnlineLobby {
   /** Jogada da preparação (de qualquer jogador; o anfitrião também passa por aqui). */
   private hostSetupMsg(g: GuildId, m: SetupMsg) {
     const st = (this.session as HostSession).lobby.setup;
-    if (!st) return;
+    if (!st || (this.session as HostSession).lobby.restored) return;
     if (m.t === 'ban') banHeroes(st, g, m.ids);
     else if (m.t === 'draft') chooseHero(st, g, m.hero);
     else if (m.t === 'vote') voteMap(st, g, m.map);
@@ -256,6 +381,8 @@ export class OnlineLobby {
     const l = host.lobby;
     const st = l.setup;
     if (!st) return;
+    // partida salva reaberta: a mesa espera o anfitrião continuar
+    if (l.restored) { host.pushLobby(); return; }
     // quem caiu na preparação (Maldições, compras…) tem um tempo para voltar; depois disso a IA assume a vaga
     // (para a mesa não travar) — e devolve quando ele reconectar
     const GRACE = 90_000;
@@ -267,6 +394,7 @@ export class OnlineLobby {
     }
     advance(st, l.seats.map(s => ({ guild: s.guild, ai: s.ai })));
     host.pushLobby();
+    this.persist();
     if (st.step === 'done') setTimeout(() => this.startGame(), 1500);
     // Maldições: a IA vira as cartas dela e, com todas viradas, a mesa passa para o próximo Herói (com tempo para todos verem)
     clearTimeout(this.curseTimer);
@@ -351,6 +479,7 @@ export class OnlineLobby {
     l.roulette = st.mode !== 'campaign' || l.scenario === 1;
     l.setup = undefined;
     host.startGame(game.s);
+    this.persist(JSON.stringify(game.s));
     this.close();
     this.onStart(game.s, l, host);
   }

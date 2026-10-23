@@ -15,7 +15,10 @@ document.documentElement.style.setProperty('--cur-pointer', POINTER_CURSOR);
 import { MenuPages } from './ui/menu';
 import { OnlineLobby } from './ui/lobby';
 import { CampaignUI } from './ui/campaignUI';
-import { gameOptions, recordResult } from './campaign/campaign';
+import { gameOptions, recordResult, saveCampaign } from './campaign/campaign';
+import { gameConfirm } from './ui/dialog';
+import { MAPS } from './engine/maps';
+import type { GameState } from './engine/types';
 import { preloadArt } from './render/chibi';
 import { initMusic, setMusic } from './audio/music';
 import { soundWidget } from './audio/widget';
@@ -76,6 +79,9 @@ lobby.onStart = (state, l, session) => {
   ctl.onlineCampaign = session.isHost && lobby.isCampaign ? g => lobby.afterScenario(g) : null;
   ctl.onLobbyBack = back => lobby.resume(back);
   ctl.startOnline(state, l, session);
+  // anfitrião: a partida fica salva (dá para fechar hoje e continuar amanhã com os mesmos jogadores)
+  ctl.autosave = session.isHost ? (_s, json) => lobby.persist(json) : null;
+  lobby.getGameState = () => ctl.game?.s ?? null;
 };
 lobby.onReturn = () => {
   controller?.stop();
@@ -93,12 +99,28 @@ function backToCampaign() {
   menu.classList.remove('hidden');
   camp.afterScenario();
 }
-camp.onPlay = mapId => {
+camp.onPlay = async mapId => {
+  const c = camp.c!;
+  // cenário salvo no meio: continua de onde parou (ou recomeça)
+  let resume: GameState | undefined;
+  const m = c.match;
+  if (m && m.mapId === mapId && !m.state.winner) {
+    const ok = await gameConfirm({ icon: '💾', title: 'Continuar de onde parou?', body: `${MAPS[mapId]?.name ?? mapId} está salvo na <b>rodada ${m.state.turn}</b>.`, yes: '▶ Continuar', no: 'Recomeçar o cenário' });
+    if (ok) resume = m.state;
+  }
   enterGame();
-  getController().startCampaign(mapId, gameOptions(camp.c!), game => {
+  getController().startCampaign(mapId, gameOptions(c), game => {
     recordResult(camp.c!, game);
     backToCampaign();
-  }, { baseMs: camp.c!.elapsed ?? 0, onExit: backToCampaign, aiLevel: camp.c!.aiLevel ?? 'normal', roulette: camp.c!.played.length === 0, scenario: camp.c!.played.length + 1 });
+  }, {
+    baseMs: c.elapsed ?? 0, onExit: backToCampaign, aiLevel: c.aiLevel ?? 'normal', roulette: c.played.length === 0, scenario: c.played.length + 1, resume,
+    autosave: (s, json) => {
+      const cc = camp.c;
+      if (!cc || s.winner || s.mapId !== mapId) return;
+      cc.match = { mapId, state: JSON.parse(json), savedAt: Date.now() };
+      saveCampaign(cc);
+    },
+  });
 };
 
 function showMenu() {
@@ -121,6 +143,8 @@ document.getElementById('m-lib')!.onclick = () => pages.showLibrary('herois');
 document.getElementById('m-set')!.onclick = () => pages.showSettings();
 
 hud.classList.add('hidden');
+// fechou a aba / o navegador: grava a partida em andamento (campanha local e anfitrião online)
+window.addEventListener('pagehide', () => controller?.flushSave());
 
 // No início só os retratos (menus); os personagens, marcadores, dados e sons vêm ao entrar numa partida (mapLoading).
 // Atalhos: /#teste inicia direto no Modo Teste; /#biblioteca abre a Biblioteca.

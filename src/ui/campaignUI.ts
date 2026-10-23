@@ -60,15 +60,25 @@ export class CampaignUI {
     const y = this.page.scrollTop;
     this.lastTitle = title;
     this.page.classList.remove('hidden');
-    this.page.innerHTML = `<div class="mp-head">${back ? '<button class="mp-back">← Menu</button>' : ''}<h2>${title}</h2></div><div class="mp-body">${body}</div>`;
+    // abandonar a campanha em qualquer etapa (recrutamento, itens, mapa, Melhorias…); o painel da campanha tem o seu botão
+    const quit = !!this.c && this.c.phase !== 'done' && title !== 'Campanha' && title !== 'Nova Campanha';
+    this.page.innerHTML = `<div class="mp-head">${back ? '<button class="mp-back">← Menu</button>' : ''}<h2>${title}</h2>${quit ? '<button class="cp-reset mp-quit">🏳️ Abandonar campanha</button>' : ''}</div><div class="mp-body">${body}</div>`;
     const b = this.page.querySelector('.mp-back') as HTMLElement | null;
     if (b) b.onclick = () => this.close();
+    const q = this.page.querySelector('.mp-quit') as HTMLElement | null;
+    if (q) q.onclick = () => this.abandon();
     closeMapPeek();
     attachMapPeek(this.page);
     this.page.scrollTop = same ? y : 0;
   }
 
   private save() { saveCampaign(this.c); }
+
+  /** Abandona a campanha (com confirmação) e volta para a criação. */
+  private async abandon() {
+    if (!await gameConfirm({ icon: '🏳️', title: 'Abandonar a campanha?', body: 'Todo o progresso da campanha atual (Heróis, cartas, moedas e cenários jogados) será perdido.', yes: 'Abandonar', no: 'Voltar', danger: true })) return;
+    this.c = null; this.save(); this.setup();
+  }
 
   /** Entrada: continua a campanha salva ou mostra a criação. */
   open() {
@@ -281,7 +291,7 @@ export class CampaignUI {
     const why = !c.played.length ? 'Escolhido na votação.' : c.chooser === me.id ? 'Você venceu o último cenário e escolheu.' : `A ${guildName(c.chooser)} venceu o último cenário e escolheu.`;
     const nextHtml = next
       ? `<div class="hub-nextmap">${mapChoiceCard(MAPS[next], { cls: 'big', level: scenarioLevel(c), sub: MAPS[next].missions.pve.map(m => m.name).join(' · '), titles: titleHolders(c, next, guildName) })}
-          <div class="hub-nextinfo"><p>${why}</p><button class="primary cp-big" id="cp-go">▶ Jogar ${MAPS[next].name}</button></div></div>`
+          <div class="hub-nextinfo"><p>${why}</p><button class="primary cp-big" id="cp-go">${c.match?.mapId === next ? `💾 Continuar ${MAPS[next].name} <small>(rodada ${c.match.state.turn})</small>` : `▶ Jogar ${MAPS[next].name}`}</button></div></div>`
       : myChoice
         ? `<p>Você venceu o último cenário: <b>escolha o próximo</b>. A escolha fica salva.</p>
            <div class="cp-votes hub-choices">${av.map(id => mapChoiceCard(MAPS[id], { attrs: `data-pick="${id}"`, level: scenarioLevel(c), sub: MAPS[id].missions.pve.map(m => m.name).join(' · '), titles: titleHolders(c, id, guildName) })).join('')}</div>`
@@ -342,10 +352,7 @@ export class CampaignUI {
     const go = this.page.querySelector('#cp-go') as HTMLElement | null;
     if (go && next) go.onclick = () => this.onPlay(next);
     (this.page.querySelector('#cp-org') as HTMLElement).onclick = () => this.organize();
-    (this.page.querySelector('#cp-reset') as HTMLElement).onclick = async () => {
-      if (!await gameConfirm({ icon: '🏳️', title: 'Abandonar a campanha?', body: 'Todo o progresso da campanha atual (Heróis, cartas, moedas e cenários jogados) será perdido.', yes: 'Abandonar', no: 'Voltar', danger: true })) return;
-      this.c = null; this.save(); this.setup();
-    };
+    (this.page.querySelector('#cp-reset') as HTMLElement).onclick = () => this.abandon();
     attachMapPeek(this.page);
   }
 

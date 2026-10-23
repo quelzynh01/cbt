@@ -213,7 +213,10 @@ export class MenuPages {
         <p class="muted">Clique num <b>espaço vazio</b> ou numa <b>carta</b> para escolher qual carta vai nele (qualquer carta do jogo, ou trocar entre Heróis).</p>
         <div class="ts-btnrow"><button id="ts-gear">Equipamento inicial padrão</button><button id="ts-clear">Remover todas as cartas</button></div>
         ${invEditorHtml(invItems, invOpts)}</section>
-      <section class="ts-sec ts-wide"><h3>5. Configurações da partida</h3>
+      <section class="ts-sec ts-wide"><h3>5. Maldições <small>(opcional)</small></h3>
+        <div class="ts-curses">${c.heroes.map(h => `<label class="ts-curse"><b>${HEROES[h].name}</b> <select data-tcurse="${h}">${Object.values(CURSES).map(k => `<option value="${k.id}" ${(c.curses?.[h] ?? 'sem_maldicao') === k.id ? 'selected' : ''} title="${k.text.replace(/"/g, '&quot;')}">☠ ${k.name}</option>`).join('')}</select>
+          <small>${c.curses?.[h] ? CURSES[c.curses[h]].text : ''}</small></label>`).join('')}</div></section>
+      <section class="ts-sec ts-wide"><h3>6. Configurações da partida</h3>
         <label class="set-opt"><input type="checkbox" id="ts-cap" ${c.diceCap ? 'checked' : ''}/> <b>Limite de dados</b> — no máximo 8 dados de ataque e 6 de defesa por rolagem (contando críticos e rerrolagens), como os dados físicos da caixa. Sem marcar, os dados são ilimitados.</label></section>
       <div class="ts-go"><button class="primary" id="ts-start">▶ Começar teste</button></div>
     </div>`);
@@ -259,6 +262,11 @@ export class MenuPages {
       this.tsSlot = (slot + 1) % 3;
       this.test = c;
       save();
+    }; });
+    this.page.querySelectorAll<HTMLSelectElement>('[data-tcurse]').forEach(sel => { sel.onchange = () => {
+      const cs = { ...(c.curses ?? {}) };
+      if (sel.value === 'sem_maldicao') delete cs[sel.dataset.tcurse!]; else cs[sel.dataset.tcurse!] = sel.value;
+      c.curses = cs; save();
     }; });
     (this.page.querySelector('#ts-gear') as HTMLElement).onclick = () => { c.cards = distributeStartingGear(c.heroes); save(); };
     (this.page.querySelector('#ts-clear') as HTMLElement).onclick = () => { c.cards = Object.fromEntries(c.heroes.map(h => [h, []])); save(); };

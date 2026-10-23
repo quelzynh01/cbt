@@ -22,6 +22,10 @@ export interface Highlights {
   hoverCell: Cell | null;
   hoverUnit: string | null;
   doorIcons: string[];
+  /** Portas que dá para clicar sem mostrar o ícone (Monstro da Vingança). */
+  doorClick?: string[];
+  /** Portas desenhadas ao contrário (prévia: o Monstro vai abrir/fechar). */
+  doorFlip?: string[];
   activeUnit: string | null;
   los: { from: Cell; to: Cell; ok: boolean } | null;
   moveColor?: 'blue' | 'purple' | 'green';
@@ -67,6 +71,9 @@ const WALL_H = 30;
 function gemColor(c?: string): string { return GUILDS[c as keyof typeof GUILDS]?.color ?? '#e0b43a'; }
 function hexRgb(h: string): string { const n = parseInt(h.slice(1), 16); return `${(n >> 16) & 255},${(n >> 8) & 255},${n & 255}`; }
 const DIE_ICON: Record<string, string> = { crit: '✷', melee: '⚔', ranged: '➶', shield: '⛨', blank: '–' };
+
+/** Eventos que fazem parte do resultado de um ataque (aparecem logo no impacto, antes da pausa). */
+const HIT_RESULT = new Set<GameEvent['t']>(['damage', 'death', 'stun', 'heal', 'coins', 'log', 'cemetery', 'drop', 'reward']);
 
 const DUR: Partial<Record<GameEvent['t'], number>> = {
   move: 280, door: 220, attack: 1500, damage: 480, heal: 420, death: 520, stun: 200, pickup: 650, drop: 200,
@@ -149,7 +156,14 @@ export class Renderer {
     this.fit();
   }
 
-  get busy() { return !!this.current || this.queue.length > 0; }
+  get busy() { return !!this.current || this.queue.length > 0 || this.t < this.waitUntil; }
+
+  /** Pausa depois do resultado de um ataque (dano, morte…): só antes do próximo lance, não antes do dano. */
+  private hitPause = 0;
+  private waitUntil = 0;
+  pauseAfterHit(ms: number) { this.hitPause = ms; }
+  /** Quando o golpe/projétil do último animateAttack encosta no alvo (ms a partir do início). */
+  lastImpact = 0;
 
   /** Próximo ataque deste personagem na fila (antes de mudar o turno): quem ele vai atacar. */
   upcomingTargets(attackerId: string): string[] {
@@ -181,6 +195,8 @@ export class Renderer {
   reset() {
     this.queue = [];
     this.current = null;
+    this.hitPause = 0;
+    this.waitUntil = 0;
     this.floaters = [];
     this.projectiles = [];
     this.sync();
@@ -328,7 +344,7 @@ export class Renderer {
   pickDoorIcon(sx: number, sy: number): string | null {
     const w = this.screenToWorld(sx, sy);
     for (const [id, p] of this.doorIconPos) if (Math.hypot(w.x - p.x, w.y - p.y) < 24) return id;
-    for (const id of this.hl.doorIcons) {
+    for (const id of [...this.hl.doorIcons, ...(this.hl.doorClick ?? [])]) {
       const d = this.game.s.doors.find(x => x.id === id)!;
       const m = g2s((d.a.c + d.b.c + 1) / 2, (d.a.r + d.b.r + 1) / 2, 22);
       if (Math.abs(w.x - m.x) < 46 && Math.abs(w.y - m.y) < 34) return id;
@@ -498,7 +514,9 @@ export class Renderer {
         // golpe depois da escolha do dano espalhado: vira para o alvo principal e anima contra todos
         const a = this.units.get(e.attackerId), t = this.units.get(e.targets[0]?.id);
         if (a && t && a !== t) { const pa = g2s(a.pos.gx, a.pos.gy), pt = g2s(t.pos.gx, t.pos.gy); a.flip = pt.x < pa.x; a.dir = dirFromScreen(pt.x - pa.x, pt.y - pa.y); }
-        dur = this.animateAttack(e) + 80 / this.speed;
+        // o dano aparece no impacto (a volta da investida continua enquanto isso)
+        this.animateAttack(e);
+        dur = this.lastImpact + 30 / this.speed;
         break;
       }
       case 'damage': {
@@ -524,6 +542,7 @@ export class Renderer {
     const now = this.t;
     const a = this.units.get(e.attackerId);
     const t = this.units.get(e.targets[0]?.id);
+    this.lastImpact = 0;
     if (!a || !t) return 0;
     const pa = g2s(a.pos.gx, a.pos.gy), pt = g2s(t.pos.gx, t.pos.gy);
     // agora sim: o atacante vira para o alvo e o alvo para o atacante
@@ -542,6 +561,7 @@ export class Renderer {
           // Fender: gira no lugar com a espada, atingindo quem está em volta
           a.spin = { t0: now + 100 / sp, dur: 700 / sp };
           setTimeout(() => play('cleave'), 200 / sp);
+          this.lastImpact = 420 / sp;
           return 820 / sp;
         }
         if (e.attackType === 'melee' && !e.thrown) {
@@ -567,9 +587,12 @@ export class Renderer {
           const base = a.defId.replace(/\d+$/, '');
           setTimeout(() => play(e.thrown ? 'atack-sword' : base === 'goblin' ? 'archer-sound' : kind === 'orb' ? 'atack-magic' : 'atack-bow'), 230 / sp);
         }
-        if (e.attackType === 'melee' && !e.thrown) return 820 / sp;
+        // investida: encosta no alvo em 150 + 35% de 620 ms
+        if (e.attackType === 'melee' && !e.thrown) { this.lastImpact = 370 / sp; return 820 / sp; }
         const far = e.targets.map(tg => { const tv = this.units.get(tg.id)!; const p2 = g2s(tv.pos.gx, tv.pos.gy); return Math.hypot(p2.x - pa.x, p2.y - pa.y); });
-        return (250 + Math.min(900, 380 + Math.max(...far) * 0.35)) / sp;
+        const total = (250 + Math.min(900, 380 + Math.max(...far) * 0.35)) / sp;
+        this.lastImpact = total;
+        return total;
       }
     }
   }
@@ -682,6 +705,13 @@ export class Renderer {
         this.finishEvent(this.current.e);
         for (const x of this.current.also ?? []) this.finishEvent(x);
         this.current = null;
+      }
+      if (this.t < this.waitUntil) return;
+      // o resultado do ataque já apareceu: agora sim a pausa, antes do próximo lance
+      if (this.hitPause && (!this.queue.length || !HIT_RESULT.has(this.queue[0].t))) {
+        if (this.queue.length) this.waitUntil = this.t + this.hitPause;
+        this.hitPause = 0;
+        if (this.queue.length) return;
       }
       const e = this.queue.shift();
       if (!e) {
@@ -1269,7 +1299,7 @@ export class Renderer {
     // portas
     this.doorIconPos.clear();
     for (const d of g.s.doors) {
-      const open = this.doors.get(d.id) ?? d.open;
+      const open = (this.doors.get(d.id) ?? d.open) !== !!this.hl.doorFlip?.includes(d.id);
       const [back, front] = d.a.c + d.a.r < d.b.c + d.b.r ? [d.a, d.b] : [d.b, d.a];
       const box = edgeBox(d.a, d.b, 0.025);
       const fade = behind(back);
@@ -1356,8 +1386,11 @@ export class Renderer {
     ctx.translate(p.x, p.y);
     ctx.globalAlpha = u.alpha;
     // Herói ativado: aura dourada no chão (anel girando + brilho) para todos verem quem está jogando
-    const activated = u.alive && this.game?.s.activation?.heroId === u.id;
-    const gcol = u.guild ? GUILDS[u.guild as keyof typeof GUILDS].color : '#ffd65a';
+    // Monstro controlado por um jogador (Vingança ou Lápide): a mesma aura e a seta, em roxo
+    const s0 = this.game?.s;
+    const controlled = u.alive && !!s0 && (s0.pending?.monsterId === u.id || s0.puppet?.monsterId === u.id);
+    const activated = u.alive && (s0?.activation?.heroId === u.id || controlled);
+    const gcol = controlled ? '#aa46eb' : u.guild ? GUILDS[u.guild as keyof typeof GUILDS].color : '#ffd65a';
     const gc = hexRgb(gcol);
     if (activated) {
       ctx.save();
@@ -1479,7 +1512,7 @@ export class Renderer {
     }
     // Herói ativado: seta dourada pulando em cima da cabeça
     if (activated) {
-      const y = -78 * L.scale - 34 - Math.abs(Math.sin(tt * 4)) * 10;
+      const y = -78 * L.scale - 44 - Math.abs(Math.sin(tt * 4)) * 10;
       ctx.save();
       ctx.translate(0, y);
       ctx.beginPath(); ctx.moveTo(-20, -18); ctx.lineTo(20, -18); ctx.lineTo(0, 8); ctx.closePath();
@@ -1516,7 +1549,7 @@ export class Renderer {
     }
 
     // barra de vida + número
-    const top = -78 * L.scale - 6;
+    const top = -78 * L.scale - 16;
     // barra maior, dividida em gomos (1 por ponto de Vida, como no Dota)
     const bw = Math.min(110, Math.max(54, u.maxHp * 12));
     const bh = 9;

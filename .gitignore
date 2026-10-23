@@ -1,3 +1,5 @@
 node_modules
+tools/tests/.out/
+tools/tests/browser/out/
 dist
 ref/

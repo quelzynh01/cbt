@@ -85,20 +85,13 @@ export class Controller {
         this.hud.onEvent(e, showBattle);
         // se a rolagem já começou na tela de combate do centro (Rerrolagem), continua nela — sem abrir outra tela
         if (showBattle && e.t === 'attack' && (this.battle.hasCarry || !this.hud.hasCarry)) {
-          this.battle.playAttack(e, () => {
-            const ms = e.noAnim ? 0 : this.renderer.animateAttack(e);
-            // depois da animação, uma pausa para ver o resultado no mapa antes do próximo lance
-            setTimeout(() => this.renderer.release(), ms + 80 + (minePart && !e.noAnim ? 2000 / Math.max(1, this.renderer.speed) : 0));
-          });
+          this.battle.playAttack(e, () => this.strikeThen(e, minePart));
           return true;
         }
         // animações no centro da tela: o jogo espera elas acabarem
         if (e.t === 'attack') {
           // primeiro a rolagem (ataque e defesa) no centro da tela; com o resultado, a investida / o projétil
-          this.hud.centerDice(e, () => {
-            const ms = e.noAnim ? 0 : this.renderer.animateAttack(e);
-            setTimeout(() => this.renderer.release(), ms + 80 + (minePart && !e.noAnim ? 2000 / Math.max(1, this.renderer.speed) : 0));
-          });
+          this.hud.centerDice(e, () => this.strikeThen(e, minePart));
           return true;
         }
         if (e.t === 'pickup') {
@@ -217,7 +210,21 @@ export class Controller {
   private campaignAI: AILevel | null = null;
   private aiFor(g: GuildId): SimpleAI { return (this.ais[g] ??= new SimpleAI(this.campaignEnd && this.campaignAI ? this.campaignAI : getSettings().ai)); }
 
-  startCampaign(mapId: string, opts: Omit<Parameters<typeof Game.create>[1], 'seed'>, onEnd: (g: Game) => void, info: { baseMs: number; onExit: () => void; aiLevel?: AILevel; roulette?: boolean; scenario?: number }) {
+  /** Salvamento automático da partida (campanha local; anfitrião online): recebe o estado a cada poucos segundos e ao sair. */
+  autosave: ((s: GameState, json: string) => void) | null = null;
+  private savedJson = '';
+  private saveClock = 0;
+  /** Grava o estado atual (se mudou) — só quem roda as regras (local ou anfitrião). */
+  flushSave() {
+    const g = this.game;
+    if (!this.autosave || !g || this.mode === 'client') return;
+    const json = JSON.stringify(g.s);
+    if (json === this.savedJson) return;
+    this.savedJson = json;
+    this.autosave(g.s, json);
+  }
+
+  startCampaign(mapId: string, opts: Omit<Parameters<typeof Game.create>[1], 'seed'>, onEnd: (g: Game) => void, info: { baseMs: number; onExit: () => void; aiLevel?: AILevel; roulette?: boolean; scenario?: number; resume?: GameState; autosave?: (s: GameState, json: string) => void }) {
     this.campaignAI = info.aiLevel ?? null;
     this.campaignScenario = info.scenario ?? 0;
     this.hud.scenarioLabel = this.campaignScenario ? `Cenário ${this.campaignScenario}/6` : '';
@@ -226,13 +233,16 @@ export class Controller {
     this.campaignEnd = onEnd;
     this.campaignBase = info.baseMs;
     this.campaignExit = info.onExit;
-    this.campaignRestart = () => this.startCampaign(mapId, opts, onEnd, info);
+    this.campaignRestart = () => this.startCampaign(mapId, opts, onEnd, { ...info, resume: undefined, roulette: false });
+    this.autosave = info.autosave ?? null;
+    this.savedJson = '';
     this.closeRestSilently();
     this.setTestUI(false);
     this.onlinePanel.classList.add('hidden');
     this.hud.setModeBadge('CAMPANHA');
     this.stopped = false;
-    this.game = Game.create(getMap(mapId), { ...opts, deploy: true });
+    // partida salva: continua de onde parou
+    this.game = info.resume ? new Game(getMap(mapId), info.resume) : Game.create(getMap(mapId), { ...opts, deploy: true });
     this.ais = {};
     this.bindHud();
     this.applySettings();
@@ -241,14 +251,14 @@ export class Controller {
     this.history = [];
     this.turnStart = null;
     this.renderer.enqueue(this.game.drain());
-    this.hud.log(`${this.game.map.name} — Monstros Nível ${this.game.s.level}. ${guildShort(this.game.s.guildOrder[0])} começa.`);
+    this.hud.log(info.resume ? `${this.game.map.name} — partida salva: continuando na rodada ${this.game.s.turn}.` : `${this.game.map.name} — Monstros Nível ${this.game.s.level}. ${guildShort(this.game.s.guildOrder[0])} começa.`);
     document.getElementById('gameover')?.remove();
     this.deploySel = null;
     this.deployFocused = null;
     this.focusStart();
     this.onIdle();
     // 1º cenário da campanha: o jogador inicial é sorteado (p.14) — a roleta mostra quem começa
-    if (info.roulette) this.rouletteFor(this.game);
+    if (info.roulette && !info.resume) this.rouletteFor(this.game);
   }
 
   private rouletteShown = '';
@@ -280,6 +290,7 @@ export class Controller {
   private testCfg: TestConfig = loadTestConfig();
   startTest(seed?: number, cfg: TestConfig = this.testCfg) {
     this.leaveOnline(false);
+    this.autosave = null;
     this.mode = 'local';
     this.stopped = false;
     this.testCfg = cfg;
@@ -295,7 +306,7 @@ export class Controller {
     // Modo Teste: o Time 1 fica na Área Inicial 1 e joga primeiro; os outros recebem Heróis diferentes, sorteados.
     this.game = Game.create(getMap(cfg.mapId), {
       seed,
-      players: cfg.teams.map((t, i) => ({ guild: t.guild, controller: t.controller, name: t.name, heroes: i === 0 ? cfg.heroes : undefined, cards: i === 0 ? cfg.cards : undefined })),
+      players: cfg.teams.map((t, i) => ({ guild: t.guild, controller: t.controller, name: t.name, heroes: i === 0 ? cfg.heroes : undefined, cards: i === 0 ? cfg.cards : undefined, curses: i === 0 ? cfg.curses : undefined })),
       fixedOrder: true,
       deploy: true,
       diceCap: !!cfg.diceCap,
@@ -632,6 +643,7 @@ export class Controller {
   // ------------------------------------------------------------------
   startOnline(state: GameState, lobby: Lobby, session: Session) {
     this.leaveOnline(false);
+    this.savedJson = '';
     this.net = session;
     this.lobby = lobby;
     this.mode = session.isHost ? 'host' : 'client';
@@ -713,6 +725,16 @@ export class Controller {
       undoPoll: (poll, result) => this.showUndoPoll(poll, result),
       decide: (req, id) => this.decideForHost(req, id),
     };
+  }
+
+  /** Anima o golpe/projétil e solta a fila no impacto (o dano aparece na hora que o golpe chega);
+   *  o resto da animação e a pausa para ver o resultado ficam depois do dano. */
+  private strikeThen(e: Extract<GameEvent, { t: 'attack' }>, minePart: boolean) {
+    const r = this.renderer;
+    const ms = e.noAnim ? 0 : r.animateAttack(e);
+    const hit = e.noAnim ? 0 : r.lastImpact;
+    r.pauseAfterHit(Math.max(0, ms - hit) + 80 + (minePart && !e.noAnim ? 2000 / Math.max(1, r.speed) : 0));
+    setTimeout(() => r.release(), hit + 20);
   }
 
   /** Online (jogador): o anfitrião pede a minha decisão no meio de uma jogada — Rerrolagem ou alvo adicional. */
@@ -911,7 +933,7 @@ export class Controller {
     };
     (p.querySelector('#op-leave') as HTMLElement).onclick = async () => {
       if (!await gameConfirm(this.mode === 'host'
-        ? { icon: '🚪', title: 'Encerrar a partida?', body: 'Você é o <b>anfitrião</b>: sair encerra a partida para todos os jogadores.', yes: 'Sair e encerrar', no: 'Continuar jogando', danger: true }
+        ? { icon: '🚪', title: 'Encerrar a partida?', body: 'Você é o <b>anfitrião</b>: sair fecha a sala para todos, mas a partida <b>fica salva</b>. Depois é só abrir Online → Partidas salvas → Continuar, e seus amigos entram com o mesmo código e nome.', yes: 'Sair (fica salva)', no: 'Continuar jogando', danger: true }
         : { icon: '🚪', title: 'Sair da partida?', body: 'A IA assume os seus Heróis até o fim.', yes: 'Sair', no: 'Continuar jogando', danger: true })) return;
       this.leaveOnline();
       this.onExit();
@@ -966,6 +988,8 @@ export class Controller {
     hl.path = [];
     hl.attackUnits = new Set();
     hl.doorIcons = [];
+    hl.doorClick = [];
+    hl.doorFlip = [];
     hl.los = null;
   }
 
@@ -1062,6 +1086,8 @@ export class Controller {
     const a = this.game.s.activation;
     const mine = this.isHumanTurn() && !this.renderer.busy;
     if (mine && this.renderer.pickDoorIcon(this.mouse.x, this.mouse.y)) return setCursor(canvas, 'door');
+    const pend = this.game.s.pending;
+    if (pend && this.isMine(pend.controller) && !this.renderer.busy && this.renderer.pickDoorIcon(this.mouse.x, this.mouse.y)) return setCursor(canvas, 'door');
     if (mine && a) {
       const target = unitId && hl.attackUnits.has(unitId) ? unitId : cell ? this.game.unitsAt(cell).find(u => hl.attackUnits.has(u.id))?.id : undefined;
       if (target && !(cell && hl.move.has(key(cell)) && !unitId)) {
@@ -1289,8 +1315,9 @@ export class Controller {
     const opts = g.vengeanceOptions(this.vDoors)!;
     const m = g.unit(p.monsterId), h = g.unit(p.heroId);
     const md = MONSTERS[m.defId];
-    // portas Perto do Monstro: ícone no mapa (clique alterna) — como o Herói faz
-    this.renderer.hl.doorIcons = near;
+    // portas Perto do Monstro: clique na própria porta para abrir/fechar (sem ícone); a porta já aparece como vai ficar
+    this.renderer.hl.doorClick = near;
+    this.renderer.hl.doorFlip = this.vDoors.slice();
     const hl = this.renderer.hl;
     hl.moveColor = 'purple';
     hl.activeUnit = m.id;
@@ -1306,7 +1333,6 @@ export class Controller {
       <div class="mc-body">
         <p>${g.name(h)} atacou o ${md.name}. Pela regra, quem controla o Monstro é o <b>jogador à direita</b> do jogador ativo: <b>${ctlName}</b>.</p>
         <p>O Monstro pode se mover até <b>${md.move}</b> Espaço${md.move > 1 ? 's' : ''} e depois atacar <b>${g.name(h)}</b> (${md.attackType === 'melee' ? '⚔ Próximo' : '➶ Distância'}, ${md.dice} dados). Mover e atacar são opcionais.</p>
-        ${near.length ? `<div class="mc-doors">${near.map((id, i) => { const d = g.s.doors.find(x => x.id === id)!; const on = this.vDoors.includes(id); const willOpen = on ? !d.open : d.open; return `<button class="${on ? 'primary' : ''}" data-vdoor="${id}" ${!on && this.vDoors.length >= g.monMove(m) ? 'disabled' : ''}>🚪 Porta ${i + 1}: ${on ? (willOpen ? 'vai abrir' : 'vai fechar') : d.open ? 'fechar' : 'abrir'} <small>(1 mov.)</small></button>`; }).join('')}</div>` : ''}
         <p class="mc-legend"><span class="pu">■</span> clique para escolher onde o Monstro termina · <span class="rd">◇</span> de lá ele consegue atacar · destino atual: <b>${sameCell(dest, m.cell) ? 'ficar parado' : `(${dest.c},${dest.r})`}</b></p>
         <div class="mc-btns">
           <button class="primary" id="mc-atk" ${canHit ? '' : 'disabled'}>⚔ ${sameCell(dest, m.cell) ? 'Atacar' : 'Mover e Atacar'} ${HEROES[h.defId].name}</button>
@@ -1326,8 +1352,7 @@ export class Controller {
     (el.querySelector('#mc-noatk') as HTMLElement).onclick = () => go(false);
     const rs = el.querySelector('#mc-reset') as HTMLElement | null;
     if (rs) rs.onclick = () => { this.vDest = null; this.refresh(); };
-    el.querySelectorAll<HTMLElement>('[data-vdoor]').forEach(b => { b.onclick = () => this.toggleVDoor(b.dataset.vdoor!); });
-    this.hud.setHint('Você controla o Monstro: abra/feche portas (🚪), escolha um Espaço roxo e confirme no painel');
+    this.hud.setHint('Você controla o Monstro: escolha um Espaço roxo e confirme no painel');
   }
 
   /** Vingança: marca/desmarca uma porta Perto do Monstro para ele abrir ou fechar antes de mover. */
@@ -1634,7 +1659,7 @@ export class Controller {
     const pend = this.game.s.pending;
     if (pend) {
       if (!this.isMine(pend.controller)) return;
-      // ícone de porta Perto do Monstro: abre/fecha (como o Herói)
+      // porta Perto do Monstro: clique nela para abrir/fechar
       const door = this.renderer.pickDoorIcon(x, y);
       if (door) { this.toggleVDoor(door); return; }
       const cell = this.renderer.pickCell(x, y);
@@ -2059,6 +2084,7 @@ export class Controller {
 
   /** Sai da partida: para a IA, o cronômetro e as animações. */
   stop() {
+    if (!this.stopped && !this.deciding) this.flushSave();
     this.stopped = true;
     clearTimeout(this.aiTimer);
     this.battle.close();
@@ -2187,6 +2213,8 @@ export class Controller {
     const html = `${scen ? `<span title="Cenário da campanha">🗺️ <b>${scen}/6</b></span>` : ''}<span title="Rodada">🔄 Rodada <b>${g.s.turn}</b></span>`
       + (clock ? `<span title="Tempo da partida">⏱ <b>${fmtTime(g.s.elapsed ?? 0)}</b></span>${this.campaignEnd ? `<span title="Tempo total da campanha">🏰 <b>${fmtTime(this.campaignBase + (g.s.elapsed ?? 0))}</b></span>` : ''}` : '');
     if (html !== this.clockShown) { this.clockShown = html; this.hud.setClock(html, fmtTime(g.s.elapsed ?? 0)); }
+    // salvamento automático a cada 3 s (fora do meio de uma animação/decisão)
+    if (this.autosave && !this.stopped && dt > 0 && (this.saveClock += dt) > 3000 && !this.deciding) { this.saveClock = 0; this.flushSave(); }
   }
 
   /** Aplica as Configurações (velocidade). */

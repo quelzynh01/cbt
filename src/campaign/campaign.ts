@@ -5,7 +5,7 @@ import { TITLES } from '../engine/titles';
 import { GUILDS, HEROES, distributeStartingGear, heroPool, levelForScenario, setGuildNames, starterError, teamName, type HeroSet } from '../engine/data';
 import type { Game } from '../engine/game';
 import { MAPS, campaignList, type Edition } from '../engine/maps';
-import type { GuildId } from '../engine/types';
+import type { GameState, GuildId } from '../engine/types';
 import { cardFit, pickHero, type AILevel } from '../ai/ai';
 
 // Modo Campanha (Livro de Regras p.9 e p.24-29): 6 cenários — 3 do Círculo Exterior, 2 do Círculo Interior e o
@@ -103,6 +103,8 @@ export interface CampaignState {
   heroSet?: HeroSet;
   /** Edição da campanha: CBT Clássico ou Beyond the Grave. */
   edition?: Edition;
+  /** Cenário em andamento (salvo automaticamente): dá para sair e continuar depois de onde parou. */
+  match?: { mapId: string; state: GameState; savedAt: number };
 }
 
 // ------------------------------------------------------------------ persistência
@@ -257,6 +259,7 @@ export function gameOptions(c: CampaignState) {
 export function recordResult(c: CampaignState, game: Game) {
   const s = game.s;
   const res: ScenarioResult = { mapId: s.mapId, winner: s.winner!, ms: s.elapsed ?? 0, guilds: [] };
+  delete c.match; // o cenário acabou: não há mais partida salva
   c.elapsed = (c.elapsed ?? 0) + (s.elapsed ?? 0);
   for (const cg of c.guilds) {
     const gs = game.guild(cg.id);

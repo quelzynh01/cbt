@@ -1,0 +1,6 @@
+{
+  "name": "cbt-browser-tests",
+  "private": true,
+  "type": "module",
+  "dependencies": { "puppeteer-core": "^23.11.1" }
+}

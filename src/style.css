@@ -1241,7 +1241,8 @@ html.touch :is(.cd-roll, .bt-act, #rr-roll, #rr-go, #cd-rr, #bt-rr)::after { con
   #scorebar { gap: 8px; padding: 5px 10px 7px; }
   .sb-mid { min-width: 150px; }
   .sb-hero.insp { box-shadow: 0 0 0 3px #9fe8ff; }
-  .sb-info { display: flex; gap: 8px; font-size: 12px; font-weight: 700; align-items: center; }
+  .sb-info { display: flex; gap: 6px; font-size: 12px; font-weight: 700; align-items: center; white-space: nowrap; }
+  .sb-info > * { white-space: nowrap; flex-shrink: 0; }
   .sb-info b { color: var(--gc); }
   .sb-mid { display: grid; justify-items: center; align-content: center; min-width: 170px; padding: 0 6px; }
   .sb-map { font-size: 12px; color: var(--muted); white-space: nowrap; }

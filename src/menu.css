@@ -519,3 +519,16 @@
 .cp-rank table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .cp-rank th, .cp-rank td { padding: 3px 6px; text-align: center; border-bottom: 1px solid rgba(255,255,255,.08); }
 .cp-rank td:nth-child(2) { text-align: left; }
+
+/* Partidas online salvas */
+.lb-saves { grid-column: 1 / -1; }
+.lb-save { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 10px; background: rgba(255,255,255,.04); border: 1px solid var(--line); }
+.lb-save > div { flex: 1; min-width: 0; display: grid; gap: 2px; text-align: left; }
+.lb-save small { color: var(--muted); }
+.lb-save .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-left: 4px; }
+.lb-seat-hero button { margin-left: 6px; font-size: 12px; padding: 2px 8px; }
+@media (max-width: 600px) { .lb-save { flex-wrap: wrap; } }
+/* Modo Teste: Maldições */
+.ts-curses { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; }
+.ts-curse { display: grid; gap: 4px; padding: 8px; border-radius: 10px; background: rgba(0,0,0,.2); border: 1px solid var(--line); }
+.ts-curse small { color: var(--muted); font-size: 12px; }

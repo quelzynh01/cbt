@@ -38,6 +38,8 @@ export interface Lobby {
   roulette?: boolean;
   /** Número do cenário (para a roleta não repetir ao reconectar). */
   scenario?: number;
+  /** Partida salva reaberta: a sala espera os jogadores voltarem (só os originais entram) até o anfitrião continuar. */
+  restored?: boolean;
 }
 
 /** Jogadas da preparação. */
@@ -163,15 +165,23 @@ export class HostSession {
   /** Jogada da preparação vinda de um jogador remoto (ou do próprio anfitrião). */
   onSetupMsg: (guild: GuildId, m: SetupMsg) => void = () => {};
 
-  constructor(name: string, heroes: string[], ev: SessionEvents) {
+  /** `restore`: sala de uma partida salva (mesmas vagas; tenta reabrir com o mesmo código). */
+  constructor(name: string, heroes: string[], ev: SessionEvents, restore?: Lobby) {
     this.ev = ev;
-    this.lobby = { code: '', started: false, mapId: loadMapId(), seats: [{ clientId: this.me, name, team: name.trim().slice(0, 20) || undefined, heroes, guild: 'azul', ai: false, connected: true, host: true }] };
-    this.open();
+    if (restore) {
+      this.lobby = restore;
+      const me = restore.seats.find(s => s.host) ?? restore.seats[0];
+      me.clientId = this.me; me.connected = true; me.name = name || me.name;
+      for (const s of restore.seats) if (!s.host && !s.ai) { s.connected = false; s.lostAt = undefined; }
+      for (const s of restore.seats) if (s.autoAI) { s.ai = false; s.autoAI = false; s.connected = false; } // a IA só cobria quem tinha caído
+      restore.restored = true;
+    } else this.lobby = { code: '', started: false, mapId: loadMapId(), seats: [{ clientId: this.me, name, team: name.trim().slice(0, 20) || undefined, heroes, guild: 'azul', ai: false, connected: true, host: true }] };
+    this.open(0, restore?.code);
     keepAwake(true);
   }
 
-  private open(tries = 0) {
-    const code = newCode();
+  private open(tries = 0, want?: string) {
+    const code = want && tries === 0 ? want : newCode();
     this.ev.status('Criando sala…');
     const peer = new Peer(PREFIX + code, { config: iceConfig(), debug: 1 });
     this.peer = peer;
@@ -182,6 +192,7 @@ export class HostSession {
     });
     peer.on('error', err => {
       const type = (err as { type?: string }).type;
+      // código ocupado (ou o antigo da partida salva): tenta outro
       if (type === 'unavailable-id' && tries < 5) { peer.destroy(); this.open(tries + 1); return; }
       this.ev.status(`Erro de conexão (${type ?? err.message}).`, 'error');
     });
@@ -219,8 +230,14 @@ export class HostSession {
         this.seen.set(m.clientId, Date.now());
         cid = m.clientId;
         let seat = this.lobby.seats.find(s => s.clientId === m.clientId);
+        // partida em andamento (ou salva): quem entra de outro aparelho volta para a vaga com o mesmo nome
+        if (!seat && (this.lobby.started || this.lobby.setup || this.lobby.restored)) {
+          const nm = (m.name || '').trim().toLowerCase();
+          seat = this.lobby.seats.find(s => !s.host && !s.connected && (!s.ai || s.autoAI) && s.name.trim().toLowerCase() === nm);
+          if (seat) { this.conns.get(seat.clientId)?.close(); this.conns.delete(seat.clientId); seat.clientId = m.clientId; }
+        }
         if (!seat) {
-          if (this.lobby.started || this.lobby.setup) { conn.send({ t: 'kicked', reason: 'A partida já começou.' } satisfies Msg); setTimeout(() => conn.close(), 300); return; }
+          if (this.lobby.started || this.lobby.setup || this.lobby.restored) { conn.send({ t: 'kicked', reason: this.lobby.restored ? 'Esta é uma partida salva: só os jogadores dela podem entrar (use o mesmo nome de antes).' : 'A partida já começou.' } satisfies Msg); setTimeout(() => conn.close(), 300); return; }
           const free = GUILD_SEATS.find(g => !this.lobby.seats.some(s => s.guild === g));
           if (!free) { conn.send({ t: 'kicked', reason: 'A sala está cheia (4 jogadores).' } satisfies Msg); setTimeout(() => conn.close(), 300); return; }
           seat = { clientId: m.clientId, name: m.name || 'Jogador', team: (m.name || 'Jogador').trim().slice(0, 20), heroes: m.heroes, guild: free, ai: false, connected: true };
@@ -238,14 +255,14 @@ export class HostSession {
         if (old && old !== conn) old.close();
         this.pushLobby();
         const st = this.getState();
-        if (this.lobby.started && st) conn.send({ t: 'start', state: st, lobby: this.lobby } satisfies Msg);
+        if (this.lobby.started && !this.lobby.restored && st) conn.send({ t: 'start', state: st, lobby: this.lobby } satisfies Msg);
         this.onSeatsChanged();
         return;
       }
       if (!cid) return;
       const seat = this.lobby.seats.find(s => s.clientId === cid);
       if (!seat) return;
-      if (m.t === 'pick' && !this.lobby.started) {
+      if (m.t === 'pick' && !this.lobby.started && !this.lobby.restored) {
         if (m.heroes) seat.heroes = m.heroes;
         if (m.name) seat.name = m.name;
         if (m.guild && !this.lobby.seats.some(s => s.guild === m.guild)) seat.guild = m.guild;
@@ -283,7 +300,7 @@ export class HostSession {
     this.conns.delete(cid);
     const seat = this.lobby.seats.find(s => s.clientId === cid);
     if (!seat) return;
-    if (!this.lobby.started && !this.lobby.setup) this.lobby.seats = this.lobby.seats.filter(s => s !== seat);
+    if (!this.lobby.started && !this.lobby.setup && !this.lobby.restored) this.lobby.seats = this.lobby.seats.filter(s => s !== seat);
     else { seat.connected = false; seat.lostAt = Date.now(); }
     this.chatAll('Sistema', `${seat.name} desconectou — esperando voltar…`);
     this.pushLobby();
@@ -431,7 +448,9 @@ export class HostSession {
   }
   sendPing(cell: { c: number; r: number }) { this.broadcast({ t: 'ping', guild: this.lobby.seats[0].guild, cell }); }
 
-  close() { keepAwake(false); clearInterval(this.hbTimer); try { this.broadcast({ t: 'kicked', reason: 'O anfitrião encerrou a sala.' }); } catch { /* */ } setTimeout(() => this.peer?.destroy(), 300); }
+  /** A sala foi fechada (o anfitrião saiu). */
+  closed = false;
+  close() { this.closed = true; keepAwake(false); clearInterval(this.hbTimer); try { this.broadcast({ t: 'kicked', reason: this.lobby.started || this.lobby.setup ? 'O anfitrião saiu. A partida ficou salva com ele: quando ele reabrir, entre com o mesmo código e o mesmo nome.' : 'O anfitrião encerrou a sala.' }); } catch { /* */ } setTimeout(() => this.peer?.destroy(), 300); }
 }
 
 // ---------------------------------------------------------------------------
@@ -447,7 +466,7 @@ export class ClientSession {
   private name: string;
   private heroes: string[];
   private code: string;
-  private closed = false;
+  closed = false;
   private retries = 0;
 
   constructor(code: string, name: string, heroes: string[], ev: SessionEvents) {
