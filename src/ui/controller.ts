@@ -44,6 +44,7 @@ export class Controller {
   private turnStart: { key: string; state: string; histLen: number } | null = null;
   private keepDice = false;
   private vDest: Cell | null = null; // destino escolhido para o Monstro na Vingança
+  private vDoors: string[] = []; // portas que o Monstro da Vingança abre/fecha antes de mover
   private pDest: Cell | null = null; // destino do Monstro ativado pela Lápide
   private pRepick = false; // Lápide: voltou para escolher outro Monstro (só na tela)
   private puppetShown = false; // o quadro da esquerda está mostrando o Monstro da Lápide
@@ -1203,9 +1204,13 @@ export class Controller {
   private showMonsterControl() {
     const g = this.game;
     const p = g.s.pending!;
-    const opts = g.vengeanceOptions()!;
+    const near = g.vengeanceDoors();
+    this.vDoors = this.vDoors.filter(id => near.includes(id));
+    const opts = g.vengeanceOptions(this.vDoors)!;
     const m = g.unit(p.monsterId), h = g.unit(p.heroId);
     const md = MONSTERS[m.defId];
+    // portas Perto do Monstro: ícone no mapa (clique alterna) — como o Herói faz
+    this.renderer.hl.doorIcons = near;
     const hl = this.renderer.hl;
     hl.moveColor = 'purple';
     hl.activeUnit = m.id;
@@ -1221,6 +1226,7 @@ export class Controller {
       <div class="mc-body">
         <p>${g.name(h)} atacou o ${md.name}. Pela regra, quem controla o Monstro é o <b>jogador à direita</b> do jogador ativo: <b>${ctlName}</b>.</p>
         <p>O Monstro pode se mover até <b>${md.move}</b> Espaço${md.move > 1 ? 's' : ''} e depois atacar <b>${g.name(h)}</b> (${md.attackType === 'melee' ? '⚔ Próximo' : '➶ Distância'}, ${md.dice} dados). Mover e atacar são opcionais.</p>
+        ${near.length ? `<div class="mc-doors">${near.map((id, i) => { const d = g.s.doors.find(x => x.id === id)!; const on = this.vDoors.includes(id); const willOpen = on ? !d.open : d.open; return `<button class="${on ? 'primary' : ''}" data-vdoor="${id}" ${!on && this.vDoors.length >= g.monMove(m) ? 'disabled' : ''}>🚪 Porta ${i + 1}: ${on ? (willOpen ? 'vai abrir' : 'vai fechar') : d.open ? 'fechar' : 'abrir'} <small>(1 mov.)</small></button>`; }).join('')}</div>` : ''}
         <p class="mc-legend"><span class="pu">■</span> clique para escolher onde o Monstro termina · <span class="rd">◇</span> de lá ele consegue atacar · destino atual: <b>${sameCell(dest, m.cell) ? 'ficar parado' : `(${dest.c},${dest.r})`}</b></p>
         <div class="mc-btns">
           <button class="primary" id="mc-atk" ${canHit ? '' : 'disabled'}>⚔ ${sameCell(dest, m.cell) ? 'Atacar' : 'Mover e Atacar'} ${HEROES[h.defId].name}</button>
@@ -1232,13 +1238,27 @@ export class Controller {
       const d = dest;
       this.vDest = null;
       this.hud.monsterPanel(null);
-      this.act({ type: 'vengeance', dest: sameCell(d, m.cell) ? null : d, attack }, 'vingança');
+      const doors = this.vDoors.slice();
+      this.vDoors = [];
+      this.act({ type: 'vengeance', dest: sameCell(d, m.cell) ? null : d, attack, doors }, 'vingança');
     };
     (el.querySelector('#mc-atk') as HTMLElement).onclick = () => go(true);
     (el.querySelector('#mc-noatk') as HTMLElement).onclick = () => go(false);
     const rs = el.querySelector('#mc-reset') as HTMLElement | null;
     if (rs) rs.onclick = () => { this.vDest = null; this.refresh(); };
-    this.hud.setHint('Você controla o Monstro: escolha um Espaço roxo e confirme no painel');
+    el.querySelectorAll<HTMLElement>('[data-vdoor]').forEach(b => { b.onclick = () => this.toggleVDoor(b.dataset.vdoor!); });
+    this.hud.setHint('Você controla o Monstro: abra/feche portas (🚪), escolha um Espaço roxo e confirme no painel');
+  }
+
+  /** Vingança: marca/desmarca uma porta Perto do Monstro para ele abrir ou fechar antes de mover. */
+  private toggleVDoor(id: string) {
+    const g = this.game;
+    const p = g.s.pending;
+    if (!p || !g.vengeanceDoors().includes(id)) return;
+    if (this.vDoors.includes(id)) this.vDoors = this.vDoors.filter(x => x !== id);
+    else if (this.vDoors.length < g.monMove(g.unit(p.monsterId))) this.vDoors.push(id);
+    this.vDest = null;
+    this.refresh();
   }
 
   /** Lápide "ativar um Monstro": 1) clique no Monstro que pisca; 2) Espaço roxo para mover e Herói vermelho para atacar. */
@@ -1519,8 +1539,12 @@ export class Controller {
     }
     const pend = this.game.s.pending;
     if (pend) {
+      if (!this.isMine(pend.controller)) return;
+      // ícone de porta Perto do Monstro: abre/fecha (como o Herói)
+      const door = this.renderer.pickDoorIcon(x, y);
+      if (door) { this.toggleVDoor(door); return; }
       const cell = this.renderer.pickCell(x, y);
-      if (cell && this.renderer.hl.move.has(key(cell)) && this.isMine(pend.controller)) { this.vDest = cell; this.refresh(); }
+      if (cell && this.renderer.hl.move.has(key(cell))) { this.vDest = cell; this.refresh(); }
       return;
     }
     if (this.powerMode) {

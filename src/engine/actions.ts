@@ -15,7 +15,8 @@ export type Action =
   | { type: 'tomb' }
   | { type: 'rest'; opts?: RestOptions }
   | { type: 'end' }
-  | { type: 'vengeance'; dest: Cell | null; attack: boolean }
+  /** doors: portas Perto do Monstro que ele abre/fecha antes de mover (1 ponto de Movimento cada). */
+  | { type: 'vengeance'; dest: Cell | null; attack: boolean; doors?: string[] }
   /** Lápide: escolhe o Monstro a ativar; depois move (opcional) até `dest` e ataca `targetId` (opcional). */
   | { type: 'puppetPick'; monsterId: string }
   | { type: 'puppet'; dest: Cell | null; targetId: string | null }
@@ -34,7 +35,7 @@ export function applyAction(g: Game, by: GuildId, a: Action): boolean {
   if (g.s.deploying?.length) return false;
   if (a.type === 'vengeance') {
     if (g.s.pending?.controller !== by) return false;
-    return g.resolveVengeance(a.dest, a.attack);
+    return g.resolveVengeance(a.dest, a.attack, a.doors ?? []);
   }
   if (g.currentGuild().id !== by || g.s.pending) return false;
   if (a.type === 'puppetPick' || a.type === 'puppet' || a.type === 'puppetSkip') {

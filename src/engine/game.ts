@@ -1416,24 +1416,51 @@ export class Game {
   }
 
   /** Opções da Vingança pendente: Espaços alcançáveis pelo Monstro e de onde ele consegue atacar. */
-  vengeanceOptions(): { reach: Map<string, PathNode>; attackFrom: Set<string> } | null {
+  /** Portas (não trancadas) Perto do Monstro da Vingança: ele pode abrir ou fechar (1 ponto de Movimento cada). */
+  vengeanceDoors(): string[] {
+    const p = this.s.pending;
+    if (!p) return [];
+    const m = this.unit(p.monsterId);
+    if (!m.cell || this.monAbility(m, 'object')) return [];
+    return this.s.doors.filter(d => !d.locked && (sameCell(d.a, m.cell) || sameCell(d.b, m.cell))).map(d => d.id);
+  }
+
+  /** Para onde o Monstro da Vingança pode ir e de onde ataca — depois de abrir/fechar as portas `doors`. */
+  vengeanceOptions(doors: string[] = []): { reach: Map<string, PathNode>; attackFrom: Set<string> } | null {
     const p = this.s.pending;
     if (!p) return null;
     const m = this.unit(p.monsterId), h = this.unit(p.heroId);
-    const reach = this.reachable(m, this.monMove(m));
-    const attackFrom = new Set<string>();
-    for (const [k, n] of reach) if (n.canEnd && this.monsterCanAttack(m, h, n.cell)) attackFrom.add(k);
-    return { reach, attackFrom };
+    const ok = this.vengeanceDoors();
+    const use = doors.filter(id => ok.includes(id)).slice(0, this.monMove(m));
+    const toggled = use.map(id => this.s.doors.find(d => d.id === id)!);
+    for (const d of toggled) d.open = !d.open; // simula as portas mexidas (e desfaz no fim)
+    try {
+      const reach = this.reachable(m, this.monMove(m) - use.length);
+      const attackFrom = new Set<string>();
+      for (const [k, n] of reach) if (n.canEnd && this.monsterCanAttack(m, h, n.cell)) attackFrom.add(k);
+      return { reach, attackFrom };
+    } finally {
+      for (const d of toggled) d.open = !d.open;
+    }
   }
 
   /** O controlador dos Monstros decide: mover (opcional) até `dest` e atacar ou não. */
-  resolveVengeance(dest: Cell | null, doAttack: boolean): boolean {
+  resolveVengeance(dest: Cell | null, doAttack: boolean, doors: string[] = []): boolean {
     const p = this.s.pending;
     if (!p || this.s.winner) return false;
     const m = this.unit(p.monsterId), h = this.unit(p.heroId);
-    if (!m.alive || !m.cell || !h.alive) { doAttack = false; dest = null; }
+    if (!m.alive || !m.cell || !h.alive) { doAttack = false; dest = null; doors = []; }
+    // portas Perto do Monstro: abre/fecha antes de mover (1 ponto de Movimento cada)
+    const okDoors = this.vengeanceDoors();
+    if (doors.some(id => !okDoors.includes(id)) || new Set(doors).size !== doors.length || doors.length > this.monMove(m)) return false;
+    for (const id of doors) {
+      const d = this.s.doors.find(x => x.id === id)!;
+      d.open = !d.open;
+      this.emit({ t: 'door', doorId: d.id, open: d.open, by: m.id });
+      this.log(`${MONSTERS[m.defId].name} ${d.open ? 'abriu' : 'fechou'} uma porta.`);
+    }
     if (dest && m.cell && !sameCell(dest, m.cell)) {
-      const nodes = this.reachable(m, this.monMove(m));
+      const nodes = this.reachable(m, this.monMove(m) - doors.length);
       const n = nodes.get(key(dest));
       if (!n || !n.canEnd) return false;
       this.walkMonster(m, nodes, dest);
