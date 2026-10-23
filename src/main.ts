@@ -159,6 +159,9 @@ Promise.all([
   hideLoading();
   if (location.hash === '#teste') { enterGame(); getController().startTest(); }
   if (location.hash === '#biblioteca') pages.showLibrary('herois');
+  // revisão das paredes dos mapas: /#paredes
+  if (location.hash === '#paredes') void import('./ui/wallEditor').then(m => m.openWallEditor());
+  window.addEventListener('hashchange', () => { if (location.hash === '#paredes' && !document.getElementById('walleditor')) void import('./ui/wallEditor').then(m => m.openWallEditor()); });
   const sala = new URLSearchParams(location.search).get('sala');
   if (sala) lobby.open(sala.toUpperCase());
 });

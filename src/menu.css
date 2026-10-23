@@ -538,3 +538,24 @@
 .ts-tteam > b { color: var(--gc); min-width: 110px; }
 .ts-tchip { display: inline-flex; gap: 4px; align-items: center; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); cursor: pointer; font-size: 13px; }
 .ts-tchip.on { border-color: var(--gold); background: rgba(255,200,80,.15); }
+
+/* Revisão das paredes (/#paredes) */
+#walleditor { position: fixed; inset: 0; z-index: 200; background: #1d140c; overflow: auto; color: var(--text, #f3e6cf); }
+.we-box { max-width: 1500px; margin: 0 auto; padding: 14px 16px 40px; display: grid; gap: 10px; }
+.we-head { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.we-head h2 { margin: 0; color: var(--gold); }
+.we-head select { font-size: 15px; padding: 4px 8px; min-width: 280px; }
+.we-prog { color: var(--muted); }
+#we-close { margin-left: auto; }
+.we-help { margin: 0; color: var(--muted); font-size: 13px; }
+.we-main { display: grid; gap: 12px; justify-items: center; }
+.we-edit { width: min(1100px, 100%); }
+.we-ref, .we-edit { background: rgba(0,0,0,.25); border: 1px solid var(--line); border-radius: 12px; padding: 8px; display: grid; gap: 4px; }
+.we-ref img, .we-edit canvas { width: 100%; height: auto; display: block; border-radius: 8px; }
+.we-ref small { color: var(--muted); text-align: center; }
+.we-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+#we-note { flex: 1; min-width: 200px; padding: 5px 8px; }
+.we-out { display: grid; gap: 6px; }
+#we-text { width: 100%; height: 120px; font-family: monospace; font-size: 12px; background: #120c07; color: #d8c8a8; border: 1px solid var(--line); border-radius: 8px; padding: 6px; }
+#we-copy { justify-self: start; }
+@media (max-width: 900px) { .we-main { grid-template-columns: 1fr; } }
