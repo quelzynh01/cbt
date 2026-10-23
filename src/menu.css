@@ -563,3 +563,6 @@
 .we-tool { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 10px; font-size: 13px; }
 .we-tool span { font-size: 20px; }
 .we-tool.on { border-color: var(--gold); background: rgba(255,200,80,.2); box-shadow: 0 0 0 2px var(--gold); }
+.we-areas { display: inline-flex; gap: 4px; align-items: center; margin-left: 6px; color: var(--muted); }
+.we-areas button { min-width: 34px; padding: 4px 8px; }
+.we-areas button.on { border-color: var(--gold); background: rgba(255,200,80,.25); }

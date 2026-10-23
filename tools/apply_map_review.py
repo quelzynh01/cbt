@@ -7,6 +7,8 @@ O arquivo pode começar com "PAREDES" (como o editor copia). Para cada mapa:
   madeira / tirar_madeira    decks de madeira (rooms)  "(c,r)"
   portas                     portas novas  {"entre": "(c,r)-(c,r)", "tipo": "fechada|aberta|pequena|trancada"}
   tirar_portas               portas removidas  "(c,r)-(c,r)"
+  areas_iniciais             {"1": ["(c,r)", ...]}: lista completa da Área Inicial do Jogador 1 (2, 3, 4)
+  entradas / tirar_entradas  Entradas de Monstro (bueiros)  "(c,r)"
 """
 import glob
 import json
@@ -98,6 +100,37 @@ def apply(id_, ed):
         if a or r:
             src = edit_cells(src, start, name, a, r)
             n += len(a) + len(r)
+    # Entradas de Monstro
+    a = [cells(s)[0] for s in ed.get('entradas', [])]
+    r = [cells(s)[0] for s in ed.get('tirar_entradas', [])]
+    if a or r:
+        src = edit_cells(src, start, 'entryMarkers', a, r)
+        n += len(a) + len(r)
+    # Áreas Iniciais: {"1": ["(c,r)", ...]} substitui a lista inteira da área do Jogador 1
+    areas = ed.get('areas_iniciais', {})
+    if areas:
+        i, j = block(src, start, 'startAreas')
+        groups, depth, g0 = [], 0, None
+        for k in range(i, j):
+            if src[k] == '[':
+                depth += 1
+                if depth == 1:
+                    g0 = k
+            elif src[k] == ']':
+                depth -= 1
+                if depth == 0:
+                    groups.append([g0, k + 1])
+        new = [src[g0:g1] for g0, g1 in groups]
+        for num, lst in areas.items():
+            idx = int(num) - 1
+            txt = '[' + ', '.join(c_txt(cells(x)[0]) for x in lst) + ']'
+            while len(new) <= idx:
+                new.append('[]')
+            new[idx] = txt
+        # mantém o formato: uma área por linha ou todas na mesma linha
+        body = '\n    ' + ',\n    '.join(new) + ',\n  ' if '\n' in src[i:j] else ', '.join(new)
+        src = src[:i] + body + src[j:]
+        n += len(areas)
     # portas
     for s in ed.get('tirar_portas', []):
         a, b = cells(s)

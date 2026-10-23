@@ -16,15 +16,20 @@ interface MapEdits {
   wood?: string[]; unwood?: string[];
   /** porta por borda: tipo novo ou 'none' (tirar) */
   doors?: Record<string, DoorType | 'none'>;
+  /** Áreas Iniciais alteradas: índice (0-3) -> lista completa de Espaços */
+  areas?: Record<string, string[]>;
+  entryAdd?: string[]; entryRemove?: string[];
   reviewed?: boolean; note?: string;
 }
 type Edits = Record<string, MapEdits>;
 
-type Tool = 'wall' | 'block' | 'wood' | DoorType | 'erase';
+type Tool = 'wall' | 'block' | 'wood' | 'area' | 'entry' | DoorType | 'erase';
 const TOOLS: { id: Tool; icon: string; name: string; on: 'edge' | 'cell' | 'both' }[] = [
   { id: 'wall', icon: '🧱', name: 'Parede', on: 'edge' },
   { id: 'block', icon: '🌿', name: 'Espaço bloqueado', on: 'cell' },
   { id: 'wood', icon: '🪵', name: 'Deck de madeira', on: 'cell' },
+  { id: 'area', icon: '🏁', name: 'Área Inicial', on: 'cell' },
+  { id: 'entry', icon: '⚑', name: 'Entrada de Monstro', on: 'cell' },
   { id: 'fechada', icon: '🚪', name: 'Porta fechada', on: 'edge' },
   { id: 'aberta', icon: '🔓', name: 'Porta aberta', on: 'edge' },
   { id: 'pequena', icon: '🔸', name: 'Porta pequena (aberta)', on: 'edge' },
@@ -55,9 +60,15 @@ function prune(e: Edits): Edits {
     ed.wood = (ed.wood ?? []).filter(k => !rooms.has(k));
     ed.unwood = (ed.unwood ?? []).filter(k => rooms.has(k));
     for (const [k, t] of Object.entries(ed.doors ?? {})) if ((doors.get(k) ?? 'none') === t) delete ed.doors![k];
+    for (const [i, l] of Object.entries(ed.areas ?? {})) if (sameList(l, (m.startAreas[+i] ?? []).map(key))) delete ed.areas![i];
+    const ent = new Set(m.entryMarkers.map(key));
+    ed.entryAdd = (ed.entryAdd ?? []).filter(k => !ent.has(k));
+    ed.entryRemove = (ed.entryRemove ?? []).filter(k => ent.has(k));
   }
   return e;
 }
+
+const sameList = (a: string[], b: string[]) => a.length === b.length && a.every(x => b.includes(x));
 
 /** O mapa com as alterações aplicadas. */
 function edited(m: MapDef, ed?: MapEdits): MapDef {
@@ -77,11 +88,16 @@ function edited(m: MapDef, ed?: MapEdits): MapDef {
     const [a, b] = toCells(k);
     doors.set(k, { a, b, open: t === 'aberta' || t === 'pequena', ...(t === 'pequena' ? { small: true } : {}), ...(t === 'trancada' ? { locked: true } : {}) });
   }
-  return { ...m, walls: [...walls].map(toCells), pillars: [...pil].map(cellOf), rooms: [...rooms].map(cellOf), doors: [...doors.values()] };
+  const startAreas = [0, 1, 2, 3].map(i => ed.areas?.[i] ? ed.areas[i].map(cellOf) : m.startAreas[i] ?? []).filter((l, i) => l.length || i < m.startAreas.length);
+  const ent = new Set(m.entryMarkers.map(key));
+  for (const k of ed.entryRemove ?? []) ent.delete(k);
+  for (const k of ed.entryAdd ?? []) ent.add(k);
+  return { ...m, walls: [...walls].map(toCells), pillars: [...pil].map(cellOf), rooms: [...rooms].map(cellOf), doors: [...doors.values()], startAreas, entryMarkers: [...ent].map(cellOf) };
 }
 
 const count = (ed?: MapEdits) => ed ? ed.add.length + ed.remove.length + (ed.block?.length ?? 0) + (ed.unblock?.length ?? 0)
-  + (ed.wood?.length ?? 0) + (ed.unwood?.length ?? 0) + Object.keys(ed.doors ?? {}).length : 0;
+  + (ed.wood?.length ?? 0) + (ed.unwood?.length ?? 0) + Object.keys(ed.doors ?? {}).length
+  + Object.keys(ed.areas ?? {}).length + (ed.entryAdd?.length ?? 0) + (ed.entryRemove?.length ?? 0) : 0;
 
 /** Liga/desliga `k` (`orig` = o mapa original já tem; `want` = como deve ficar). */
 function toggleIn(onList: string[], offList: string[], k: string, orig: boolean, want: boolean) {
@@ -95,6 +111,7 @@ export function openWallEditor() {
   const ids = Object.keys(MAPS).sort((a, b) => Number(BTG_MAP_IDS.has(a)) - Number(BTG_MAP_IDS.has(b)));
   let cur = ids[0];
   let tool: Tool = 'wall';
+  let area = 0; // Área Inicial escolhida (0-3)
   const edits = prune(load());
   save(edits);
   let hoverEdge: string | null = null, hoverCell: string | null = null;
@@ -118,6 +135,8 @@ export function openWallEditor() {
         ...(ed.block?.length ? { bloquear: ed.block.map(cel) } : {}), ...(ed.unblock?.length ? { desbloquear: ed.unblock.map(cel) } : {}),
         ...(ed.wood?.length ? { madeira: ed.wood.map(cel) } : {}), ...(ed.unwood?.length ? { tirar_madeira: ed.unwood.map(cel) } : {}),
         ...(tirar.length ? { tirar_portas: tirar } : {}), ...(novas.length ? { portas: novas } : {}),
+        ...(Object.keys(ed.areas ?? {}).length ? { areas_iniciais: Object.fromEntries(Object.entries(ed.areas!).map(([i, l]) => [String(+i + 1), l.map(cel)])) } : {}),
+        ...(ed.entryAdd?.length ? { entradas: ed.entryAdd.map(cel) } : {}), ...(ed.entryRemove?.length ? { tirar_entradas: ed.entryRemove.map(cel) } : {}),
         ...(ed.note ? { obs: ed.note } : {}),
       };
     }
@@ -195,7 +214,15 @@ export function openWallEditor() {
   const use = (edge: string | null, cell: string | null) => {
     const m = MAPS[cur];
     const ed = (edits[cur] ??= { add: [], remove: [] });
-    ed.block ??= []; ed.unblock ??= []; ed.wood ??= []; ed.unwood ??= []; ed.doors ??= {};
+    ed.block ??= []; ed.unblock ??= []; ed.wood ??= []; ed.unwood ??= []; ed.doors ??= {}; ed.areas ??= {}; ed.entryAdd ??= []; ed.entryRemove ??= [];
+    /** Áreas Iniciais: põe/tira o Espaço da área `idx` (null = tira de todas) */
+    const setArea = (c: string, idx: number | null) => {
+      const lists = [0, 1, 2, 3].map(i => now.startAreas[i]?.map(key) ?? []);
+      const was = lists.findIndex(l => l.includes(c));
+      for (const l of lists) { const j = l.indexOf(c); if (j >= 0) l.splice(j, 1); }
+      if (idx !== null && was !== idx) lists[idx].push(c);
+      lists.forEach((l, i) => { const orig = (m.startAreas[i] ?? []).map(key); if (sameList(l, orig)) delete ed.areas![i]; else ed.areas![i] = l; });
+    };
     const now = edited(m, ed);
     const origDoors = new Map(m.doors.map(d => [edgeKey(d.a, d.b), doorType(d)]));
     const setDoor = (k: string, t: DoorType | 'none') => { if ((origDoors.get(k) ?? 'none') === t) delete ed.doors![k]; else ed.doors![k] = t; };
@@ -205,13 +232,19 @@ export function openWallEditor() {
       const wallNow = now.walls.some(([a, b]) => edgeKey(a, b) === edge);
       if (tool === 'wall') toggleIn(ed.add, ed.remove, edge, wallOrig, !wallNow);
       else if (tool === 'erase') { toggleIn(ed.add, ed.remove, edge, wallOrig, false); if (doorNow(edge)) setDoor(edge, 'none'); }
-      else if (tool !== 'block' && tool !== 'wood') setDoor(edge, doorNow(edge) === tool ? 'none' : tool); // mesma porta de novo = tira
+      else if (tool === 'fechada' || tool === 'aberta' || tool === 'pequena' || tool === 'trancada') setDoor(edge, doorNow(edge) === tool ? 'none' : tool); // mesma porta de novo = tira
     } else if (cell) {
       const pilOrig = m.pillars.some(p => key(p) === cell), pilNow = now.pillars.some(p => key(p) === cell);
       const roomOrig = m.rooms.some(p => key(p) === cell), roomNow = now.rooms.some(p => key(p) === cell);
       if (tool === 'block') toggleIn(ed.block, ed.unblock, cell, pilOrig, !pilNow);
       else if (tool === 'wood') toggleIn(ed.wood, ed.unwood, cell, roomOrig, !roomNow);
-      else if (tool === 'erase') { toggleIn(ed.block, ed.unblock, cell, pilOrig, false); toggleIn(ed.wood, ed.unwood, cell, roomOrig, false); }
+      else if (tool === 'area') setArea(cell, area);
+      else if (tool === 'entry') { const eo = m.entryMarkers.some(p => key(p) === cell), en = now.entryMarkers.some(p => key(p) === cell); toggleIn(ed.entryAdd, ed.entryRemove, cell, eo, !en); }
+      else if (tool === 'erase') {
+        toggleIn(ed.block, ed.unblock, cell, pilOrig, false); toggleIn(ed.wood, ed.unwood, cell, roomOrig, false);
+        setArea(cell, null);
+        toggleIn(ed.entryAdd, ed.entryRemove, cell, m.entryMarkers.some(p => key(p) === cell), false);
+      }
     }
     save(edits);
     render();
@@ -226,8 +259,9 @@ export function openWallEditor() {
         <select id="we-map">${ids.map(id => `<option value="${id}" ${id === cur ? 'selected' : ''}>${edits[id]?.reviewed ? '✅' : '⬜'} ${BTG_MAP_IDS.has(id) ? '💀 ' : ''}${MAPS[id].name}${count(edits[id]) ? ` (${count(edits[id])} alt.)` : ''}</option>`).join('')}</select>
         <span class="we-prog">${done}/${ids.length} revisados</span>
         <button id="we-close">✕ Fechar</button></div>
-      <div class="we-tools">${TOOLS.map(t => `<button class="we-tool ${t.id === tool ? 'on' : ''}" data-tool="${t.id}" title="${t.name}"><span>${t.icon}</span>${t.name}</button>`).join('')}</div>
-      <p class="we-help">${tool === 'block' || tool === 'wood' ? 'Clique <b>num Espaço</b>' : tool === 'erase' ? 'Clique <b>numa borda</b> (tira parede/porta) ou <b>no meio de um Espaço</b> (tira bloqueio/deck)' : 'Clique <b>entre dois Espaços</b>'}${tool === 'erase' ? '.' : ' — clicar de novo no mesmo lugar desfaz.'}
+      <div class="we-tools">${TOOLS.map(t => `<button class="we-tool ${t.id === tool ? 'on' : ''}" data-tool="${t.id}" title="${t.name}"><span>${t.icon}</span>${t.name}</button>`).join('')}
+        ${tool === 'area' ? `<span class="we-areas">Jogador: ${[0, 1, 2, 3].map(i => `<button class="${i === area ? 'on' : ''}" data-area="${i}">${i + 1}</button>`).join('')}</span>` : ''}</div>
+      <p class="we-help">${tool === 'area' ? `Clique <b>num Espaço</b> para pôr/tirar da Área Inicial do <b>Jogador ${area + 1}</b> (é onde os Heróis começam e ressuscitam)` : tool === 'entry' ? 'Clique <b>num Espaço</b> para pôr/tirar uma Entrada de Monstro (⚑, onde os Monstros voltam)' : tool === 'block' || tool === 'wood' ? 'Clique <b>num Espaço</b>' : tool === 'erase' ? 'Clique <b>numa borda</b> (tira parede/porta) ou <b>no meio de um Espaço</b> (tira bloqueio/deck)' : 'Clique <b>entre dois Espaços</b>'}${tool === 'erase' ? '.' : ' — clicar de novo no mesmo lugar desfaz.'}
         Marcas: <span style="color:#36e07a">verde</span> = novo · <span style="color:#ff5cf0">rosa tracejado</span> = tirado · <span style="color:#4db8ff">azul</span> = porta nova/trocada.
         Espaço bloqueado (verde listrado) funciona como parede. Compare com o Livro de Campanha e, no fim, copie o texto e me mande.</p>
       <div class="we-main"><div class="we-edit"><canvas id="we-cv" width="${m.cols * 110 + 50}" height="${m.rows * 110 + 50}"></canvas></div></div>
@@ -250,13 +284,14 @@ export function openWallEditor() {
     cv.onmouseleave = () => { hoverEdge = hoverCell = null; draw(); };
     cv.onclick = ev => { const p = pick(cv, ev); if (p.edge || p.cell) use(p.edge, p.cell); };
     el.querySelectorAll<HTMLElement>('[data-tool]').forEach(b => { b.onclick = () => { tool = b.dataset.tool as Tool; render(); }; });
+    el.querySelectorAll<HTMLElement>('[data-area]').forEach(b => { b.onclick = () => { area = Number(b.dataset.area); render(); }; });
     const ensure = () => (edits[cur] ??= { add: [], remove: [] });
     (el.querySelector('#we-map') as HTMLSelectElement).onchange = ev => { cur = (ev.target as HTMLSelectElement).value; hoverEdge = hoverCell = null; render(); };
     (el.querySelector('#we-rev') as HTMLInputElement).onchange = ev => { ensure().reviewed = (ev.target as HTMLInputElement).checked; save(edits); render(); };
     (el.querySelector('#we-note') as HTMLInputElement).onchange = ev => { ensure().note = (ev.target as HTMLInputElement).value.trim(); save(edits); render(); };
     (el.querySelector('#we-undo') as HTMLElement).onclick = () => {
       const e = edits[cur];
-      if (e) { e.add = []; e.remove = []; e.block = []; e.unblock = []; e.wood = []; e.unwood = []; e.doors = {}; }
+      if (e) { e.add = []; e.remove = []; e.block = []; e.unblock = []; e.wood = []; e.unwood = []; e.doors = {}; e.areas = {}; e.entryAdd = []; e.entryRemove = []; }
       save(edits); render();
     };
     const step = (d: number) => { cur = ids[(ids.indexOf(cur) + d + ids.length) % ids.length]; hoverEdge = hoverCell = null; render(); };
