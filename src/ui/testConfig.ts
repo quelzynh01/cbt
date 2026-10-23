@@ -1,4 +1,5 @@
 import { CURSES } from '../engine/cards';
+import { TITLES } from '../engine/titles';
 import { ALL_HEROES, CARDS, HEROES, TEST_HUMAN_HEROES, distributeStartingGear } from '../engine/data';
 import { MAPS, loadMapId } from '../engine/maps';
 import type { GuildId } from '../engine/types';
@@ -15,6 +16,8 @@ export interface TestConfig {
   heroes: string[];
   /** Cartas de cada Herói do Time 1. */
   cards: Record<string, string[]>;
+  /** Títulos de cada time (para testar a vantagem no mapa). */
+  titles?: Partial<Record<GuildId, string[]>>;
   /** Maldição Mortal de cada Herói do Time 1 (para testar). */
   curses?: Record<string, string>;
   /** Configurações da partida: limite de 8 dados de ataque e 6 de defesa. */
@@ -52,7 +55,8 @@ export function normalizeTestConfig(c: Partial<TestConfig>): TestConfig {
   const gear = distributeStartingGear(heroes);
   const cards = Object.fromEntries(heroes.map(h => [h, (c.cards?.[h] ?? gear[h]).filter(id => CARDS[id]).slice(0, slotsFor((c.cards?.[h] ?? gear[h]).filter(id => CARDS[id])))]));
   const curses = Object.fromEntries(heroes.filter(h => c.curses?.[h] && CURSES[c.curses[h]] && c.curses[h] !== 'sem_maldicao').map(h => [h, c.curses![h]]));
-  return { mapId, teams, heroes, cards, ...(Object.keys(curses).length ? { curses } : {}), ...(c.diceCap ? { diceCap: true } : {}), ...(heroes.some(h => HEROES[h].extra) ? { allHeroes: true } : {}) };
+  const titles = Object.fromEntries(teams.map(t => [t.guild, [...new Set((c.titles?.[t.guild] ?? []).filter(x => TITLES[x]))]]).filter(([, v]) => v.length)) as Partial<Record<GuildId, string[]>>;
+  return { mapId, teams, heroes, cards, ...(Object.keys(curses).length ? { curses } : {}), ...(Object.keys(titles).length ? { titles } : {}), ...(c.diceCap ? { diceCap: true } : {}), ...(heroes.some(h => HEROES[h].extra) ? { allHeroes: true } : {}) };
 }
 
 export function loadTestConfig(): TestConfig {

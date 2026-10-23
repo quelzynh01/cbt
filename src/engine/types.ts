@@ -221,7 +221,8 @@ export interface GameState {
   /** Títulos de campanha por Guilda. */
   titles?: Partial<Record<GuildId, string[]>>;
   /** Campos de minas das Bombas. */
-  mines?: { cell: Cell; guild: GuildId; dice: number }[];
+  /** card: a carta que criou o campo de minas (a arte aparece no chão). */
+  mines?: { cell: Cell; guild: GuildId; dice: number; card?: string }[];
   /** Heróis já ativados neste turno (para a Bênção de Hobsbawm). */
   activatedThisTurn?: string[];
   /** Último Herói ativado de cada Guilda (a câmera volta nele quando a vez é sua). */

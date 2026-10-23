@@ -259,9 +259,39 @@ export class Controller {
     this.onIdle();
     // 1º cenário da campanha: o jogador inicial é sorteado (p.14) — a roleta mostra quem começa
     if (info.roulette && !info.resume) this.rouletteFor(this.game);
+    this.announceTitles();
   }
 
   private rouletteShown = '';
+
+  /** Segurando Alt: a carta do personagem embaixo do mouse (como a lupa), troca ao passar em outro e fecha ao soltar. */
+  private altHeld = false;
+  private altPeek() {
+    if (!this.game || !this.altHeld) return;
+    const id = this.renderer.pickUnit(this.mouse.x, this.mouse.y);
+    const u = id ? this.game.unit(id) : null;
+    if (u && u.alive) this.hud.peekCard(u.id);
+    else this.hud.closePeek();
+  }
+
+  /** Começo da partida: mostra para todos quem tem Título com vantagem neste mapa (depois do carregamento e da roleta). */
+  private advShown = '';
+  private announceTitles() {
+    const g = this.game;
+    if (!g || g.s.turn !== 1 || !g.s.deploying?.length) return;
+    const list = g.guilds().map(x => ({ name: this.hud.nameOf(x.id) ?? guildShort(x.id), color: x.color, titles: g.activeTitles(x.id) })).filter(x => x.titles.length);
+    if (!list.length) return;
+    // online: uma vez por cenário (reconectar não mostra de novo)
+    const k = `${this.lobby?.code ?? ''}:${this.lobby?.scenario ?? this.campaignScenario}:${g.s.mapId}`;
+    if (this.mode !== 'local') { if (this.advShown === k) return; this.advShown = k; }
+    const run = () => {
+      if (this.game !== g) return;
+      if (this.assetsLoading) { this.afterLoad.push(run); return; }
+      if (document.getElementById('roulette') || document.getElementById('maploading')) { setTimeout(run, 400); return; }
+      this.hud.showAdvantage(list);
+    };
+    setTimeout(run, 500);
+  }
 
   /** Carregando a arte da partida (tela do mapa): a IA e a roleta esperam. */
   private assetsLoading = false;
@@ -307,6 +337,7 @@ export class Controller {
     this.game = Game.create(getMap(cfg.mapId), {
       seed,
       players: cfg.teams.map((t, i) => ({ guild: t.guild, controller: t.controller, name: t.name, heroes: i === 0 ? cfg.heroes : undefined, cards: i === 0 ? cfg.cards : undefined, curses: i === 0 ? cfg.curses : undefined })),
+      titles: cfg.titles,
       fixedOrder: true,
       deploy: true,
       diceCap: !!cfg.diceCap,
@@ -325,6 +356,7 @@ export class Controller {
     this.updateTestPanel();
     document.getElementById('gameover')?.remove();
     this.onIdle();
+    this.announceTitles();
   }
 
   // ------------------------------------------------------------------
@@ -699,6 +731,7 @@ export class Controller {
     else this.hud.banner(`Vez ${daTime(this.game.currentGuild().id)}`, this.game.currentGuild().color, this.isMine(this.game.currentGuild().id) ? 'Sua vez!' : 'Partida online');
     this.updateOnlinePanel();
     this.renderer.reset();
+    this.announceTitles();
   }
 
   /** Eventos da sessão durante a partida. */
@@ -1210,7 +1243,7 @@ export class Controller {
           setCursor(canvas, 'grabbing');
         }
       }
-      if (this.game) this.updateHover();
+      if (this.game) { this.updateHover(); if (e.altKey || this.altHeld) { this.altHeld = true; this.altPeek(); } }
       else if (!this.drag) setCursor(canvas, 'default');
     });
     canvas.addEventListener('pointerup', e => {
@@ -1240,8 +1273,17 @@ export class Controller {
       e.preventDefault();
       this.renderer.zoomAt(e.clientX, e.clientY, e.deltaY < 0 ? 1.1 : 1 / 1.1);
     }, { passive: false });
-    window.addEventListener('keyup', e => { this.panKeys.delete(e.code); });
-    window.addEventListener('blur', () => this.panKeys.clear());
+    window.addEventListener('keyup', e => {
+      this.panKeys.delete(e.code);
+      // Alt: solta = fecha a carta aberta pelo mouse (e não deixa o navegador ir para o menu)
+      if (e.key === 'Alt') { e.preventDefault(); this.altHeld = false; this.hud.closePeek(); }
+    });
+    window.addEventListener('blur', () => { this.panKeys.clear(); this.altHeld = false; this.hud.closePeek(); });
+    window.addEventListener('keydown', e => {
+      if (e.key !== 'Alt') return;
+      e.preventDefault();
+      if (!this.altHeld) { this.altHeld = true; this.altPeek(); }
+    });
     window.addEventListener('keydown', e => {
       if (!this.game) return;
       // só campos de texto (chat, nomes) ficam com as teclas; controles de volume e caixas de marcar não travam o WASD

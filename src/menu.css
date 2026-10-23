@@ -532,3 +532,9 @@
 .ts-curses { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; }
 .ts-curse { display: grid; gap: 4px; padding: 8px; border-radius: 10px; background: rgba(0,0,0,.2); border: 1px solid var(--line); }
 .ts-curse small { color: var(--muted); font-size: 12px; }
+/* Modo Teste: Títulos */
+.ts-titles { display: grid; gap: 8px; }
+.ts-tteam { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 8px; border-left: 4px solid var(--gc); border-radius: 8px; background: rgba(0,0,0,.2); }
+.ts-tteam > b { color: var(--gc); min-width: 110px; }
+.ts-tchip { display: inline-flex; gap: 4px; align-items: center; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); cursor: pointer; font-size: 13px; }
+.ts-tchip.on { border-color: var(--gold); background: rgba(255,200,80,.15); }

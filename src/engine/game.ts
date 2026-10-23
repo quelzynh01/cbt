@@ -1266,7 +1266,7 @@ export class Game {
     if (fx.bomb && atk.successes > 0) {
       const c0 = targetCells.get(target.id)!;
       const cells = [c0, ...this.board.neighbors(c0).filter(nb => this.board.isClose(c0, nb))];
-      this.s.mines = [...(this.s.mines ?? []).filter(m => m.guild !== h.guild), ...cells.map(cell => ({ cell, guild: h.guild!, dice: def.dice }))];
+      this.s.mines = [...(this.s.mines ?? []).filter(m => m.guild !== h.guild), ...cells.map(cell => ({ cell, guild: h.guild!, dice: def.dice, card: def.id }))];
       this.log(`Campo de minas da ${this.guild(h.guild!).name} em ${cells.length} Espaços!`);
     }
     // curas

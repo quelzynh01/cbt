@@ -86,7 +86,7 @@ export class BattlePanel {
     const g = this.deps.game();
     const def = g.defenseDice(u);
     const rr = u.kind === 'hero' ? g.rerollsOf(u) : (g.monDef(u).rerolls ?? 0);
-    return `${medal('hp', hp, `Vida atual: ${hp}`, 'bm-hp')}${def > 0 ? medal('def', def, `${def} dado${def === 1 ? '' : 's'} de Defesa`, 'bm-def') : `<span class="bm-zero" title="Sem dados de Defesa"><img src="${import.meta.env.BASE_URL}bonus/def1.webp" alt=""/><b>0</b></span>`}${rr ? medal('rr', rr, `Rerrolagem ${rr}`) : ''}`;
+    return `${hp > 0 ? medal('hp', hp, `Vida atual: ${hp}`, 'bm-hp') : ''}${def > 0 ? medal('def', def, `${def} dado${def === 1 ? '' : 's'} de Defesa`, 'bm-def') : ''}${rr ? medal('rr', rr, `Rerrolagem ${rr}`) : ''}`;
   }
 
   private mountFighters(a: Unit, b: Unit) {

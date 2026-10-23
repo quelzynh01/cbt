@@ -35,6 +35,15 @@ export const VIVEIRO_DAS_AGUIAS: MapDef = {
     [C(3, 3), C(2, 3)], [C(3, 3), C(4, 3)], [C(3, 3), C(3, 4)],
     // sala com os marcadores Verde e Vermelho
     [C(5, 2), C(4, 2)], [C(5, 2), C(6, 2)], [C(5, 2), C(5, 1)],
+    // Feral Martelador nos cantos: quadrado fechado, só se chega pelo portal
+    [C(8, 0), C(7, 0)], [C(8, 0), C(8, 1)],
+    [C(0, 5), C(1, 5)], [C(0, 5), C(0, 4)],
+    // decks de madeira fechados
+    [C(6, 0), C(5, 0)], [C(6, 0), C(7, 0)], [C(6, 0), C(6, 1)],
+    [C(7, 2), C(7, 1)], [C(7, 2), C(6, 2)], [C(7, 2), C(7, 3)],
+    [C(3, 5), C(2, 5)], [C(3, 5), C(4, 5)], [C(3, 5), C(3, 4)],
+    // canto de cima à esquerda
+    [C(0, 0), C(0, 1)], [C(1, 0), C(1, 1)],
   ],
 
   doors: [

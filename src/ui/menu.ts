@@ -1,6 +1,7 @@
 import type { MapDef } from '../engine/board';
 import { EXTRA_HEROES } from '../engine/extraHeroes';
-import { key } from '../engine/board';
+import { key, mapTitlesOf } from '../engine/board';
+import type { GuildId } from '../engine/types';
 import { ALL_HEROES, BTG_HEROES, CARDS, HEROES, MONSTERS, TEST_HUMAN_HEROES, distributeStartingGear, EXTRA_HERO_IDS } from '../engine/data';
 import { TOMBSTONES } from '../engine/tombstones';
 import { BTG_MAP_IDS, CAMPAIGN, CAMPAIGN_BTG, MAPS, difficultyBadge, getMap, loadMapId, mapDifficulty, saveMapId } from '../engine/maps';
@@ -216,7 +217,15 @@ export class MenuPages {
       <section class="ts-sec ts-wide"><h3>5. Maldições <small>(opcional)</small></h3>
         <div class="ts-curses">${c.heroes.map(h => `<label class="ts-curse"><b>${HEROES[h].name}</b> <select data-tcurse="${h}">${Object.values(CURSES).map(k => `<option value="${k.id}" ${(c.curses?.[h] ?? 'sem_maldicao') === k.id ? 'selected' : ''} title="${k.text.replace(/"/g, '&quot;')}">☠ ${k.name}</option>`).join('')}</select>
           <small>${c.curses?.[h] ? CURSES[c.curses[h]].text : ''}</small></label>`).join('')}</div></section>
-      <section class="ts-sec ts-wide"><h3>6. Configurações da partida</h3>
+      <section class="ts-sec ts-wide"><h3>6. Títulos <small>(vantagem neste mapa)</small></h3>
+        ${(() => {
+          const here = mapTitlesOf(m);
+          if (!here.length) return '<p class="ts-help">Este mapa não tem Títulos com vantagem. Escolha outro mapa para testar Títulos.</p>';
+          return `<div class="ts-titles">${c.teams.map(t => `<div class="ts-tteam" style="--gc:${GUILDS[t.guild].color}"><b>${t.name || GUILDS[t.guild].name.split(' (')[0]}</b>
+            ${here.map(id => `<label class="ts-tchip ${(c.titles?.[t.guild] ?? []).includes(id) ? 'on' : ''}" title="${(TITLE_TEXT[id] ?? '').replace(/"/g, '&quot;')}"><input type="checkbox" data-ttitle="${t.guild}:${id}" ${(c.titles?.[t.guild] ?? []).includes(id) ? 'checked' : ''}/> 🏅 ${TITLES[id] ?? id}</label>`).join('')}</div>`).join('')}</div>
+            <p class="ts-help">${here.map(id => `<b>${TITLES[id] ?? id}:</b> ${TITLE_TEXT[id] ?? ''}`).join('<br/>')}</p>`;
+        })()}</section>
+      <section class="ts-sec ts-wide"><h3>7. Configurações da partida</h3>
         <label class="set-opt"><input type="checkbox" id="ts-cap" ${c.diceCap ? 'checked' : ''}/> <b>Limite de dados</b> — no máximo 8 dados de ataque e 6 de defesa por rolagem (contando críticos e rerrolagens), como os dados físicos da caixa. Sem marcar, os dados são ilimitados.</label></section>
       <div class="ts-go"><button class="primary" id="ts-start">▶ Começar teste</button></div>
     </div>`);
@@ -262,6 +271,13 @@ export class MenuPages {
       this.tsSlot = (slot + 1) % 3;
       this.test = c;
       save();
+    }; });
+    this.page.querySelectorAll<HTMLInputElement>('[data-ttitle]').forEach(cb => { cb.onchange = () => {
+      const [gid, id] = cb.dataset.ttitle!.split(':') as [GuildId, string];
+      const ts = { ...(c.titles ?? {}) };
+      const cur = (ts[gid] ?? []).filter(x => x !== id);
+      ts[gid] = cb.checked ? [...cur, id] : cur;
+      c.titles = ts; save();
     }; });
     this.page.querySelectorAll<HTMLSelectElement>('[data-tcurse]').forEach(sel => { sel.onchange = () => {
       const cs = { ...(c.curses ?? {}) };

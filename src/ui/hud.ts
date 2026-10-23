@@ -8,7 +8,7 @@ import { play, playOnce } from '../audio/sfx';
 import { soundWidget } from '../audio/widget';
 import { drawFace, getArtVersion } from '../render/chibi';
 import { CURSES } from '../engine/cards';
-import { ITEM_LEVEL, itemArt, richText, bonusImg, curseCard, medal, heroCard, itemCard, itemColor, monsterCard, paintCardArt } from './cardview';
+import { ITEM_LEVEL, itemArt, richText, bonusImg, medal, heroCard, itemCard, itemColor, monsterCard, paintCardArt } from './cardview';
 import { getSettings, onSettings, saveSettings } from './settings';
 import { CARD_ART } from './cardArt';
 
@@ -376,7 +376,7 @@ export class Hud {
       return `<div class="sb-team ${id === cur.id && !g.s.winner ? 'cur' : ''} ${hot ? 'hot' : ''}" style="--gc:${gs.color}">
         <div class="sb-heroes">${g.heroesOf(id).map(h => face(h, gs.color, mine)).join('')}</div>
         <div class="sb-info"><b>${guildShort(id)}</b><span title="Missões cumpridas">🏆 ${shown}/${g.s.missionsToWin}</span><span title="Moedas">🪙 ${g.wealth(id)}</span><span title="Mortes de Heróis da Guilda neste cenário">☠ ${g.heroesOf(id).reduce((n, h) => n + h.deaths, 0)}</span></div>
-        ${g.activeTitles(id).map(t => `<button class="sb-title" data-title="${t}" title="${TITLES[t] ?? t}: clique para ver a vantagem neste mapa">🏅 ${TITLES[t] ?? t} <span class="mt-ex">!</span></button>`).join('')}</div>`;
+        ${g.activeTitles(id).length ? `<div class="sb-titles">${g.activeTitles(id).map(t => `<button class="sb-title" data-title="${t}" title="${TITLES[t] ?? t}: clique para ver a vantagem neste mapa">🏅 ${TITLES[t] ?? t} <span class="mt-ex">!</span></button>`).join('')}</div>` : ''}</div>`;
     };
     const who = g.s.winner ? 'Fim do cenário' : myTurn ? '<span class="sb-you">Sua vez!</span>' : cur.controller === 'ai' ? `Vez da IA · ${guildShort(cur.id)}` : `Vez de ${this.nameOf(cur.id) ?? guildShort(cur.id)}`;
     const others = g.s.guildOrder.filter(id => id !== mineId);
@@ -508,6 +508,20 @@ export class Hud {
   portraitOf(u: Unit): string { return this.portrait(u.defId, u.guild ? this.game.guild(u.guild).color : '#4a3a5a'); }
   get confirming() { return !$('#confirmbox', this.root).classList.contains('hidden'); }
 
+  /** Começo da partida: quem tem Título com vantagem neste mapa (todos veem). */
+  showAdvantage(list: { name: string; color: string; titles: string[] }[]) {
+    document.getElementById('advbox')?.remove();
+    const el = document.createElement('div');
+    el.id = 'advbox';
+    el.innerHTML = `<div class="adv-box"><div class="adv-h">🏅 Vantagem neste mapa</div>
+      ${list.map(x => `<div class="adv-row" style="--gc:${x.color}"><b>${x.name}</b>${x.titles.map(t => `<div class="adv-t"><span>${TITLES[t] ?? t}</span><small>${TITLE_TEXT[t] ?? ''}</small></div>`).join('')}</div>`).join('')}
+      <button class="primary adv-ok">Entendi</button></div>`;
+    this.root.append(el);
+    const close = () => el.remove();
+    (el.querySelector('.adv-ok') as HTMLElement).onclick = close;
+    el.onpointerdown = e => { if (e.target === el) close(); };
+  }
+
   /** Carta de Recompensa (ou Título) que a Missão dá: aparece na tela até fechar no ✕. */
   showPrize(m: { name: string; reward?: boolean; title?: string }) {
     const g = this.game;
@@ -564,6 +578,9 @@ export class Hud {
     const g = this.game;
     const u = g.unit(id);
     const box = $('#cardview', this.root);
+    // aberta pela lupa: carta normal (o Alt marca de novo depois, em peekCard)
+    this.peeking = false;
+    box.classList.remove('peek');
     this.cardOpen = id;
     let body: string;
     if (u.kind === 'monster') {
@@ -591,7 +608,8 @@ export class Hud {
           ${atk.notes.length ? `<div class="muted">${atk.notes.join(' · ')}</div>` : ''}
         </div>
         <h4>Cartas</h4>
-        <div class="cv-items">${u.cards.map(c => itemCard(c.defId, c.exhausted ? 'disc' : '', '', false, atk.n)).join('') || '<i class="muted">Sem cartas</i>'}${u.curse ? curseCard(u.curse) : ''}</div>`;
+        <div class="cv-items">${u.cards.map(c => itemCard(c.defId, c.exhausted ? 'disc' : '', '', false, atk.n)).join('') || '<i class="muted">Sem cartas</i>'}</div>
+        ${u.curse && CURSES[u.curse] ? `<div class="hb-cursetxt">☠ <b>${CURSES[u.curse].name}</b> — ${CURSES[u.curse].text}${u.covered ? ` · cobre <b>${CARDS[u.covered.defId].name}</b>` : ''}</div>` : ''}`;
     }
     box.innerHTML = `<div class="cv-box"><button class="cv-x" title="Fechar (Esc)">✕</button>${body}</div>`;
     box.classList.remove('hidden');
@@ -633,7 +651,18 @@ export class Hud {
   closeBag() { this.bagOpen = null; $('#bagview', this.root).classList.add('hidden'); }
   get bagIsOpen() { return !!this.bagOpen; }
 
-  closeCard() { this.cardOpen = null; $('#cardview', this.root).classList.add('hidden'); }
+  closeCard() { this.cardOpen = null; this.peeking = false; const b = $('#cardview', this.root); b.classList.add('hidden'); b.classList.remove('peek'); }
+
+  /** Carta aberta segurando Alt (não bloqueia o mouse: dá para passar em outro personagem). */
+  private peeking = false;
+  peekCard(id: string) {
+    if (this.cardOpen && !this.peeking) return; // já tem uma carta aberta pela lupa
+    if (this.peeking && this.cardOpen === id) return;
+    this.showCard(id);
+    this.peeking = true;
+    $('#cardview', this.root).classList.add('peek');
+  }
+  closePeek() { if (this.peeking) this.closeCard(); }
 
   // ------------------------------------------------------------------
   /** Marcador pego: aparece no centro da tela com o verso (?) virando para a face. Vários seguidos entram na fila. */
@@ -744,8 +773,11 @@ export class Hud {
       return `<div class="cem-slot" title="${md.name}"><img src="${this.portrait(md.id, '#4a3a5a')}"/><span>${md.abbr}</span></div>`;
     }).join('');
     const full = this.cem.length >= 5;
+    // falta 1 Monstro para a Entrada de Monstros: a borda do Cemitério fica em destaque (e cheio também)
+    const near = this.cem.length === 4;
+    $('#cembox', this.root).classList.toggle('cem-near', near || full);
     $('#cemetery', this.root).innerHTML = `<div class="cem-row">${slots}</div>
-      <div class="cem-info ${full ? 'full' : ''}">${full ? '☠ Cheio! Os monstros revivem no fim deste turno.' : `${this.cem.length}/5 — com 5 (ou mapa sem monstros) eles revivem.`}</div>`;
+      <div class="cem-info ${full ? 'full' : near ? 'near' : ''}">${full ? '☠ Cheio! Os monstros revivem no fim deste turno.' : near ? '⚠ Falta 1 Monstro para a Entrada de Monstros!' : `${this.cem.length}/5 — com 5 (ou mapa sem monstros) eles revivem.`}</div>`;
   }
 
   /** Janela de Entrada de Monstros: rolagem de 2 dados por monstro. */
@@ -866,7 +898,7 @@ export class Hud {
       box.innerHTML = `<div class="hb-c1">
         <div class="hb-head"><img src="${this.portrait(u.defId, '#7a2b8f')}"/><div><div class="hb-name">${md.name}</div><div class="hb-sub">${md.category} · Nível ${md.level}</div></div><button class="lupa" id="hb-card" title="Ver a carta com os valores atuais">🔍</button><button class="x" id="hb-close">✕</button></div>
         <div class="stats hb-meds">
-          ${u.alive && md.hp - u.wounds > 0 ? medal('hp', md.hp - u.wounds, `Vida: ${md.hp - u.wounds} de ${md.hp}`, `hbm${u.wounds ? ' down' : ''}`) : `<span class="hbm-zero" title="Sem Vida"><img src="${import.meta.env.BASE_URL}bonus/hp1.webp" alt=""/><b>0</b></span>`}
+          ${u.alive && md.hp - u.wounds > 0 ? medal('hp', md.hp - u.wounds, `Vida: ${md.hp - u.wounds} de ${md.hp}`, `hbm${u.wounds ? ' down' : ''}`) : ''}
           ${Number.isFinite(md.exterm) && md.exterm > 0 ? medal('skull', md.exterm, `Extermínio: ${md.exterm} Ferimentos num só ataque matam sem Vingança`, 'hbm') : ''}
           ${g.defenseDice(u) > 0 ? medal('def', g.defenseDice(u), `${g.defenseDice(u)} dado${g.defenseDice(u) === 1 ? '' : 's'} de Defesa`, `hbm${g.defenseDice(u) > md.defense ? ' up' : g.defenseDice(u) < md.defense ? ' down' : ''}`) : ''}
           ${g.rerollsOf(u) > 0 ? medal('rr', g.rerollsOf(u), `Rerrolagem ${g.rerollsOf(u)}`, 'hbm') : ''}
@@ -901,8 +933,8 @@ export class Hud {
         ${this.inspected ? '<button class="x" id="hb-close">✕</button>' : ''}
       </div>
       <div class="stats hb-meds">
-        ${u.alive && max - u.wounds > 0 ? medal('hp', max - u.wounds, `Vida: ${max - u.wounds} de ${max} (carta: ${hd.hp})`, 'hbm') : `<span class="hbm-zero" title="Sem Vida"><img src="${import.meta.env.BASE_URL}bonus/hp1.webp" alt=""/><b>0</b></span>`}
-        ${g.defenseDice(u) > 0 ? medal('def', g.defenseDice(u), `${g.defenseDice(u)} dado${g.defenseDice(u) === 1 ? '' : 's'} de Defesa (carta: ${hd.defense})`, 'hbm') : `<span class="hbm-zero" title="Sem dados de Defesa"><img src="${import.meta.env.BASE_URL}bonus/def1.webp" alt=""/><b>0</b></span>`}
+        ${u.alive && max - u.wounds > 0 ? medal('hp', max - u.wounds, `Vida: ${max - u.wounds} de ${max} (carta: ${hd.hp})`, 'hbm') : ''}
+        ${g.defenseDice(u) > 0 ? medal('def', g.defenseDice(u), `${g.defenseDice(u)} dado${g.defenseDice(u) === 1 ? '' : 's'} de Defesa (carta: ${hd.defense})`, 'hbm') : ''}
         ${g.rerollsOf(u) ? medal('rr', g.rerollsOf(u), `Rerrolagem ${g.rerollsOf(u)}`, 'hbm') : ''}
         ${u.deaths ? medal('skull', u.deaths, `Morreu ${u.deaths} vez${u.deaths === 1 ? '' : 'es'} neste cenário`, 'hbm') : ''}
         ${isActive ? (g.freeMode ? '<span class="mp" title="Modo Livre">👣 ∞</span>' : `<span class="mp" title="Pontos de Movimento">👣 ${[0, 1, 2].map(i => `<i class="${i < act!.mp && !act!.moveLocked ? 'on' : ''}"></i>`).join('')}</span>`) : ''}
@@ -915,13 +947,13 @@ export class Hud {
       ${u.banished ? '<div class="tag dead">👻 Banido — está no Tabuleiro de Entrada (volta na Entrada de Monstros ou ao Descansar)</div>' : ''}
       ${g.s.copied?.heroId === u.id ? `<div class="tag rr">🐒 Copiou: <b>${Object.values(HEROES).find(x => x.ability === g.s.copied!.ability)?.abilityName ?? ''}</b> (até o fim do turno)</div>` : ''}
       ${u.petrified ? `<div class="tag stun">🗿 Petrificado: −${u.petrified} de Movimento até Descansar</div>` : ''}
-      ${u.curse ? `<div class="ability curse-ab" title="${CURSES[u.curse]?.text ?? ''}"><b>☠ ${CURSES[u.curse]?.name}</b> — ${CURSES[u.curse]?.text}</div>` : ''}
+      ${u.curse && !curseSlot ? `<div class="ability curse-ab" title="${CURSES[u.curse]?.text ?? ''}"><b>☠ ${CURSES[u.curse]?.name}</b> — ${CURSES[u.curse]?.text}</div>` : ''}
       ${u.stunned ? '<div class="tag stun">✷ Atordoado — não rola Defesa até Descansar</div>' : ''}
       ${!u.alive ? '<div class="tag dead">☠ Morto — ressuscita quando a Guilda Descansar</div>' : ''}
       ${u.spent ? '<div class="tag stun">💤 Exausto — não usa de novo as cartas e habilidades que exaurem o Herói até a Guilda Descansar</div>' : ''}
       </div><div class="hb-c3">
-      <div class="cards">${cards.map(c => this.cardHtml(c, u, usableIds, mine || (human && this.isMine(u.guild!)))).join('')}${curseSlot ? `<div class="card mini curse-slot ${mine && u.covered ? 'can-cover' : ''}" ${mine && u.covered ? 'id="hb-cover"' : ''} title="${mine && u.covered ? 'Clique para escolher qual carta fica debaixo da Maldição. ' : ''}${CURSES[u.curse!].name}: ${CURSES[u.curse!].text}${u.covered ? ` Debaixo dela: ${CARDS[u.covered.defId].name} (indisponível até uma Poção de Cura).` : ''}">
-        <div class="cname">☠ ${CURSES[u.curse!].name}</div><div class="cart">${curseArt(u.curse!)}</div>${u.covered ? `<div class="ccov">cobre: ${CARDS[u.covered.defId].name}</div>` : '<div class="ccov">Maldição</div>'}</div>` : ''}</div>
+      ${curseSlot ? `<div class="hb-cursetxt ${mine && u.covered ? 'can-cover' : ''}" ${mine && u.covered ? 'id="hb-cover"' : ''} title="${mine && u.covered ? 'Clique para escolher qual carta fica debaixo da Maldição. ' : ''}${CURSES[u.curse!].text}">☠ <b>${CURSES[u.curse!].name}</b> — ocupa 1 espaço${u.covered ? ` · cobre <b>${CARDS[u.covered.defId].name}</b>${mine ? ' <u>trocar</u>' : ''}` : ''}</div>` : ''}
+      <div class="cards">${cards.map(c => this.cardHtml(c, u, usableIds, mine || (human && this.isMine(u.guild!)))).join('')}</div>
       <div class="tokrow"><button class="tok-bag" id="hb-bag2" title="Abrir a bolsa">🎒</button>${u.tokens.length ? `${sortTokens(u.tokens).slice(0, 3).map(t => `<img class="tok-mini" src="${tokenUrl(tokenImageId(t) ?? 'fundo')}" title="${tokenName(t)}"/>`).join('')}${u.tokens.length > 3 ? `<span class="tok-more">+${u.tokens.length - 3}</span>` : ''}` : '<span class="muted">Bolsa vazia</span>'}</div></div>
       ${actions}`;
     if (this.inspected) $('#hb-close', box).onclick = () => this.actions.inspect(null);

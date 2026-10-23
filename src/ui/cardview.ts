@@ -180,7 +180,7 @@ export function heroCard(id: string, extra = '', attrs = '', foot = '', badge = 
     ${h.rating ? ratingBadge(h.rating) : ''}${title(h.name, h.title)}
     <div class="hc-body">
       <div class="hc-left">
-        <div class="hc-meds">${medal('def', def, diff(def, h.defense, 'Defesa'), `big${cmp(def, h.defense)}`)}${medal('hp', hp, live ? `Vida atual: ${hp}/${live.maxHp ?? h.hp} (carta: ${h.hp})` : 'Vida', `big${cmp(hp, h.hp)}`)}${rr ?medal('rr', rr, `Rerrolagem: ${rr}`, `big${cmp(rr, 0)}`) : ''}${live?.atk ?medal('melee', live.atk, `+${live.atk} dado(s) em todos os ataques`, 'big up') : ''}</div>
+        <div class="hc-meds">${def > 0 ? medal('def', def, diff(def, h.defense, 'Defesa'), `big${cmp(def, h.defense)}`) : ''}${hp > 0 ? medal('hp', hp, live ? `Vida atual: ${hp}/${live.maxHp ?? h.hp} (carta: ${h.hp})` : 'Vida', `big${cmp(hp, h.hp)}`) : ''}${rr ?medal('rr', rr, `Rerrolagem: ${rr}`, `big${cmp(rr, 0)}`) : ''}${live?.atk ?medal('melee', live.atk, `+${live.atk} dado(s) em todos os ataques`, 'big up') : ''}</div>
         <div class="ac-ribbon"><small>Habilidade</small><b>${h.abilityName}</b></div>
         ${h.extra ? `<div class="ac-text ${textSize(h.abilityText)} ${/^\{/.test(h.abilityText) ? 'has-row' : ''}">${heroText(h.abilityText)}</div>`
           : `<div class="ac-text ${textSize(h.abilityText)}"><p>${richText(h.abilityText)}${h.implemented === false ? ' <i>(a confirmar)</i>' : ''}</p></div>`}
@@ -203,7 +203,7 @@ export function extraHeroCard(h: { id: string; name: string; def: number; hp: nu
     ${rating ? ratingBadge(rating) : ''}${title(h.name, 'Herói Extra')}
     <div class="hc-body">
       <div class="hc-left">
-        <div class="hc-meds">${h.def > 0 ? medal('def', h.def, 'Defesa', 'big') : `<span class="med def big" title="Defesa"><b>0</b></span>`}${medal('hp', h.hp, 'Vida', 'big')}</div>
+        <div class="hc-meds">${h.def > 0 ? medal('def', h.def, 'Defesa', 'big') : ''}${h.hp > 0 ? medal('hp', h.hp, 'Vida', 'big') : ''}</div>
         <div class="ac-ribbon"><small>Habilidade</small><b>${h.ability}</b></div>
         <div class="ac-text ${textSize(h.text)} ${/^\{/.test(h.text) ? 'has-row' : ''}">${heroText(h.text)}</div>
       </div>
@@ -222,7 +222,7 @@ export function monsterCard(id: string, extra = '', attrs = '', live?: LiveStats
   return `<div class="acard monster ${extra}" style="--lv:${monsterColor(id)}" ${attrs}>${ZOOM}
     ${title(m.name, `Nível ${m.level}${villain ? ` · ${m.category}` : ''}`)}
     <div class="mc-art">
-      <div class="mc-meds">${medal('hp', hp, live ? `Vida atual: ${hp}/${m.hp}` : `Vida ${m.hp}`, cmp(hp, m.hp))}${Number.isFinite(m.exterm) ? medal('skull', m.exterm, `Extermínio: ${m.exterm} Ferimentos num só ataque matam sem Vingança`) : ''}${m.defense || def ?medal('def', def, diff(def, m.defense, 'Defesa'), cmp(def, m.defense)) : ''}${m.rerolls || rr ?medal('rr', rr, diff(rr, m.rerolls, 'Rerrolagem'), cmp(rr, m.rerolls)) : ''}</div>
+      <div class="mc-meds">${hp > 0 ? medal('hp', hp, live ? `Vida atual: ${hp}/${m.hp}` : `Vida ${m.hp}`, cmp(hp, m.hp)) : ''}${Number.isFinite(m.exterm) ? medal('skull', m.exterm, `Extermínio: ${m.exterm} Ferimentos num só ataque matam sem Vingança`) : ''}${def > 0 ? medal('def', def, diff(def, m.defense, 'Defesa'), cmp(def, m.defense)) : ''}${rr > 0 ? medal('rr', rr, diff(rr, m.rerolls, 'Rerrolagem'), cmp(rr, m.rerolls)) : ''}</div>
       ${medal('coin', m.reward, `Recompensa: ${m.reward} moeda(s)`, 'mc-coin')}
       <canvas width="320" height="328" data-art="${id}"></canvas>
     </div>

@@ -318,6 +318,38 @@ export const CARD_ART: Record<string, { img: string; kind: 'fill' | 'icon' }> = 
     "img": "rouba_vidas",
     "kind": "icon"
   },
+  "tomo_iluminacao": {
+    "img": "tomo_iluminacao",
+    "kind": "icon"
+  },
+  "coroa_sangue": {
+    "img": "coroa_sangue",
+    "kind": "icon"
+  },
+  "saco_ossos": {
+    "img": "saco_ossos",
+    "kind": "icon"
+  },
+  "maldicao_peles_verdes": {
+    "img": "maldicao_peles_verdes",
+    "kind": "fill"
+  },
+  "quebra_cranio": {
+    "img": "quebra_cranio",
+    "kind": "icon"
+  },
+  "lanca_feral": {
+    "img": "lanca_feral",
+    "kind": "icon"
+  },
+  "machado_schmetterling": {
+    "img": "machado_schmetterling",
+    "kind": "icon"
+  },
+  "manto_assassino": {
+    "img": "manto_assassino",
+    "kind": "icon"
+  },
   "curse:sem_maldicao": {
     "img": "curse_sem_maldicao",
     "kind": "icon"

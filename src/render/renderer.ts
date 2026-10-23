@@ -2,6 +2,7 @@ import { entryPlaque } from './dice';
 import { getSettings } from '../ui/settings';
 import { play, playOnce, type Sfx } from '../audio/sfx';
 import { CARDS } from '../engine/cards';
+import { CARD_ART } from '../ui/cardArt';
 import { drawTokenImage, tokenImage, tokenImageId } from './tokens';
 import { key, sameCell } from '../engine/board';
 import { GUILDS, MONSTERS } from '../engine/data';
@@ -1097,6 +1098,25 @@ export class Renderer {
     for (const mn of this.game.s.mines ?? []) {
       const q = g2s(mn.cell.c + 0.7, mn.cell.r + 0.72);
       const col = GUILDS[mn.guild].color;
+      const art = mn.card ? cardIcon(mn.card) : null;
+      if (art) {
+        // a arte da carta (a própria bomba) deitada no chão, com uma aura na cor da Guilda
+        ctx.save(); ctx.translate(q.x, q.y);
+        const pulse = 0.5 + 0.5 * Math.sin(tt * 3 + mn.cell.c + mn.cell.r);
+        const rgb = hexRgb(col);
+        ctx.save(); ctx.scale(1, 0.5);
+        const glow = ctx.createRadialGradient(0, 0, 4, 0, 0, 48);
+        glow.addColorStop(0, `rgba(${rgb},${0.75 + 0.2 * pulse})`); glow.addColorStop(0.6, `rgba(${rgb},0.35)`); glow.addColorStop(1, `rgba(${rgb},0)`);
+        ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(0, 0, 48, 0, Math.PI * 2); ctx.fill();
+        ctx.lineWidth = 4; ctx.strokeStyle = `rgba(${rgb},${0.6 + 0.4 * pulse})`; ctx.beginPath(); ctx.arc(0, 0, 34, 0, Math.PI * 2); ctx.stroke();
+        ctx.restore();
+        // do tamanho de um Herói
+        const h = 84, w = h * art.width / art.height;
+        ctx.shadowColor = col; ctx.shadowBlur = 8 + pulse * 6;
+        ctx.drawImage(art, -w / 2, -h + 4, w, h);
+        ctx.restore();
+        continue;
+      }
       ctx.save(); ctx.translate(q.x, q.y);
       ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.ellipse(0, 4, 16, 6, 0, 0, 7); ctx.fill();
       ctx.fillStyle = '#2a2a2a'; ctx.strokeStyle = col; ctx.lineWidth = 3;
@@ -1276,12 +1296,9 @@ export class Renderer {
             ctx.fillStyle = 'rgba(70,120,30,0.5)';
             ctx.beginPath(); ctx.ellipse(p.x, p.y, 10, 4, 0, 0, Math.PI * 2); ctx.fill();
           }
-          const p = g2s(c.c + 0.5, c.r + 0.5, 30);
-          const v = i % 4;
-          if (v === 0) { drawCrates(ctx, c.c + 0.38, c.r + 0.42, 30); drawCrates(ctx, c.c + 0.66, c.r + 0.62, 30); }
-          else if (v === 1) { drawMushroom(ctx, p.x - 50, p.y + 10, 2.2); drawMushroom(ctx, p.x + 60, p.y - 8, 1.4, '#e07b2a'); }
-          else if (v === 2) { drawBush(ctx, p.x - 40, p.y + 6, 2.0, '#5f9e2e', 1); drawBush(ctx, p.x + 60, p.y - 10, 1.3, '#6aa832', 0); }
-          else { drawBush(ctx, p.x - 50, p.y + 2, 1.6, '#6aa832', 0); drawCrates(ctx, c.c + 0.66, c.r + 0.62, 30); }
+          // só caixotes (sem cogumelos nem arbustos)
+          if (i % 2 === 0) { drawCrates(ctx, c.c + 0.38, c.r + 0.42, 30); drawCrates(ctx, c.c + 0.66, c.r + 0.62, 30); }
+          else drawCrates(ctx, c.c + 0.55, c.r + 0.55, 30);
           ctx.restore();
         },
       });
@@ -1496,18 +1513,30 @@ export class Renderer {
     if (blink) ctx.filter = 'none';
     if (spinFx && spinFront) spinFx();
     if (u.stunned) this.drawStun(ctx, -78 * L.scale - 6, tt);
-    // Maldição: 3 caveirinhas roxas girando em volta do corpo (atrás e na frente)
-    if (cursed) {
+    // em volta do corpo, girando: 1 caveirinha roxa (Maldição) e, pequenos, os itens que o Herói carrega na bolsa
+    const bag = u.alive && u.kind === 'hero' ? this.game?.s.units[u.id]?.tokens ?? [] : [];
+    const orbit: (Token | null)[] = [...(cursed ? [null] : []), ...bag.slice(0, 6)];
+    if (orbit.length) {
       ctx.save();
       ctx.font = `900 ${Math.round(20 * L.scale)}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      for (let k = 0; k < 3; k++) {
-        const a = tt * 1.1 + k * (Math.PI * 2 / 3);
+      orbit.forEach((it, k) => {
+        const a = tt * 1.1 + k * (Math.PI * 2 / orbit.length);
         const x = Math.cos(a) * 34 * L.scale, y = -42 * L.scale + Math.sin(a) * 10 * L.scale - Math.sin(tt * 2 + k) * 6;
         ctx.globalAlpha = 0.65 + 0.35 * (Math.sin(a) + 1) / 2;
-        ctx.shadowColor = '#d58bff'; ctx.shadowBlur = 10;
-        ctx.lineWidth = 3; ctx.strokeStyle = '#2a0838'; ctx.strokeText('☠', x, y);
-        ctx.fillStyle = '#d9a3ff'; ctx.fillText('☠', x, y);
-      }
+        if (!it) {
+          ctx.shadowColor = '#d58bff'; ctx.shadowBlur = 10;
+          ctx.lineWidth = 3; ctx.strokeStyle = '#2a0838'; ctx.strokeText('☠', x, y);
+          ctx.fillStyle = '#d9a3ff'; ctx.fillText('☠', x, y);
+          ctx.shadowBlur = 0;
+          return;
+        }
+        const img = tokenImage(tokenImageId(it));
+        if (!img) return;
+        const sz = 18 * L.scale;
+        ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 4;
+        ctx.drawImage(img, x - sz / 2, y - sz / 2, sz, sz);
+        ctx.shadowBlur = 0;
+      });
       ctx.restore();
     }
     // Herói ativado: seta dourada pulando em cima da cabeça
@@ -1755,27 +1784,8 @@ export class Renderer {
   // Cenário estático (cache)
   // ---------------------------------------------------------------------
   private buildDecor() {
-    const d = this.decor = [] as typeof this.decor;
-    // atrás do mapa (topo da tela): árvores grandes
-    const back: [number, number, number][] = [[1.2, 1.0, 1.1], [2.4, 0.2, 0.9], [0.3, 2.3, 1.0], [-0.8, 1.2, 1.2], [1.0, -0.8, 1.15],
-      [4.2, -1.1, 1.0], [7.2, -1.0, 1.15], [9.6, -0.6, 1.0], [-1.0, 4.4, 1.0], [-1.1, 7.4, 1.1], [10.2, 1.6, 0.9], [-0.6, 9.8, 0.9]];
-    for (const [gx, gy, s] of back) d.push({ gx, gy, kind: 'tree', s, seed: 0 });
-    // laterais e frente: arbustos e cogumelos baixos
-    const front: [number, number, 'bush' | 'mush' | 'mushB', number][] = [
-      [2.2, 2.4, 'bush', 0.9], [1.6, 2.6, 'mush', 0.8], [0.4, 0.6, 'bush', 1.0],
-      [6.8, 6.6, 'bush', 0.85], [7.6, 7.3, 'mush', 0.9], [8.6, 6.4, 'mushB', 0.7], [6.4, 8.4, 'mushB', 0.8], [7.4, 8.8, 'bush', 0.9],
-      [9.7, 4.0, 'bush', 0.8], [9.6, 5.6, 'mush', 0.75], [4.0, 9.6, 'bush', 0.8], [5.8, 9.7, 'mushB', 0.7], [1.6, 9.7, 'mush', 0.8],
-      [9.4, 2.6, 'mushB', 0.7], [-0.4, 6.0, 'bush', 0.8],
-    ];
-    front.forEach(([gx, gy, kind, s], i) => d.push({ gx, gy, kind, s, seed: i }));
-    // nada de decoração em cima dos tabuleiros; buracos dentro do mapa ganham jardim
-    const b = this.game.board;
-    this.decor = d.filter(x => !b.exist({ c: Math.floor(x.gx), r: Math.floor(x.gy) }));
-    for (let r = 0; r < b.rows; r++) for (let c = 0; c < b.cols; c++) {
-      if (b.exist({ c, r })) continue;
-      const h = hash(c, r, 21);
-      this.decor.push({ gx: c + 0.3 + h * 0.4, gy: r + 0.3 + hash(r, c, 5) * 0.4, kind: h < 0.35 ? 'tree' : h < 0.7 ? 'bush' : 'mush', s: h < 0.35 ? 0.8 : 0.85, seed: c + r });
-    }
+    // sem árvores, arbustos e cogumelos em volta do mapa
+    this.decor = [];
   }
 
   private buildGround() {
@@ -1980,6 +1990,16 @@ export class Renderer {
 }
 
 // -----------------------------------------------------------------------------
+/** Arte de uma carta (public/cards) — para desenhar no mapa (ex.: a Bomba no chão). */
+const cardIcons = new Map<string, HTMLImageElement>();
+function cardIcon(cardId: string): HTMLImageElement | null {
+  const a = CARD_ART[cardId];
+  if (!a) return null;
+  let img = cardIcons.get(a.img);
+  if (!img) { img = new Image(); img.src = `${import.meta.env.BASE_URL}cards/${a.img}.webp`; cardIcons.set(a.img, img); }
+  return img.complete && img.naturalWidth ? img : null;
+}
+
 /** Imagens de piso dos mapas (carregam na primeira vez; `ready` redesenha o chão quando chegar). */
 const floors = new Map<string, HTMLImageElement>();
 function floorImage(id: string, ready: () => void): HTMLImageElement | null {

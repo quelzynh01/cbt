@@ -80,6 +80,15 @@ ITEMS = {
     'ragestone': ['pedra_furia'],
     'soulseeker': ['caca_almas'],
     'lifestealer': ['rouba_vidas'],
+    # cartas de Recompensa dos cenários
+    'tome-of-enlightenment': ['tomo_iluminacao'],
+    'blood-crown': ['coroa_sangue'],
+    'sack-os-bones': ['saco_ossos'],
+    'greenskin-bane': ['maldicao_peles_verdes'],
+    'skullcracker': ['quebra_cranio'],
+    'beastmans-spear': ['lanca_feral'],
+    'schmetterlings-axe': ['machado_schmetterling'],
+    'assasins-cloak': ['manto_assassino'],
     # Maldições Mortais: a 1ª imagem é a carta "Sem Maldição"; a 2ª, todas as outras
     'death-curse1': ['curse:sem_maldicao'],
     'death-curse2': ['curse:aquafobia', 'curse:choque', 'curse:sangramento', 'curse:amnesia', 'curse:sangramento_grave', 'curse:propenso', 'curse:atordoado'],

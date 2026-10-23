@@ -57,7 +57,7 @@ function statsHtml(h: string, cards: string[]): string {
   const hp = hd.hp + sum(d => d.hpBonus), def = hd.defense + sum(d => d.defBonus), rr = sum(d => d.rerolls), atk = sum(d => d.fx.rawr);
   const tag = (base: number, now: number) => now > base ? 'up' : now < base ? 'down' : '';
   return `<div class="inv-stats" title="Como o Herói fica com estas cartas">
-    ${medal('hp', hp, `Vida ${hp} (carta: ${hd.hp})`, `ism ${tag(hd.hp, hp)}`)}${def > 0 ? medal('def', def, `${def} dados de Defesa (carta: ${hd.defense})`, `ism ${tag(hd.defense, def)}`) : ''}
+    ${hp > 0 ? medal('hp', hp, `Vida ${hp} (carta: ${hd.hp})`, `ism ${tag(hd.hp, hp)}`) : ''}${def > 0 ? medal('def', def, `${def} dados de Defesa (carta: ${hd.defense})`, `ism ${tag(hd.defense, def)}`) : ''}
     ${rr > 0 ? medal('rr', rr, `Rerrolagem ${rr}`, 'ism up') : ''}${atk > 0 ? medal('melee', atk, `+${atk} dado(s) em todos os ataques`, 'ism up') : ''}</div>`;
 }
 
