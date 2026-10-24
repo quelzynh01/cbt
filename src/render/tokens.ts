@@ -2,7 +2,7 @@ import type { Token } from '../engine/types';
 
 // Imagens dos marcadores (public/tokens/<id>.webp, geradas por tools/build_tokens.py).
 
-const IDS = ['fundo', 'cura', 'revigorante', 'turno', 'armadilha', 'bau1', 'bau2', 'bau3',
+const IDS = ['fundo', 'cura', 'revigorante', 'turno', 'armadilha', 'bau1', 'bau2', 'bau3', 'bau4',
   'missao_azul', 'missao_vermelho', 'missao_verde', 'missao_laranja', 'missao_morte', 'lapide'];
 const imgs = new Map<string, HTMLImageElement>();
 
@@ -22,7 +22,7 @@ export function preloadTokens(onEach?: () => void): Promise<void> {
 
 /** Id da imagem da face do marcador (ou null se não houver imagem). */
 export function tokenImageId(t: Pick<Token, 'type' | 'value' | 'color'>): string | null {
-  if (t.type === 'bau') return `bau${Math.max(1, Math.min(3, t.value ?? 1))}`;
+  if (t.type === 'bau') return `bau${Math.max(1, Math.min(4, t.value ?? 1))}`;
   if (t.type === 'missao') return IDS.includes(`missao_${t.color}`) ? `missao_${t.color}` : null;
   return t.type;
 }

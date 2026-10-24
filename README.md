@@ -21,6 +21,8 @@ npm run build      # build de produção em dist/
 | Mover | clique num Espaço **azul** (o caminho e o custo em PM aparecem ao passar o mouse) |
 | Atacar | clique no inimigo marcado em **vermelho** → abre a **Tela de Batalha**: escolha a arma e clique **Atacar**. Quando um herói seu é atacado, clique **Defender** para rolar a defesa (Enter/Espaço também funcionam) |
 | Abrir/fechar porta | clique na porta (ou no ícone 🔑) ao lado do herói ativo — 1 PM. O movimento **nunca** abre portas sozinho |
+| Prévia de ataque | segure **Shift** com o mouse num Espaço e mire num personagem: linha verde/vermelha, ✓/✗ corpo a corpo e a distância e um **X** no que bloqueia (parede, porta, quina, Espaço bloqueado) |
+| Ver a carta | segure **Alt** sobre um personagem |
 | Encerrar turno / Descansar | **Espaço** / **R** |
 | Câmera | arrastar ou **W/A/S/D** (ou setas) = mover · roda = zoom · **C** = mapa inteiro · **F** = focar herói · **V** (ou botão no topo) = *Visão livre* / *Visão dos jogadores* |
 | Desfazer jogada (Modo Teste) | **Ctrl+Z** ou painel de teste → *Desfazer* / *Início do turno* (opção: mesmos dados) |

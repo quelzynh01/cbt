@@ -16,7 +16,7 @@ import { CARDS, GUILDS, HEROES, MONSTERS } from '../engine/data';
 import { type TestConfig, loadTestConfig } from './testConfig';
 import { Game } from '../engine/game';
 import { MAPS, getMap } from '../engine/maps';
-import type { Cell, DiceMode, GameEvent, GuildId, Token } from '../engine/types';
+import type { Cell, DiceMode, GameEvent, GuildId, Token, Unit } from '../engine/types';
 import { Renderer } from '../render/renderer';
 import { BattlePanel } from './battle';
 import { Hud, daTime, guildShort, toggleView } from './hud';
@@ -276,6 +276,17 @@ export class Controller {
 
   /** Segurando Alt: a carta do personagem embaixo do mouse (como a lupa), troca ao passar em outro e fecha ao soltar. */
   private altHeld = false;
+  /** Segurando Shift: o Espaço de onde se mira (prévia do ataque até o personagem embaixo do mouse). */
+  private aimFrom: Cell | null = null;
+  private aimInfo = '';
+  /** Quem "ataca" na prévia: o Herói ativo; senão o Herói no Espaço de onde se mira; senão um Herói meu. */
+  private aimAttacker(from: Cell): Unit | null {
+    const g = this.game, a = g.s.activation;
+    if (a) { const h = g.unit(a.heroId); if (h.kind === 'hero') return h; }
+    const here = g.unitsAt(from).find(u => u.kind === 'hero');
+    if (here) return here;
+    return g.units().find(u => u.kind === 'hero' && u.guild && this.isMine(u.guild)) ?? g.units().find(u => u.kind === 'hero') ?? null;
+  }
   private altPeek() {
     if (!this.game || !this.altHeld) return;
     const id = this.renderer.pickUnit(this.mouse.x, this.mouse.y);
@@ -1184,6 +1195,24 @@ export class Controller {
         if (this.game.isEnemy(h, t) && t.cell) hl.los = { from: h.cell, to: t.cell, ok: hl.attackUnits.has(unitId) };
       }
     }
+    // Shift: mira do Espaço marcado até o personagem (ou Espaço) embaixo do mouse
+    this.aimInfo = '';
+    const from = this.aimFrom;
+    if (from && cell) {
+      const tu = unitId ? this.game.unit(unitId) : null;
+      const atk = this.aimAttacker(from);
+      const target = tu?.cell ? tu : this.game.unitsAt(cell).find(u => u.alive && atk && (u.kind === 'monster' || this.game.isEnemy(atk, u))) ?? null;
+      if (atk && target?.cell) {
+        const k = this.game.attackCheck(atk, from, target);
+        hl.los = { from, to: target.cell, ok: k.melee || k.ranged, aim: true, block: k.block };
+        const yes = (b: boolean, t: string) => `<div style="color:${b ? '#8dffa0' : '#ff8a7a'}">${b ? '✓' : '✗'} ${t}</div>`;
+        this.aimInfo = `<div class="tip-aim"><small>Mirando de (${from.c},${from.r})</small>${yes(k.melee, 'Corpo a corpo')}${yes(k.ranged, 'A distância')}`
+          + `${k.why.length ? `<div class="muted">${k.why.join('<br/>')}</div>` : ''}</div>`;
+      } else if (!sameCell(from, cell)) {
+        const block = this.game.board.losBlock(from, cell, atk ? this.game.cellBlocksFor(atk) : c => this.game.board.isPillar(c));
+        hl.los = { from, to: cell, ok: !block, aim: true, block };
+      } else hl.los = { from, to: cell, ok: true, aim: true, block: null };
+    }
     this.updateCursor(unitId, cell);
     // tooltip
     if (unitId) {
@@ -1204,9 +1233,9 @@ export class Controller {
         const meds = [hp > 0 ? medal('hp', hp, `Vida ${hp}/${max}`, 'tipm') : '', def > 0 ? medal('def', def, 'Defesa', 'tipm') : '', rr > 0 ? medal('rr', rr, 'Rerrolagem', 'tipm') : ''].join('');
         html = `<b style="color:${GUILDS[u.guild!].light}">${HEROES[u.defId].name}</b> (${guildShort(u.guild!)}) <small>${hp}/${max} de Vida</small><div class="tip-meds">${meds}</div>${u.stunned ? '✷ Atordoado' : ''}`;
       }
-      if (hl.attackUnits.has(unitId)) html += '<br/><span style="color:#ff9b7a">Clique para atacar</span>';
-      this.hud.tooltip(html, x, y);
-    } else this.hud.tooltip(null);
+      if (hl.attackUnits.has(unitId) && !this.aimInfo) html += '<br/><span style="color:#ff9b7a">Clique para atacar</span>';
+      this.hud.tooltip(html + this.aimInfo, x, y);
+    } else this.hud.tooltip(this.aimInfo || null, x, y);
   }
 
   // ------------------------------------------------------------------
@@ -1304,8 +1333,19 @@ export class Controller {
       this.panKeys.delete(e.code);
       // Alt: solta = fecha a carta aberta pelo mouse (e não deixa o navegador ir para o menu)
       if (e.key === 'Alt') { e.preventDefault(); this.altHeld = false; this.hud.closePeek(); }
+      if (e.key === 'Shift' && this.aimFrom) { this.aimFrom = null; if (this.game) this.updateHover(); }
     });
-    window.addEventListener('blur', () => { this.panKeys.clear(); this.altHeld = false; this.hud.closePeek(); });
+    window.addEventListener('blur', () => { this.panKeys.clear(); this.altHeld = false; this.hud.closePeek(); this.aimFrom = null; });
+    // Shift: marca o Espaço embaixo do mouse; mirando num personagem mostra se dá para atacar dali (e o que atrapalha)
+    window.addEventListener('keydown', e => {
+      if (e.key !== 'Shift' || e.repeat || !this.game || this.aimFrom) return;
+      const tgt = e.target as HTMLElement | null;
+      if (tgt && (tgt.tagName === 'TEXTAREA' || tgt.isContentEditable || tgt.tagName === 'INPUT')) return;
+      const c = this.renderer.pickCell(this.mouse.x, this.mouse.y);
+      if (!c || !this.game.board.playable(c)) return;
+      this.aimFrom = c;
+      this.updateHover();
+    });
     window.addEventListener('keydown', e => {
       if (e.key !== 'Alt') return;
       e.preventDefault();

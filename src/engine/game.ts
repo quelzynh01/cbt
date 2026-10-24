@@ -1,4 +1,4 @@
-import { Board, key, parseKey, sameCell, type MapDef, mapTitlesOf } from './board';
+import { Board, key, parseKey, sameCell, type MapDef, type LosBlock, mapTitlesOf } from './board';
 import {
   heroPool, ATTACK_DIE, CARDS, DEFENSE_DIE, ENTRY_PAIRS, EXPLORATION_BAG, GUILDS, HEROES, HERO_ORDER, MONSTERS, TOKEN_INFO, distributeStartingGear, levelSuffix, lowerSuffix,
 } from './data';
@@ -513,6 +513,34 @@ export class Game {
     } else if (!this.isEnemy(attacker, target)) return false;
     if (type === 'melee') return this.closeFor(attacker, from, target.cell);
     return this.hasLOS(attacker, from, target.cell);
+  }
+
+  /** Prévia (Shift + mirar): de `from`, o `attacker` acerta o `target` corpo a corpo e a distância? E o que atrapalha. */
+  attackCheck(attacker: Unit, from: Cell, target: Unit): { melee: boolean; ranged: boolean; why: string[]; block: LosBlock | null } {
+    const why: string[] = [];
+    if (!target.alive || !target.cell) return { melee: false, ranged: false, why: ['Fora do tabuleiro'], block: null };
+    if (!this.isObject(target) && !this.isEnemy(attacker, target)) return { melee: false, ranged: false, why: ['É Aliado: não pode ser atacado'], block: null };
+    const to = target.cell;
+    const melee = this.closeFor(attacker, from, to);
+    const blocks = this.cellBlocksFor(attacker);
+    const block = this.board.losBlock(from, to, blocks);
+    const ranged = !block;
+    const at = (c: Cell) => `(${c.c},${c.r})`;
+    if (!melee) {
+      const d = Math.abs(from.c - to.c) + Math.abs(from.r - to.r);
+      const e = d === 1 ? this.board.edge(from, to) : null;
+      why.push(e === 'wall' ? 'Corpo a corpo: parede entre os Espaços' : e === 'door' ? 'Corpo a corpo: porta fechada entre os Espaços' : 'Corpo a corpo: não está Perto');
+    }
+    if (block) {
+      const cellWhy = (c: Cell) => this.board.isPillar(c) ? `Espaço bloqueado em ${at(c)}`
+        : this.status(attacker, c) === 'blocked' ? `Inimigos bloqueiam o Espaço ${at(c)}` : `Espaço ${at(c)} bloqueia`;
+      why.push(`Distância: ${block.kind === 'wall' ? `parede entre ${at(block.a)} e ${at(block.b)}`
+        : block.kind === 'door' ? `porta fechada entre ${at(block.a)} e ${at(block.b)}`
+        : block.kind === 'corner' ? `quina fechada perto de ${at(block.a)}`
+        : block.kind === 'off' ? 'a linha sai do tabuleiro'
+        : cellWhy(block.a)}`);
+    }
+    return { melee, ranged, why, block };
   }
 
   /** Lança do Feral: o primeiro Espaço na diagonal conta como Perto — só se houver passagem em "L" sem parede/porta fechada. */

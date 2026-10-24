@@ -95,6 +95,9 @@ export const edgeKey = (a: Cell, b: Cell) => {
 export const DIRS: Cell[] = [{ c: 1, r: 0 }, { c: -1, r: 0 }, { c: 0, r: 1 }, { c: 0, r: -1 }];
 
 /** Geometria estática do mapa + estado das portas (vindo do GameState). */
+/** O que corta a Linha de Visão: borda (a-b), quina (de a para b na diagonal) ou Espaço (a). */
+export type LosBlock = { kind: 'wall' | 'door' | 'corner' | 'cell' | 'off'; a: Cell; b: Cell };
+
 export class Board {
   readonly map: MapDef;
   readonly cols: number;
@@ -181,7 +184,12 @@ export class Board {
    * Usa coordenadas dobradas (centros ímpares, bordas pares) para detectar quinas sem erro de ponto flutuante.
    */
   hasLOS(from: Cell, to: Cell, cellBlocks: (c: Cell) => boolean): boolean {
-    if (sameCell(from, to)) return true;
+    return !this.losBlock(from, to, cellBlocks);
+  }
+
+  /** O que corta a Linha de Visão (null = livre): uma borda (parede/porta fechada), uma quina fechada ou um Espaço que bloqueia. */
+  losBlock(from: Cell, to: Cell, cellBlocks: (c: Cell) => boolean): LosBlock | null {
+    if (sameCell(from, to)) return null;
     const ax = 2 * from.c + 1, ay = 2 * from.r + 1;
     const bx = 2 * to.c + 1, by = 2 * to.r + 1;
     const dx = bx - ax, dy = by - ay;
@@ -212,20 +220,20 @@ export class Board {
         const Cc = { c: cur.c, r: cur.r + sy };
         const viaB = this.edgeOpen(cur, B) && passable(B) && this.edgeOpen(B, D);
         const viaC = this.edgeOpen(cur, Cc) && passable(Cc) && this.edgeOpen(Cc, D);
-        if (!viaB && !viaC) return false;
+        if (!viaB && !viaC) return { kind: 'corner', a: cur, b: D };
         cur = D;
       } else if (g.x) {
         const n = { c: cur.c + sx, r: cur.r };
-        if (!this.edgeOpen(cur, n)) return false;
+        if (!this.edgeOpen(cur, n)) return { kind: this.edge(cur, n) === 'door' ? 'door' : 'wall', a: cur, b: n };
         cur = n;
       } else {
         const n = { c: cur.c, r: cur.r + sy };
-        if (!this.edgeOpen(cur, n)) return false;
+        if (!this.edgeOpen(cur, n)) return { kind: this.edge(cur, n) === 'door' ? 'door' : 'wall', a: cur, b: n };
         cur = n;
       }
-      if (!sameCell(cur, to) && !passable(cur)) return false;
+      if (!sameCell(cur, to) && !passable(cur)) return { kind: this.playable(cur) ? 'cell' : 'off', a: cur, b: cur };
     }
-    return true;
+    return null;
   }
 }
 

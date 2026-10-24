@@ -359,6 +359,7 @@ export class MenuPages {
         ${tok('bau1', 'Baú de Tesouro (1)', TOKEN_INFO.bau.text, `${qty('bau', 1)} no saco · vale 1 moeda`)}
         ${tok('bau2', 'Baú de Tesouro (2)', TOKEN_INFO.bau.text, `${qty('bau', 2)} no saco · vale 2 moedas`)}
         ${tok('bau3', 'Baú de Tesouro (3)', TOKEN_INFO.bau.text, `${qty('bau', 3)} no saco · vale 3 moedas`)}
+        ${tok('bau4', 'Baú de Tesouro (4)', TOKEN_INFO.bau.text, `${qty('bau', 4)} no saco · vale 4 moedas`)}
         ${tok('armadilha', TOKEN_INFO.armadilha.name, TOKEN_INFO.armadilha.text, `${qty('armadilha')} no saco`)}
       </div>
       <h3 class="mp-sub">Marcadores de Missão</h3>

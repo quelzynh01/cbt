@@ -4,7 +4,7 @@ import { play, playOnce, type Sfx } from '../audio/sfx';
 import { CARDS } from '../engine/cards';
 import { CARD_ART } from '../ui/cardArt';
 import { drawTokenImage, tokenImage, tokenImageId } from './tokens';
-import { key, sameCell } from '../engine/board';
+import { key, sameCell, type LosBlock } from '../engine/board';
 import { GUILDS, MONSTERS, teamName } from '../engine/data';
 import type { Game } from '../engine/game';
 import type { Cell, GameEvent, Token } from '../engine/types';
@@ -28,7 +28,8 @@ export interface Highlights {
   /** Portas desenhadas ao contrário (prévia: o Monstro vai abrir/fechar). */
   doorFlip?: string[];
   activeUnit: string | null;
-  los: { from: Cell; to: Cell; ok: boolean } | null;
+  /** `aim`: prévia do Shift (marca o Espaço de onde se mira e o ponto que bloqueia). */
+  los: { from: Cell; to: Cell; ok: boolean; aim?: boolean; block?: LosBlock | null } | null;
   moveColor?: 'blue' | 'purple' | 'green';
   attackCells?: Set<string>;
 }
@@ -816,6 +817,7 @@ export class Renderer {
     this.drawDragged();
     this.drawFlashArrows();
     this.drawPings();
+    this.drawAim();
     this.drawFx();
     this.drawPointers();
     // luz quente + vinheta (atmosfera do Dofus)
@@ -833,6 +835,37 @@ export class Renderer {
   }
 
   /** Marcações: anel pulsando no Espaço e seta pulando, na cor de quem marcou (3,5 s). */
+  /** Prévia do Shift: a linha de mira e o X no que bloqueia, por cima das paredes e dos bonecos. */
+  private drawAim() {
+    const los = this.hl.los;
+    if (!los?.aim) return;
+    const ctx = this.ctx;
+    const a = g2s(los.from.c + 0.5, los.from.r + 0.5), b = g2s(los.to.c + 0.5, los.to.r + 0.5);
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = 'rgba(0,0,0,0.55)'; ctx.lineWidth = 6;
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    ctx.setLineDash([10, 7]);
+    ctx.strokeStyle = los.ok ? '#7dff8c' : '#ff5a4a'; ctx.lineWidth = 3.5;
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    ctx.setLineDash([]);
+    // o que bloqueia: um X vermelho na borda/quina/Espaço
+    const k = los.block;
+    if (k) {
+      // na parede/porta/quina o X fica na altura do muro
+      const p = k.kind === 'cell' || k.kind === 'off' ? g2s(k.a.c + 0.5, k.a.r + 0.5)
+        : g2s((k.a.c + k.b.c) / 2 + 0.5, (k.a.r + k.b.r) / 2 + 0.5, 20);
+      const s = 11;
+      ctx.lineCap = 'round';
+      for (const [w, col] of [[8, 'rgba(0,0,0,0.6)'], [4.5, '#ff4a3d']] as const) {
+        ctx.strokeStyle = col; ctx.lineWidth = w;
+        ctx.beginPath(); ctx.moveTo(p.x - s, p.y - s); ctx.lineTo(p.x + s, p.y + s); ctx.moveTo(p.x + s, p.y - s); ctx.lineTo(p.x - s, p.y + s); ctx.stroke();
+      }
+      ctx.lineCap = 'butt';
+    }
+    ctx.restore();
+  }
+
   private drawPings() {
     if (!this.pings.length) return;
     const ctx = this.ctx;
@@ -1225,11 +1258,19 @@ export class Renderer {
       }
     if (this.hl.los) {
       const a = g2s(this.hl.los.from.c + 0.5, this.hl.los.from.r + 0.5), b = g2s(this.hl.los.to.c + 0.5, this.hl.los.to.r + 0.5);
-      ctx.setLineDash([8, 6]);
-      ctx.strokeStyle = this.hl.los.ok ? 'rgba(120,255,140,0.95)' : 'rgba(255,80,80,0.95)';
-      ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-      ctx.setLineDash([]);
+      if (!this.hl.los.aim) {
+        ctx.setLineDash([8, 6]);
+        ctx.strokeStyle = this.hl.los.ok ? 'rgba(120,255,140,0.95)' : 'rgba(255,80,80,0.95)';
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+        ctx.setLineDash([]);
+      } else {
+        // o Espaço de onde se mira
+        const f = this.hl.los.from;
+        diamondPath(ctx, f.c, f.r, 1, 1);
+        ctx.fillStyle = 'rgba(255,214,90,0.22)'; ctx.fill();
+        ctx.strokeStyle = 'rgba(255,214,90,0.95)'; ctx.lineWidth = 3; ctx.stroke();
+      }
       }
     if (this.showGrid) {
       ctx.font = '11px monospace';

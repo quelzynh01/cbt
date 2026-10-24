@@ -312,11 +312,12 @@ export const ENTRY_PAIRS: [DieFace, DieFace][] = [
 
 // 14 marcadores de Exploração (o cenário sorteia 12).
 export const EXPLORATION_BAG: { type: TokenType; value?: number }[] = [
-  { type: 'cura' }, { type: 'cura' }, { type: 'cura' },
-  { type: 'revigorante' }, { type: 'revigorante' }, { type: 'revigorante' },
+  { type: 'cura' }, { type: 'cura' },
+  { type: 'revigorante' }, { type: 'revigorante' },
   { type: 'turno' }, { type: 'turno' },
-  { type: 'bau', value: 1 }, { type: 'bau', value: 1 }, { type: 'bau', value: 2 }, { type: 'bau', value: 3 },
   { type: 'armadilha' }, { type: 'armadilha' },
+  { type: 'bau', value: 1 }, { type: 'bau', value: 1 }, { type: 'bau', value: 2 }, { type: 'bau', value: 2 },
+  { type: 'bau', value: 3 }, { type: 'bau', value: 4 },
 ];
 
 export const TOKEN_INFO: Record<TokenType, { name: string; text: string }> = {
