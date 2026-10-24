@@ -111,7 +111,7 @@ atk('lamina_confiavel', 'Lâmina Confiável', '01-01', '1', 3, 1, 'melee', 'Espa
 atk('sangradora', 'Sangradora', '01-02', '1', 2, 2, 'melee', 'Machado', 3, { fx: { critExtra: 1 }, text: 'Cada ✷ causa 1 acerto adicional.' });
 atk('esmaga_orcs', 'Esmaga-Orcs', '01-03', '1', 1, 8, 'melee', 'Martelo', 4, { fx: { vsOrcs: 1 }, text: '+1 dado contra Orcs e Goblins.' });
 atk('arco_crescente', 'Arco Crescente', '01-04', '1', 3, 3, 'ranged', 'Arco', 3);
-atk('rajada_vento', 'Rajada de Vento', '01-05', '1', 3, 4, 'ranged', 'Mágica', 3, { fx: { push: 3 }, text: 'Se acertar, move o alvo até 3 Espaços (sem Reação de Alerta).' });
+atk('rajada_vento', 'Rajada de Vento', '01-05', '1', 3, 4, 'ranged', 'Mágica', 3, { fx: { push: 3 }, text: 'Se acertar, move o alvo até 3 Espaços (sem Reação de Alerta e sem passar por portal).' });
 perm('anel_sol', 'Anel do Sol', '01-06', '1', 2, 0, 'Joia', { rerolls: 1 });
 boost('anel_lua', 'Anel da Lua', '01-07', '1', 2, 4, 'Joia', { fx: { boostDice: 1, boostFor: 'any' }, text: '+1 dado em uma carta de Ataque.' });
 perm('pele_orc', 'Pele de Orc', '01-08', '1', 2, 5, 'Armadura', { defBonus: 2, fx: { armor: true }, text: 'Limite de 1 armadura por Herói.' });
@@ -142,7 +142,7 @@ atk('enxofre', 'Enxofre', '03-03', '3', 2, 1, 'melee', 'Martelo', 4, { fx: { daz
 atk('bombastica', 'Bombástica', '03-04', '3', 1, 9, 'ranged', 'Arremesso', 3, { fx: { bomb: true }, text: 'Limite 1 bomba por Guilda. Se acertar, cria minas no Espaço do alvo e nos Espaços Perto.' });
 atk('raio_nova2', 'Raio Nova II', '03-05', '3', 2, 4, 'ranged', 'Mágica', 4, { fx: { extraOnCrit: true }, text: 'Se rolar algum ✷, pode atingir um Inimigo adicional Perto do alvo.' });
 atk('golpe_astral', 'Golpe Astral', '03-06', '3', 1, 6, 'melee', 'Mágica', 3, { fx: { astral: true }, text: 'Só ataca Inimigos Perto de um Aliado seu, em qualquer lugar do tabuleiro.' });
-atk('rajada_vento2', 'Rajada de Vento II', '03-07', '3', 2, 4, 'ranged', 'Mágica', 4, { fx: { push: 3 }, text: 'Se acertar, move o alvo até 3 Espaços (sem Reação de Alerta).' });
+atk('rajada_vento2', 'Rajada de Vento II', '03-07', '3', 2, 4, 'ranged', 'Mágica', 4, { fx: { push: 3 }, text: 'Se acertar, move o alvo até 3 Espaços (sem Reação de Alerta e sem passar por portal).' });
 perm('die_booten', 'Die Booten', '03-08', '3', 1, 2, 'Equipamento', { fx: { bootMove: 2 }, text: 'Ao ativar outro Herói, pode mover este Herói 2 Espaços.' });
 perm('mais_grrr', 'Mais Grrrrrrrrr!', '03-09', '3', 1, 4, 'Habilidade', { fx: { grrr: 2 }, text: 'Uma vez por ataque, pode sofrer 2 Ferimentos para +2 dados.' });
 perm('coracao_grifo', 'Coração do Grifo', '03-10', '3', 1, 0, 'Joia', { hpBonus: 3 });

@@ -53,7 +53,7 @@ export function guildShort(g: GuildId) { return teamName(g); }
 export function daTime(g: GuildId) { return `${GUILD_NAMES[g] ? 'de' : 'da'} ${teamName(g)}`; }
 
 /** Ícones do celular: cada um abre um painel numa gaveta lateral. */
-const DOCK: [string, string, string][] = [['hero', '🧙', 'Herói'], ['score', '🏆', 'Placar'], ['missions', '📜', 'Missões'], ['cem', '⚰️', 'Cemitério'], ['log', '📖', 'Registro'], ['online', '🌐', 'Online']];
+const DOCK: [string, string, string][] = [['hero', '🛡️', 'Status'], ['bag', '🎒', 'Bolsa'], ['score', '🏆', 'Placar'], ['missions', '📜', 'Missões'], ['cem', '⚰️', 'Cemitério'], ['log', '📖', 'Registro'], ['online', '🌐', 'Online']];
 
 /** Bloco de Defesa (painel de dados do centro). */
 const cdDefHtml = (name: string, id: string) => `<div class="cd-def" data-tid="${id}"><div class="cd-who">${name} ${lupa(id)}</div>
@@ -105,6 +105,7 @@ export class Hud {
       <div id="topbar">
         <div class="brand"><span class="logo">CBT</span><div><div class="title">Champions Battle Tactics</div><div class="sub" id="mapname"></div></div><span class="badge-test">MODO TESTE</span></div>
         <div id="turninfo"></div>
+        <div id="topquick"><span id="topclock" title="Tempo da partida"></span><button data-dock="score" title="Placar">🏆<small>Placar</small></button><button data-dock="online" title="Online">🌐<small>Online</small></button></div>
         <button id="testbtn" class="hidden" title="Opções do Modo Teste (T)">🧪 Teste</button>
         <button id="viewbtn" title="Câmera: visão livre ou visão dos jogadores (V)"></button>
         <button id="menubtn" title="Menu da partida (Esc)">☰</button>
@@ -173,6 +174,14 @@ export class Hud {
     };
     // celular: os painéis abrem numa gaveta lateral pelos ícones
     root.querySelectorAll<HTMLElement>('[data-dock]').forEach(b => { b.onclick = () => this.openDrawer(root.dataset.drawer === b.dataset.dock ? null : b.dataset.dock!); });
+    // Bolsa: abre a bolsa do Herói que está na ficha (o escolhido, o ativo ou o 1º da sua Guilda)
+    $('[data-dock="bag"]', root).onclick = () => {
+      this.openDrawer(null);
+      const g = this.game;
+      const id = this.inspected ?? g?.s.activation?.heroId ?? g?.guilds().filter(x => this.isMine(x.id)).flatMap(x => g.heroesOf(x.id))[0]?.id;
+      if (!id || g.unit(id).kind !== 'hero') return;
+      if (this.bagOpen === id) this.closeBag(); else this.showBag(id);
+    };
     $('#drawerclose', root).onclick = () => this.openDrawer(null);
     $('#drawerbg', root).onclick = () => this.openDrawer(null);
     $('#dock-rest', root).onclick = () => { this.openDrawer(null); this.actions.rest(); };
@@ -265,7 +274,8 @@ export class Hud {
           return `<div class="mby-row" style="--gc:${GUILDS[gid].color}">✔ <span class="dot" style="background:${GUILDS[gid].color}"></span> ${guildShort(gid)}${who ? ` — ${who}` : ''}${i === 0 ? ' <small>1º</small>' : ''}</div>`; }).join('')}</div>` : ''}
       </div>`;
     }).join('');
-    this.root.querySelectorAll<HTMLElement>('[data-mission]').forEach(el => { el.onclick = () => this.actions.mission(el.dataset.mission!); });
+    // celular: fecha a gaveta para ver os objetivos piscando no mapa (e a janela da Recompensa da Missão)
+    this.root.querySelectorAll<HTMLElement>('[data-mission]').forEach(el => { el.onclick = () => { if (this.root.dataset.drawer) this.openDrawer(null); this.actions.mission(el.dataset.mission!); }; });
   }
 
   /** Celular: abre a gaveta lateral com um painel (ou fecha, com null). */
@@ -289,7 +299,7 @@ export class Hud {
     ($('#dock-end', this.root) as HTMLButtonElement).disabled = !human;
     $('#dock-end', this.root).classList.toggle('end-now', human && this.nothingLeft());
     const online = this.root.querySelector('#onlinepanel');
-    this.root.querySelector<HTMLElement>('[data-dock="online"]')?.classList.toggle('hidden', !online || online.classList.contains('hidden'));
+    this.root.querySelectorAll<HTMLElement>('[data-dock="online"]').forEach(b => b.classList.toggle('hidden', !online || online.classList.contains('hidden')));
   }
 
   /** O controlador diz se não sobrou nada para fazer no turno (o "Encerrar Turno" pisca). */
@@ -1091,6 +1101,8 @@ export class Hud {
     this.clockHtml = time;
     const c = this.root.querySelector('#sb-clock');
     if (c) c.innerHTML = time;
+    // celular: o tempo fica no topo
+    $('#topclock', this.root).textContent = getSettings().clock && time ? `⏱ ${time}` : '';
   }
 
   /** Painel genérico (Descanso, posicionamento). */

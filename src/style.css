@@ -1461,3 +1461,9 @@ html.touch :is(.cd-roll, .bt-act, #rr-roll, #rr-go, #cd-rr, #bt-rr)::after { con
 .cards .card.card-over { outline: 3px solid var(--gold); outline-offset: 2px; }
 #herobox .cards .card[data-card]:not(.cursed) { cursor: grab; }
 .cs-box .cs-sheet > h4 { display: none; }
+/* Recompensa com o inventário cheio: o editor do inventário com a carta nova para arrastar */
+.rw-now { padding: 8px 12px; border-radius: 10px; background: rgba(70,200,90,.12); border: 2px solid #46c85a; color: #d6f7db; font-size: 14px; }
+.rw-now.bad { background: rgba(224,80,58,.15); border-color: #e0503a; color: #ffc4b8; }
+#restbox .rw-body .inv-pool { border: 2px solid var(--gold); border-radius: 12px; padding: 6px 8px; background: rgba(240,194,67,.08); }
+#restbox .rw-body .inv-ed { display: flex; flex-direction: column; gap: 8px; }
+#restbox .rw-body .inv-pool { order: -1; }

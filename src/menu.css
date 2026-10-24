@@ -605,3 +605,72 @@
 .cs-title { display: flex; gap: 6px; align-items: center; padding: 4px 8px; border-radius: 6px; background: rgba(255,255,255,.06); margin-bottom: 4px; font-size: 13px; }
 .cs-title small { color: var(--muted); flex: 1; }
 .cs-title.got { background: rgba(255,200,80,.12); }
+
+/* Fase de Melhorias compacta: a etapa à esquerda e, ao lado, os seus Heróis e o resultado (pouca rolagem) */
+.up-bar { margin-bottom: 8px; }
+.up-g { padding: 4px 10px; font-size: 13px; }
+.up-lay { display: grid; grid-template-columns: minmax(0, 1fr) 350px; gap: 14px; align-items: start; }
+.up-main { min-width: 0; }
+.up-side { display: grid; gap: 10px; }
+.up-step { margin-top: 0; gap: 8px; }
+.up-step h3, .up-sum h3 { color: var(--gold); margin: 0; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.up-step h3 small, .up-sum h3 small { color: var(--muted); font-size: 14px; font-weight: 600; }
+.up-step p { margin: 0; }
+.up-step h4 { margin: 4px 0 0; color: var(--gold); font-size: 14px; }
+.up-step .up-from { margin: 0; font-size: 13px; }
+.up-step .buy-hint { margin: 0; }
+.up-main .cp-cards { grid-template-columns: repeat(auto-fill, 172px) !important; gap: 10px; justify-content: start; }
+.up-main .cp-cards > .acard { zoom: .8; }
+.up-actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; justify-content: flex-start; position: sticky; bottom: -18px; z-index: 5; padding: 8px 0 10px; background: linear-gradient(transparent, #2a1d13 35%); }
+.up-actions .cp-sum { font-size: 14px; }
+/* painéis ao lado */
+.up-panel { background: rgba(0,0,0,.28); border-radius: 14px; padding: 8px 10px; border: 2px solid rgba(240,194,67,.18); display: grid; gap: 6px; }
+.up-panel h4 { margin: 0; color: var(--gold); font-size: 15px; display: flex; align-items: baseline; gap: 6px; }
+.up-panel h4 small { margin-left: auto; color: var(--muted); font-size: 12px; font-weight: 600; }
+.up-heroes { border-color: color-mix(in srgb, var(--gc) 55%, transparent); }
+.up-hero { display: grid; gap: 4px; padding: 6px; border-radius: 10px; background: rgba(0,0,0,.22); }
+.up-hh { display: flex; align-items: center; gap: 6px; }
+.up-hh canvas { width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--gc); background: #2a1a10; flex: none; }
+.up-hh b { color: #f3e6cf; font-size: 14px; }
+.up-hh small { margin-left: auto; color: var(--muted); font-size: 12px; font-weight: 700; }
+.up-hcurse { font-size: 11px; color: #ffc6e0; background: #4a1d2e; border-radius: 6px; padding: 2px 6px; line-height: 1.25; }
+.up-minis { display: flex; flex-wrap: wrap; gap: 5px; }
+.up-mini { width: 62px; height: 105px; flex: none; border-radius: 6px; position: relative; }
+.up-mini .acard { zoom: .29; }
+.up-mini .ac-zoom { zoom: 2.6; }
+.up-mini.empty { border: 2px dashed rgba(240,194,67,.35); background: rgba(0,0,0,.2); }
+.up-minis.by-disc .acard { filter: grayscale(.6) brightness(.75); }
+.up-result table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.up-result th, .up-result td { padding: 2px 4px; border-bottom: 1px solid rgba(255,255,255,.1); text-align: center; }
+.up-result th:first-child, .up-result td:first-child { text-align: left; }
+.up-result tr.win td { color: #ffe9a8; font-weight: 800; }
+.up-rankbtn { justify-self: start; font-size: 13px; padding: 4px 12px; }
+/* placar da campanha numa janela por cima */
+.up-pop { display: none; position: fixed; inset: 0; z-index: 9000; background: rgba(8,5,14,.7); place-items: center; padding: 16px; }
+.up-pop.open { display: grid; }
+.up-popbox { position: relative; width: min(980px, 100%); max-height: calc(100vh - 32px); overflow: auto; background: var(--panel); border: 3px solid var(--line); border-radius: 18px; padding: 14px 18px; box-shadow: 0 20px 60px rgba(0,0,0,.6); }
+.up-popx { position: absolute; right: 10px; top: 10px; padding: 2px 10px; }
+/* resumos (Maldições e compras): as Guildas lado a lado, a sua primeiro */
+.up-sum { margin-top: 0; }
+.up-sumgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px; align-items: start; }
+.up-sumgrid .cr-sumg, .up-sumgrid .by-guild { margin: 0; padding: 8px 10px; border-radius: 14px; background: rgba(0,0,0,.25); border: 2px solid color-mix(in srgb, var(--gc) 45%, transparent); border-left-width: 5px; }
+.up-sumgrid .me { box-shadow: 0 0 0 2px var(--gold); }
+.up-sumgrid .by-guild h4 { margin: 0 0 4px; }
+.up-sumgrid .by-guild h5 { margin: 4px 0 3px; font-size: 12px; color: var(--gold); }
+.up-sumgrid .by-guild h5.by-droph { color: #ffb36b; }
+.up-sumgrid .up-mini { width: 70px; height: 118px; }
+.up-sumgrid .up-mini .acard { zoom: .327; }
+.up-sumgrid .up-mini .ac-zoom { zoom: 2.3; }
+.up-sumgrid .cr-sumrow { gap: 8px; }
+.up-sumgrid .cr-sumhero { padding: 4px; }
+.up-sumgrid .cr-sumhero { width: 132px; }
+.up-sumgrid .cr-sumhero .acard { zoom: .5; }
+.cr-sumtxt { font-size: 11px; line-height: 1.25; text-align: center; color: #ffc6e0; }
+.cr-sumhero.free .cr-sumtxt { color: #9fe8b0; }
+.up-table { padding: 10px; }
+@media (max-width: 900px) {
+  .up-lay { grid-template-columns: 1fr; }
+  .up-main .cp-cards { grid-template-columns: repeat(auto-fill, 150px) !important; justify-content: center; }
+  .up-main .cp-cards > .acard { zoom: .7; }
+}
+.up-table .up-actions { background: linear-gradient(transparent, #120e08 35%); }

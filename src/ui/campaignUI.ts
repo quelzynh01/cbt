@@ -15,7 +15,7 @@ import { TITLES, TITLE_TEXT } from '../engine/titles';
 import { drawFace } from '../render/chibi';
 import { curseCard, heroCard, itemCard, paintCardArt } from './cardview';
 import { CARD_ART } from './cardArt';
-import { buyHint, buySummaryHtml, curseRevealHtml, curseSummaryHtml, handFromHtml, myCursesHtml, rankingHtml, resultTabsHtml, upgradeBarHtml } from './upgradeViews';
+import { bindUpgradeView, buyHint, buySummaryHtml, curseRevealHtml, curseSummaryHtml, handFromHtml, miniCards, myHeroesHtml, rankingHtml, resultHtml, upgradeBarHtml, upgradeLayout } from './upgradeViews';
 import { attachMapPeek, closeMapPeek, mapChoiceCard } from './mapInfo';
 import { bindInvEditor, invEditorHtml, poolErrors, type InvItem, type InvOptions } from './inventoryEditor';
 import { fmtTime, getSettings } from './settings';
@@ -389,11 +389,9 @@ export class CampaignUI {
     const c = this.c!;
     const up = c.upgrade!;
     const me = human(c);
-    const last = c.played[c.played.length - 1];
-    // topo: as Guildas (a sua primeiro); resultado do mapa e a campanha em abas; as Maldições dos seus Heróis
-    const results = `<div class="cp-results">${upgradeBarHtml(c, me.id, guildName)}
-      <h3>Resultado: ${MAPS[last.mapId].name}</h3>${resultTabsHtml(c, guildName)}${myCursesHtml(c, me.id)}
-    </div>`;
+    // topo: as Guildas (a sua primeiro); ao lado da etapa: os seus Heróis com as cartas e o resultado do mapa
+    const bar = upgradeBarHtml(c, me.id, guildName);
+    const side = `${myHeroesHtml(c, me.id)}${resultHtml(c, guildName)}`;
     // antes das Melhorias: as Maldições Mortais (cartas viradas na mesa, um Herói de cada vez)
     if (!up.curseDone) { this.curses(); return; }
     // depois da compra: o que cada Guilda comprou e descartou
@@ -401,13 +399,15 @@ export class CampaignUI {
     if (up.step === 'draft') {
       const hand = up.hands[me.id]!;
       this.sel = new Set([...this.sel].filter(i => Number(i) < hand.length));
-      this.show(`Fase de Melhorias · Nível ${up.level}`, `${results}
-        <div class="cp-step"><h3>1. Escolha de cartas — rodada ${up.round + 1} de ${draftRounds(c)}</h3>
+      this.show(`Fase de Melhorias · Nível ${up.level}`, upgradeLayout(bar, `
+        <div class="cp-step up-step"><h3>1. Escolha de cartas <small>rodada ${up.round + 1} de ${draftRounds(c)}</small></h3>
         <p>Escolha <b>${picksPerRound(c) === 1 ? '1 carta' : '2 cartas'}</b> da sua mão. O resto passa para o jogador à esquerda (as IAs fazem o mesmo). No fim você terá 6 cartas para comprar.</p>
         ${handFromHtml(c, me.id, guildName)}
         <div class="cp-cards">${hand.map((id, i) => cardHtml(id, this.sel.has(`${i}`) ? 'sel' : '', `data-i="${i}"`)).join('')}</div>
-        ${up.picked[me.id]!.length ? `<h4>Já escolhidas</h4><div class="cp-cards small">${up.picked[me.id]!.map(id => cardHtml(id)).join('')}</div>` : ''}
-        <button class="primary cp-big" id="cp-ok" ${this.sel.size === Math.min(picksPerRound(c), hand.length) ? '' : 'disabled'}>Confirmar escolha</button></div>`, false);
+        <div class="up-actions"><button class="primary cp-big" id="cp-ok" ${this.sel.size === Math.min(picksPerRound(c), hand.length) ? '' : 'disabled'}>Confirmar escolha</button></div>
+        ${up.picked[me.id]!.length ? `<h4>Já escolhidas</h4>${miniCards(up.picked[me.id]!)}` : ''}</div>`, side), false);
+      paintCardArt(this.page);
+      bindUpgradeView(this.page);
       this.page.querySelectorAll<HTMLElement>('[data-i]').forEach(el => {
         el.onclick = () => { const k = el.dataset.i!; if (this.sel.has(k)) this.sel.delete(k); else if (this.sel.size < picksPerRound(c)) this.sel.add(k); this.upgrade(); };
       });
@@ -424,13 +424,15 @@ export class CampaignUI {
       const coins = up.coins[me.id] ?? 0;
       const picked = up.picked[me.id]!;
       const spent = [...this.sel].reduce((s, i) => s + CARDS[picked[Number(i)]].cost, 0);
-      this.show(`Fase de Melhorias · Nível ${up.level}`, `${results}
-        <div class="cp-step"><h3>2. Compra — você tem 🪙 ${coins}</h3>
+      this.show(`Fase de Melhorias · Nível ${up.level}`, upgradeLayout(bar, `
+        <div class="cp-step up-step"><h3>2. Compra <small>você tem 🪙 ${coins}</small></h3>
         <p>Compre até <b>3 cartas</b>. Sobrando moedas, só <b>1</b> fica guardada para a próxima Fase de Melhorias.</p>
         <div class="cp-cards">${picked.map((id, i) => cardHtml(id, this.sel.has(`${i}`) ? 'sel' : '', `data-i="${i}"`)).join('')}</div>
-        <div class="cp-sum">Selecionadas: ${this.sel.size}/3 · Custo: 🪙 ${spent} ${spent > coins ? '<b class="bad">— moedas insuficientes</b>' : ''}</div>
         ${buyHint(picked, [...this.sel].map(Number), coins).html}
-        <button class="primary cp-big" id="cp-ok" ${spent <= coins ? '' : 'disabled'}>Comprar e continuar</button></div>`, false);
+        <div class="up-actions"><button class="primary cp-big" id="cp-ok" ${spent <= coins ? '' : 'disabled'}>Comprar e continuar</button>
+          <span class="cp-sum">Selecionadas: ${this.sel.size}/3 · Custo: 🪙 ${spent} ${spent > coins ? '<b class="bad">— moedas insuficientes</b>' : ''}</span></div></div>`, side), false);
+      paintCardArt(this.page);
+      bindUpgradeView(this.page);
       this.page.querySelectorAll<HTMLElement>('[data-i]').forEach(el => {
         el.onclick = () => { const k = el.dataset.i!; if (this.sel.has(k)) this.sel.delete(k); else if (this.sel.size < 3) this.sel.add(k); this.upgrade(); };
       });
@@ -462,7 +464,7 @@ export class CampaignUI {
     clearTimeout(this.curseTimer);
     const name = (g: GuildId) => guildName(g);
     if (step >= list.length) {
-      this.show('Maldições Mortais · Resumo', `${curseSummaryHtml(c, name)}
+      this.show('Maldições Mortais · Resumo', `${curseSummaryHtml(c, name, me.id)}
         <div class="cp-step"><button class="primary cp-big" id="cp-ok">Continuar para as Melhorias ▶</button></div>`, false);
       paintCardArt(this.page);
       (this.page.querySelector('#cp-ok') as HTMLElement).onclick = () => { up.curseDone = true; this.save(); this.upgrade(); };
@@ -510,8 +512,8 @@ export class CampaignUI {
     const inv = Object.fromEntries(me.heroes.map(h => [h, st.filter(x => x.to === h).map(x => x.id)]));
     const errs = [...validateInventory(c, me, inv), ...poolErrors(st, true)];
     const opts: InvOptions = { heroes: me.heroes, color: GUILDS[me.id].color, discard: true, slots: (h, cards) => heroSlots(c, me, h, cards), curse: h => curseLabel(me.curses[h]), curseSlot: h => CURSES[me.curses[h]]?.slot ? CURSES[me.curses[h]].name : null };
-    this.show('Fase de Melhorias · Inventário', `
-      <div class="cp-step"><h3>3. Equipe seus Heróis</h3>
+    this.show('Fase de Melhorias · Inventário', `${upgradeBarHtml(c, me.id, guildName)}
+      <div class="cp-step up-step"><h3>3. Equipe seus Heróis</h3>
       <p>Clique num <b>espaço vazio</b> ou numa <b>carta</b> para escolher a carta (troca entre Heróis, tira ou descarta). Cada Herói tem 4 espaços (o Tomo da Iluminação dá +2 para Mágicas; algumas Maldições ocupam 1). Até 12 cartas na Guilda; 1 armadura por Herói; 1 Bomba por Guilda.</p>
       ${invEditorHtml(st, opts)}
       ${errs.length ? `<div class="lb-warn">${errs.join('<br/>')}</div>` : ''}

@@ -428,7 +428,7 @@ export class Controller {
   private choicePick: { req: ChoiceRequest; resolve: (i: number) => void } | null = null;
   private askChoice(req: ChoiceRequest): Promise<number> {
     return new Promise(res => {
-      this.choicePick = { req, resolve: i => { this.choicePick = null; this.hud.monsterPanel(null).classList.remove('over'); this.clearHighlights(); res(i); } };
+      this.choicePick = { req, resolve: i => { this.choicePick = null; this.hud.monsterPanel(null).classList.remove('over'); if (req.choice === 'reward') this.closeReward(); this.clearHighlights(); res(i); } };
       this.refresh();
     });
   }
@@ -450,20 +450,8 @@ export class Controller {
       this.hud.setHint(`${req.source}: escolha Sim ou Não`);
     } else if (req.choice === 'reward') {
       hl.activeUnit = h.id;
-      const nc = req.newCard!;
-      const swaps = (req.cards ?? []).map((id, i) => `<button class="primary" data-i="${i}">🔁 Trocar <b>${CARDS[id]?.name ?? id}</b></button>`).join('');
-      const gives = (req.units ?? []).map((id, i) => `<button data-i="${(req.cards ?? []).length + i}">🎁 Dar para ${g.name(g.unit(id))}</button>`).join('');
-      html = `<div class="panel-h">🃏 Recompensa: ${CARDS[nc]?.name ?? nc}</div>
-        <div class="mc-body">
-          <p>${req.text ?? ''}</p>
-          <div class="rw-card">${itemCard(nc)}</div>
-          <div class="mc-btns">${swaps}${gives}<button id="ch-none">📦 Guardar sem Herói</button></div>
-        </div>`;
-      this.hud.setHint('Inventário cheio: troque uma carta, dê a um Aliado ou guarde a nova sem Herói');
-      const el1 = this.hud.monsterPanel(html);
-      paintCardArt(el1);
-      el1.querySelectorAll<HTMLElement>('[data-i]').forEach(b => { b.onclick = () => resolve(Number(b.dataset.i)); });
-      (el1.querySelector('#ch-none') as HTMLElement).onclick = () => resolve(-1);
+      this.hud.monsterPanel(null);
+      this.paintReward(req, resolve);
       return;
     } else if (req.choice === 'loot') {
       hl.activeUnit = h.id;
@@ -507,6 +495,105 @@ export class Controller {
     el.classList.toggle('over', this.battle.isOpen);
     el.querySelectorAll<HTMLElement>('[data-i]').forEach(b => { b.onclick = () => resolve(Number(b.dataset.i)); });
     (el.querySelector('#ch-none') as HTMLElement).onclick = () => resolve(-1);
+  }
+
+  /** Recompensa com o inventário cheio: as cartas dos Heróis da Guilda e a carta nova, para arrastar (o mesmo editor do inventário).
+   *  Só valem as escolhas da regra: trocar por uma carta do Herói, dar a um Aliado com espaço ou guardar sem Herói. */
+  private rewardDraft: { req: ChoiceRequest; items: InvItem[]; base: InvItem[]; home: Map<InvItem, string>; card: InvItem; mine: InvItem[]; pick: number; msg: string } | null = null;
+
+  private closeReward() {
+    this.rewardDraft = null;
+    this.hud.panel('restbox', null);
+  }
+
+  private paintReward(req: ChoiceRequest, resolve: (i: number) => void) {
+    const g = this.game;
+    const h = g.unit(req.heroId);
+    const heroes = g.heroesOf(req.guild);
+    const hd = h.defId;
+    const n = (req.cards ?? []).length;
+    const allies = (req.units ?? []).map(id => g.unit(id).defId);
+    const nc = req.newCard!;
+    const cname = (id: string) => CARDS[id]?.name ?? id;
+    if (this.rewardDraft?.req !== req) {
+      // as cartas do Herói vêm do pedido (a ordem é a dos índices da troca)
+      const mine = (req.cards ?? []).map(id => ({ id, to: hd }));
+      const base = heroes.flatMap(x => x.defId === hd ? mine : x.cards.map(c => ({ id: c.defId, to: x.defId })));
+      const card = { id: nc, to: 'pool' };
+      this.rewardDraft = { req, items: [], base, home: new Map(base.map(x => [x, x.to])), card, mine, pick: -1, msg: '' };
+    }
+    const d = this.rewardDraft!;
+    // arruma as cartas conforme a escolha atual
+    const layout = () => {
+      const arr = d.base.slice();
+      for (const x of d.base) x.to = d.home.get(x)!;
+      if (d.pick >= 0 && d.pick < n) {
+        const old = d.mine[d.pick];
+        arr[arr.indexOf(old)] = d.card;
+        d.card.to = hd;
+        old.to = 'pool';
+        arr.push(old);
+      } else {
+        d.card.to = d.pick >= n ? allies[d.pick - n] : 'pool';
+        arr.push(d.card);
+      }
+      d.items.splice(0, d.items.length, ...arr);
+    };
+    // o que o jogador fez no editor vira uma das escolhas da regra (ou um aviso)
+    const before = new Map<InvItem, string>();
+    const at = new Map<InvItem, number>();
+    const interpret = () => {
+      const moved = d.items.filter(x => x !== d.card && x.to !== before.get(x));
+      const cardMoved = d.card.to !== before.get(d.card);
+      const out = d.mine.filter(x => x.to !== hd);
+      // a carta nova já estava no Herói e foi trocada de lugar com outra carta dele: agora sai essa outra
+      const other = d.card.to === hd && before.get(d.card) === hd ? d.mine.find(x => x.to === hd && d.items.indexOf(x) !== at.get(x)) : undefined;
+      // só a carta nova (e a carta do Herói que sai para dar lugar) mudam de lugar
+      const bad = moved.some(x => !d.mine.includes(x) || (x.to !== 'pool' && x.to !== hd));
+      let pick: number | null = null;
+      if (bad) pick = null;
+      else if (other && !moved.length) pick = d.mine.indexOf(other);
+      else if (d.card.to === hd && out.length === 1) pick = d.mine.indexOf(out[0]);
+      else if (!cardMoved && moved.length === 1 && d.mine.includes(moved[0]) && moved[0].to === 'pool' && out.length === 1) pick = d.mine.indexOf(moved[0]);
+      else if (d.card.to === 'pool' && !moved.length) pick = -1;
+      else if (d.card.to === 'pool' && moved.length === 1 && moved[0].to === hd) pick = -1;
+      else if (allies.includes(d.card.to) && !moved.length) pick = n + allies.indexOf(d.card.to);
+      if (pick === null) {
+        const to = d.card.to;
+        d.msg = bad ? 'Só a carta nova muda de lugar agora — as outras você troca no Descanso.'
+          : to === hd ? `Solte a ${cname(nc)} em cima da carta de ${HEROES[hd].name} que vai sair.`
+          : to !== 'pool' ? `${HEROES[to]?.name ?? to} não tem espaço livre para a ${cname(nc)}.`
+          : 'Escolha onde a carta nova fica.';
+      } else { d.pick = pick; d.msg = ''; }
+      layout();
+      this.refresh();
+    };
+    layout();
+    d.items.forEach((x, i) => { before.set(x, x.to); at.set(x, i); });
+    const opts: InvOptions = {
+      heroes: heroes.map(x => x.defId), color: g.guild(req.guild).color, discard: false,
+      slots: (id, ids) => {
+        const s = g.slotsUsed(heroes.find(x => x.defId === id)!, ids.map((defId, i) => ({ uid: `_${i}`, defId, exhausted: false, uses: 0 })));
+        return { ...s, magicExtra: ids.reduce((k, c) => k + (CARDS[c]?.fx.magicSlots ?? 0), 0) };
+      },
+      curse: id => { const u = heroes.find(x => x.defId === id)!; return u.curse ? CURSES[u.curse]?.name ?? null : null; },
+    };
+    const now = d.pick >= 0 && d.pick < n ? `🔁 <b>${cname(nc)}</b> fica com <b>${HEROES[hd].name}</b>; <b>${cname(d.mine[d.pick].id)}</b> vai para as cartas sem Herói (equipe no próximo Descanso).`
+      : d.pick >= n ? `🎁 <b>${cname(nc)}</b> vai para <b>${HEROES[allies[d.pick - n]].name}</b>.`
+      : `📦 <b>${cname(nc)}</b> fica sem Herói até o próximo Descanso.`;
+    const el = this.hud.panel('restbox', `
+      <div class="panel-h">🃏 Recompensa: ${cname(nc)}</div>
+      <div class="rb-body rw-body">
+        <p><b>${HEROES[hd].name}</b> está com o inventário cheio. <b>Arraste a carta nova</b> para cima de uma carta dele (troca: a outra fica sem Herói até o Descanso)${allies.length ? `, para um espaço vazio de ${allies.map(a => `<b>${HEROES[a].name}</b>`).join(' ou ')}` : ''} ou deixe-a sem Herói.</p>
+        ${invEditorHtml(d.items, opts)}
+        <div class="rw-now ${d.msg ? 'bad' : ''}">${d.msg ? `⚠ ${d.msg}` : now}</div>
+        <div class="rb-btns">${d.pick !== -1 ? '<button id="rw-keep">📦 Guardar sem Herói</button>' : ''}<button class="primary" id="rw-ok">✔ Confirmar</button></div>
+      </div>`);
+    bindInvEditor(el, d.items, opts, interpret);
+    const keep = el.querySelector('#rw-keep') as HTMLElement | null;
+    if (keep) keep.onclick = () => { d.pick = -1; d.msg = ''; this.refresh(); };
+    (el.querySelector('#rw-ok') as HTMLElement).onclick = () => resolve(d.pick);
+    this.hud.setHint('Recompensa: arraste a carta nova para um Herói (ou guarde sem Herói) e confirme');
   }
 
   /** Roda `fn`; se precisar de decisão, pergunta e repete. `done` é chamado (talvez depois) com o resultado. */
@@ -1749,7 +1836,7 @@ export class Controller {
         const cell = this.renderer.pickCell(x, y);
         const i = cell ? cp.req.cells!.findIndex(c => sameCell(c, cell)) : -1;
         if (i >= 0) cp.resolve(i);
-      } else {
+      } else if (cp.req.choice === 'extra') {
         const uid = this.renderer.pickUnit(x, y);
         const i = uid ? cp.req.units!.indexOf(uid) : -1;
         if (i >= 0) cp.resolve(i);
@@ -2524,7 +2611,7 @@ export class Controller {
     this.game.s = s;
     this.game.drain();
     this.deciding = false;
-    if (this.choicePick) { this.choicePick = null; this.hud.monsterPanel(null).classList.remove('over'); }
+    if (this.choicePick) { this.choicePick = null; this.hud.monsterPanel(null).classList.remove('over'); this.closeReward(); }
     this.ais = {};
     document.getElementById('gameover')?.remove();
     this.hud.inspected = null;

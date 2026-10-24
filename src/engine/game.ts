@@ -1687,7 +1687,8 @@ export class Game {
   /** Rajada de Vento: empurra o alvo até N Espaços, para o mais longe possível de quem atacou. */
   private pushAway(t: Unit, by: Unit, n: number, source = 'Rajada de Vento') {
     const start = t.cell!;
-    const nodes = this.reachable(t, n, start, false);
+    // empurrão não usa portal (teletransporte): nem pára no portal nem atravessa para o outro lado
+    const nodes = this.reachable(t, n, start, false, true);
     // quem atacou pode ter morrido na retaliação: a distância conta a partir de onde ele estava (ou do alvo)
     const ref = by.cell ?? start;
     const dist = (c: Cell) => Math.abs(c.c - ref.c) + Math.abs(c.r - ref.r);

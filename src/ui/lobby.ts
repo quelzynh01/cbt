@@ -1,7 +1,7 @@
 import { play } from '../audio/sfx';
 import { BANS_EACH } from '../engine/heroBan';
 import { GUILDS, HEROES, HERO_SETS, heroSetName, starterCards, type HeroSet } from '../engine/data';
-import { buyHint, buySummaryHtml, curseRevealHtml, curseSummaryHtml, handFromHtml, myCursesHtml, rankingHtml, resultTabsHtml, upgradeBarHtml } from './upgradeViews';
+import { bindUpgradeView, buyHint, buySummaryHtml, curseRevealHtml, curseSummaryHtml, handFromHtml, miniCards, myHeroesHtml, rankingHtml, resultHtml, upgradeBarHtml, upgradeLayout } from './upgradeViews';
 import { draftRounds, picksPerRound, titleHolders, type CampaignState } from '../campaign/campaign';
 import { gameConfirm } from './dialog';
 import { Game } from '../engine/game';
@@ -525,6 +525,8 @@ export class OnlineLobby {
       </div>`;
     };
     let center = '';
+    // Fase de Melhorias: a mesa inteira para a etapa (sem as cadeiras em cima e embaixo)
+    const upgrading = st.step.startsWith('upgrade') && !!me && !!camp?.upgrade;
     if (st.step === 'ban' && me) {
       const pool = st.banPool ?? [];
       const mine = st.bans?.[me] ?? null;
@@ -573,8 +575,8 @@ export class OnlineLobby {
         <div class="tb-actions">${ready
           ? `<span class="tb-wait">✓ Pronto! Aguardando: ${st.order.filter(g => !st.equip[g]).map(g => esc(name(g))).join(', ')} — você ainda pode trocar as cartas até todos terminarem.</span>`
           : `<button class="primary" id="tb-equip" ${errs.length ? 'disabled' : ''}>✔ Pronto</button>`}</div>`;
-    } else if (st.step.startsWith('upgrade') && me && camp?.upgrade) {
-      center = this.upgradeHtml(st, me);
+    } else if (upgrading) {
+      center = this.upgradeHtml(st, me!);
     } else if (st.step === 'choose' && camp) {
       const av = availableScenarios(camp);
       const chooser = camp.chooser;
@@ -595,11 +597,11 @@ export class OnlineLobby {
 
     this.show(`
       <div class="mp-head"><button class="mp-back">← Sair da sala</button><h2>Mesa · sala ${l.code}</h2></div>
-      <div class="tb-table">
+      ${upgrading ? `<div class="tb-table up-table"><div class="tb-center">${center}</div></div>` : `<div class="tb-table">
         <div class="tb-others">${others.map(seat).join('')}</div>
         <div class="tb-center">${center}</div>
         ${me ? seat(me) : ''}
-      </div>
+      </div>`}
       <div class="lb-status ${this.status.kind}" id="lb-status">${esc(this.status.text)}</div>
       ${this.chatHtml()}`);
     this.bindChat();
@@ -655,7 +657,6 @@ export class OnlineLobby {
     const c = st.camp!;
     const up = c.upgrade!;
     const g = c.guilds.find(x => x.id === me)!;
-    const last = c.played[c.played.length - 1];
     const name = (x: GuildId) => this.seatName(x);
     // quem ainda está escolhendo nesta etapa (as IAs escolhem na hora)
     const pending = (x: GuildId): boolean => {
@@ -664,49 +665,50 @@ export class OnlineLobby {
       return st.step === 'upgrade-draft' ? !st.upPick[x] : st.step === 'upgrade-buy' ? !st.upBuy[x] : st.step === 'upgrade-arrange' ? !st.upArr[x] : false;
     };
     const waitList = () => { const w = c.guilds.filter(x => x.id !== me && pending(x.id)).map(x => esc(name(x.id))); return w.length ? `<p class="up-waitlist">⏳ Aguardando ${w.join(', ')} escolher${w.length > 1 ? 'em' : ''}…</p>` : '<p class="up-waitlist">✓ Todos prontos…</p>'; };
-    // topo: as Guildas (a sua primeiro); resultado do mapa e a campanha em abas; as Maldições dos seus Heróis
-    const results = `<div class="cp-results">${upgradeBarHtml(c, me, name, ['upgrade-draft', 'upgrade-buy', 'upgrade-arrange'].includes(st.step) ? pending : undefined)}
-      <h4>Resultado: ${MAPS[last.mapId].name}</h4>${resultTabsHtml(c, name)}${myCursesHtml(c, me)}</div>`;
+    // topo: as Guildas (a sua primeiro, com quem ainda está escolhendo); ao lado da etapa: os seus Heróis com as cartas e o resultado do mapa
+    const bar = upgradeBarHtml(c, me, name, ['upgrade-draft', 'upgrade-buy', 'upgrade-arrange'].includes(st.step) ? pending : undefined);
+    const lay = (main: string) => upgradeLayout(bar, main, `${myHeroesHtml(c, me)}${resultHtml(c, name)}`);
     // Maldições Mortais: as cartas viradas na mesa, um Herói de cada vez (todos veem); depois o resumo
     if (st.step === 'upgrade-curses') {
       if ((up.curseStep ?? 0) < up.cursesDrawn.length) {
         const cur = up.cursesDrawn[up.curseStep ?? 0];
         return curseRevealHtml(c, cur.guild === me && g.controller === 'human', name);
       }
-      return `${curseSummaryHtml(c, name)}<div class="tb-actions">${st.upOk?.[me] || g.controller !== 'human' ? '<p class="tb-wait">✓ Aguardando os outros…</p>' : '<button class="primary" id="up-ok">Continuar para as Melhorias ▶</button>'}</div>`;
+      return `${curseSummaryHtml(c, name, me)}<div class="tb-actions">${st.upOk?.[me] || g.controller !== 'human' ? '<p class="tb-wait">✓ Aguardando os outros…</p>' : '<button class="primary" id="up-ok">Continuar para as Melhorias ▶</button>'}</div>`;
     }
     // depois das compras: o que cada Guilda comprou e descartou
     if (st.step === 'upgrade-summary') {
       return `${buySummaryHtml(c, name, me)}<div class="tb-actions">${st.upOk?.[me] || g.controller !== 'human' ? '<p class="tb-wait">✓ Aguardando os outros…</p>' : '<button class="primary" id="up-ok">Equipar meus Heróis ▶</button>'}</div>`;
     }
-    if (g.controller !== 'human') return `${results}<p>Você está assistindo.</p>`;
+    if (g.controller !== 'human') return lay('<p>Você está assistindo.</p>');
     if (st.step === 'upgrade-draft') {
       const hand = up.hands[me] ?? [];
       const need = Math.min(picksPerRound(c), hand.length);
-      if (st.upPick[me]) return `${results}<h3>Escolha de cartas — rodada ${up.round + 1} de ${draftRounds(c)}</h3>${waitList()}
-        <h4>Você escolheu</h4><div class="cp-cards small">${(st.upPick[me] ?? []).map(id => itemCard(id)).join('')}</div>
-        ${(up.picked[me] ?? []).length ? `<h4>Já escolhidas antes</h4><div class="cp-cards small">${up.picked[me]!.map(id => itemCard(id)).join('')}</div>` : ''}`;
-      return `${results}<h3>Escolha de cartas — rodada ${up.round + 1} de ${draftRounds(c)}</h3>
+      const head = `<h3>1. Escolha de cartas <small>rodada ${up.round + 1} de ${draftRounds(c)}</small></h3>`;
+      if (st.upPick[me]) return lay(`<div class="up-step">${head}${waitList()}
+        <h4>Você escolheu</h4>${miniCards(st.upPick[me] ?? [])}
+        ${(up.picked[me] ?? []).length ? `<h4>Já escolhidas antes</h4>${miniCards(up.picked[me]!)}` : ''}</div>`);
+      return lay(`<div class="up-step">${head}
         <p>Escolha <b>${need === 1 ? '1 carta' : `${need} cartas`}</b>; o resto passa para a esquerda. Ao fim você terá 6 cartas para comprar.</p>
         ${handFromHtml(c, me, name)}
         <div class="cp-cards">${hand.map((id, i) => itemCard(id, this.upSel.has(i) ? 'sel' : '', `data-up="${i}"`)).join('')}</div>
-        ${(up.picked[me] ?? []).length ? `<h4>Já escolhidas</h4><div class="cp-cards small">${up.picked[me]!.map(id => itemCard(id)).join('')}</div>` : ''}
-        <div class="tb-actions"><button class="primary" id="up-go" ${this.upSel.size === need ? '' : 'disabled'}>Confirmar escolha</button></div>`;
+        <div class="tb-actions up-actions"><button class="primary" id="up-go" ${this.upSel.size === need ? '' : 'disabled'}>Confirmar escolha</button></div>
+        ${(up.picked[me] ?? []).length ? `<h4>Já escolhidas</h4>${miniCards(up.picked[me]!)}` : ''}</div>`);
     }
     if (st.step === 'upgrade-buy') {
       const coins = up.coins[me] ?? 0;
       const picked = up.picked[me] ?? [];
       const spent = [...this.upSel].reduce((s, i) => s + CARDS[picked[i]].cost, 0);
-      if (st.upBuy[me]) return `${results}<h3>Compra</h3>${waitList()}<h4>Você comprou</h4><div class="cp-cards small">${(st.upBuy[me] ?? []).map(id => itemCard(id)).join('') || '<i class="muted">nada</i>'}</div>`;
-      return `${results}<h3>Compra — você tem 🪙 ${coins}</h3>
+      if (st.upBuy[me]) return lay(`<div class="up-step"><h3>2. Compra</h3>${waitList()}<h4>Você comprou</h4>${miniCards(st.upBuy[me] ?? [])}</div>`);
+      return lay(`<div class="up-step"><h3>2. Compra <small>você tem 🪙 ${coins}</small></h3>
         <p>Compre até <b>3 cartas</b>. Sobrando moedas, só 1 fica guardada.</p>
         <div class="cp-cards">${picked.map((id, i) => itemCard(id, this.upSel.has(i) ? 'sel' : '', `data-up="${i}"`)).join('')}</div>
-        <div class="cp-sum">Selecionadas: ${this.upSel.size}/3 · Custo: 🪙 ${spent} ${spent > coins ? '<b class="bad">— moedas insuficientes</b>' : ''}</div>
         ${buyHint(picked, [...this.upSel], coins).html}
-        <div class="tb-actions"><button class="primary" id="up-go" ${spent <= coins ? '' : 'disabled'}>Comprar e continuar</button></div>`;
+        <div class="tb-actions up-actions"><button class="primary" id="up-go" ${spent <= coins ? '' : 'disabled'}>Comprar e continuar</button>
+          <span class="cp-sum">Selecionadas: ${this.upSel.size}/3 · Custo: 🪙 ${spent} ${spent > coins ? '<b class="bad">— moedas insuficientes</b>' : ''}</span></div></div>`);
     }
     // distribuição
-    if (st.upArr[me]) return `${results}<h3>Inventário</h3>${waitList()}`;
+    if (st.upArr[me]) return lay(`<div class="up-step"><h3>3. Inventário</h3>${waitList()}</div>`);
     if (!this.arrState) {
       this.arrState = [
         ...g.heroes.flatMap(h => (g.inventory[h] ?? []).map(id => ({ id, to: h }))),
@@ -718,7 +720,7 @@ export class OnlineLobby {
     const errs = [...validateInventory(c, g, inv), ...poolErrors(arr, true)];
     const arOpts: InvOptions = { heroes: g.heroes, color: GUILDS[me].color, discard: true, slots: (h, cards) => heroSlots(c, g, h, cards), curse: h => g.curses[h] ? CURSES[g.curses[h]].name : null, curseSlot: h => CURSES[g.curses[h]]?.slot ? CURSES[g.curses[h]].name : null };
     this.invBind = { items: arr, opts: arOpts };
-    return `${results}<h3>Equipe seus Heróis</h3>
+    return `${bar}<h3>3. Equipe seus Heróis</h3>
       <p>Clique num <b>espaço vazio</b> ou numa <b>carta</b> para escolher a carta (troca entre Heróis, tira ou descarta).</p>
       ${invEditorHtml(arr, arOpts)}
       ${errs.length ? `<div class="lb-warn">${errs.join('<br/>')}</div>` : ''}
@@ -737,6 +739,7 @@ export class OnlineLobby {
     }; });
     if (this.invBind) { bindInvEditor(this.page, this.invBind.items, this.invBind.opts, () => this.renderTable()); this.invBind = null; }
     paintCardArt(this.page);
+    bindUpgradeView(this.page);
     this.page.querySelectorAll<HTMLElement>('[data-flip]').forEach(b => { b.onclick = () => { if (!b.hasAttribute('disabled')) { play('pick-item'); this.send({ t: 'curseFlip' }); } }; });
     const ok = this.page.querySelector('#up-ok') as HTMLElement | null;
     if (ok) ok.onclick = () => this.send({ t: 'upOk' });

@@ -77,3 +77,74 @@
   #timeline { right: 76px; }
   :root { --safe-right: 76px; }
 }
+
+/* =====================================================================
+   Celular em pé — disposição de jogo de celular:
+   topo = menu, tempo, Placar e Online; embaixo = abas (Status, Bolsa, Missões, Cemitério, Registro)
+   e, no polegar direito, os botões grandes Descansar / Encerrar.
+   ===================================================================== */
+#topquick { display: none; }
+@media (orientation: portrait) and (max-width: 820px) {
+  /* topo */
+  #menubtn { order: -1; }
+  #topquick { display: flex; align-items: center; gap: 4px; margin-left: auto; order: 5; }
+  #topclock { font-weight: 800; color: var(--gold); font-size: 14px; padding: 5px 8px; background: rgba(0,0,0,.35); border-radius: 10px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  #topclock:empty { display: none; }
+  #topquick button { display: grid; justify-items: center; gap: 0; padding: 2px 8px 1px; font-size: 16px; line-height: 1.1; border-radius: 10px; }
+  #topquick button small { font-size: 8.5px; font-weight: 800; }
+  #topquick button.on { box-shadow: 0 0 0 2px var(--gold); }
+  #topquick button.hidden { display: none; }
+
+  /* abas embaixo: Placar e Online foram para o topo */
+  #dock [data-dock="score"], #dock [data-dock="online"], #dock .dock-sep { display: none !important; }
+  #dock button { height: 52px; }
+  #dock button small { font-size: 10px; }
+
+  /* Descansar / Encerrar: grandes, à direita, logo acima das abas */
+  #dock #dock-rest, #dock #dock-end { position: fixed; bottom: calc(70px + env(safe-area-inset-bottom)); height: 56px; flex: none; z-index: 46; border-radius: 16px;
+    box-shadow: 0 6px 16px rgba(0,0,0,.55); }
+  #dock #dock-end { right: 6px; width: 96px; font-size: 22px; }
+  #dock #dock-end small { font-size: 11px; }
+  #dock #dock-rest { right: 108px; width: 64px; }
+  #timeline { right: 178px; bottom: calc(70px + env(safe-area-inset-bottom)); }
+  html.touch #zoombtns { bottom: calc(136px + env(safe-area-inset-bottom)); }
+
+  /* combate e dados ficam por cima da barra de baixo (o botão de rolar não some) */
+  #battle, #dicecenter { z-index: 50; }
+  .bt-box { max-height: calc(100% - 12px); }
+
+  /* Status: a folha só do tamanho do conteúdo e cartas menores (fáceis de ver e tocar) */
+  #hud[data-drawer="hero"] #leftside { height: auto; max-height: min(70vh, 600px); }
+  #hud[data-drawer="hero"] #drawerhead { display: none !important; }
+  #hud[data-drawer="hero"] #leftside { border-radius: 18px 18px 0 0; border-top: 2px solid var(--line); }
+  #hud[data-drawer] #herobox .actions { display: none; }
+  #herobox .cards { grid-template-columns: repeat(var(--n, 4), 74px); justify-content: center; gap: 6px; }
+  #herobox .card.mini:not(.empty-slot), #herobox .card.empty-slot { height: 112px; }
+  #herobox .ability { font-size: 12px; }
+}
+
+/* ---------- celular: janelas por cima da gaveta (Bolsa aberta pelo Status, Recompensa da Missão) ---------- */
+@media (max-width: 1100px), (max-height: 560px) {
+  #bagview { z-index: 52; }
+  #prizebox { z-index: 52; }
+}
+/* ---------- celular em pé: seus 3 Heróis embaixo (no polegar), os inimigos em cima ---------- */
+@media (orientation: portrait) and (max-width: 820px) {
+  #prizebox { left: 8px; right: 8px; bottom: calc(136px + env(safe-area-inset-bottom)); display: flex; justify-content: center; }
+  #heropick { top: auto; bottom: calc(70px + env(safe-area-inset-bottom)); left: 6px; transform: scale(.82); transform-origin: bottom left; }
+  #timeline { top: 96px; bottom: auto; left: 50%; right: auto; transform: translateX(-50%); width: max-content; max-width: calc(100% - 12px); }
+}
+/* celular em pé: inimigos logo abaixo do topo, "Sua vez" embaixo deles */
+@media (orientation: portrait) and (max-width: 820px) {
+  #timeline { top: 52px; }
+  #activebar { top: 122px; }
+  #toasts { top: 168px; }
+}
+/* celular em pé: "▶ Ativar" no mesmo lugar de Descansar / Encerrar (no polegar); o Herói escolhido aparece logo acima */
+@media (orientation: portrait) and (max-width: 820px) {
+  #actprompt { transform: none; left: 6px; right: 56px; width: auto; justify-content: flex-start; z-index: 47; animation: none; }
+  body:has(#actprompt:not(.hidden)) :is(#dock-rest, #dock-end) { visibility: hidden; }
+  #actprompt #ap-x { margin-left: auto; }
+  #actprompt #ap-go { position: fixed; right: 6px; bottom: calc(70px + env(safe-area-inset-bottom)); width: 166px; height: 56px; z-index: 47;
+    font-size: 20px; border-radius: 16px; box-shadow: 0 6px 16px rgba(0,0,0,.55); }
+}

@@ -1,9 +1,10 @@
 import { CARDS, CURSES } from '../engine/cards';
 import { GUILDS, HEROES } from '../engine/data';
 import type { GuildId } from '../engine/types';
-import { medals, type CampaignState } from '../campaign/campaign';
-import { campaignList } from '../engine/maps';
+import { heroSlots, medals, type CampaignState } from '../campaign/campaign';
+import { MAPS, campaignList } from '../engine/maps';
 import { TITLES } from '../engine/titles';
+import { drawFace } from '../render/chibi';
 import { curseCard, itemCard } from './cardview';
 
 // Telas da Fase de Melhorias usadas igual na campanha (neste computador) e na campanha online:
@@ -27,25 +28,57 @@ export function upgradeBarHtml(c: CampaignState, me: GuildId, name: (g: GuildId)
   }).join('')}</div>`;
 }
 
-/** Resultado do último mapa e a campanha (geral) em abas. */
-export function resultTabsHtml(c: CampaignState, name: (g: GuildId) => string): string {
-  const last = c.played[c.played.length - 1];
-  if (!last) return '';
-  const map = `<table><tr><th>Guilda</th><th>Missões</th><th>Mortes</th><th>Moedas</th></tr>
-    ${last.guilds.map(r => `<tr class="${r.id === last.winner ? 'win' : ''}"><td>${who(r.id, name)}${r.id === last.winner ? ' 🏆' : ''}</td><td>${r.missions}</td><td>${r.deaths}</td><td>${r.coins}</td></tr>`).join('')}</table>`;
-  return `<div class="up-tabs" data-tab="map">
-    <div class="up-tabbar"><button type="button" class="t-map" onclick="this.closest('.up-tabs').dataset.tab='map'">📋 Este mapa</button><button type="button" class="t-all" onclick="this.closest('.up-tabs').dataset.tab='all'">🏆 Campanha (geral)</button></div>
-    <div class="up-tab tab-map">${map}</div>
-    <div class="up-tab tab-all">${rankingHtml(c, name)}</div>
-  </div>`;
+/** Carta pequena (cartas dos Heróis e resumos): o nome e o texto aparecem ao passar o mouse; a lupa amplia. */
+const mini = (id: string) => `<div class="up-mini" title="${esc(`${CARDS[id]?.name ?? id}: ${CARDS[id]?.text ?? ''}`)}">${itemCard(id)}</div>`;
+export function miniCards(ids: string[], cls = ''): string {
+  return `<div class="up-minis ${cls}">${ids.map(mini).join('') || '<span class="muted">Nada</span>'}</div>`;
 }
 
-/** Maldições Mortais dos meus Heróis (o efeito), para pensar na compra. */
-export function myCursesHtml(c: CampaignState, me: GuildId): string {
+/** Tela da Fase de Melhorias: as Guildas no topo; a etapa à esquerda e, ao lado, os seus Heróis e o resultado (sem rolar a tela). */
+export function upgradeLayout(bar: string, main: string, side: string): string {
+  return `${bar}<div class="up-lay"><div class="up-main">${main}</div><aside class="up-side">${side}</aside></div>`;
+}
+
+/** Placar da campanha aberto (janela por cima): continua aberto quando a tela é redesenhada (online). */
+let rankOpen = false;
+
+/** Resultado do último mapa (tabela curta) e o botão do placar da campanha (abre numa janela). */
+export function resultHtml(c: CampaignState, name: (g: GuildId) => string): string {
+  const last = c.played[c.played.length - 1];
+  if (!last) return '';
+  return `<section class="up-panel up-result"><h4>📋 ${esc(MAPS[last.mapId]?.name ?? '')}</h4>
+    <table><tr><th>Guilda</th><th title="Missões">🎯</th><th title="Mortes">💀</th><th title="Moedas">🪙</th></tr>
+    ${last.guilds.map(r => `<tr class="${r.id === last.winner ? 'win' : ''}"><td>${who(r.id, name)}${r.id === last.winner ? ' 🏆' : ''}</td><td>${r.missions}</td><td>${r.deaths}</td><td>${r.coins}</td></tr>`).join('')}</table>
+    <button type="button" class="up-rankbtn" data-rank="1">🏆 Placar da campanha</button>
+    <div class="up-pop ${rankOpen ? 'open' : ''}" data-rankpop><div class="up-popbox"><button type="button" class="up-popx" data-rank="0" title="Fechar">✕</button>${rankingHtml(c, name)}</div></div>
+  </section>`;
+}
+
+/** Os seus Heróis: as cartas que cada um tem agora e a Maldição (para pensar na escolha e na compra). */
+export function myHeroesHtml(c: CampaignState, me: GuildId): string {
   const g = c.guilds.find(x => x.id === me);
-  const list = g ? g.heroes.filter(h => g.curses[h] && CURSES[g.curses[h]] && g.curses[h] !== 'sem_maldicao') : [];
-  if (!list.length) return '';
-  return `<div class="up-curses"><b>☠ Maldições dos seus Heróis</b>${list.map(h => `<div><b>${HEROES[h].name}</b>: ${CURSES[g!.curses[h]].name} — <small>${esc(CURSES[g!.curses[h]].text)}</small></div>`).join('')}</div>`;
+  if (!g) return '';
+  const total = g.heroes.reduce((n, h) => n + (g.inventory[h] ?? []).length, 0);
+  return `<section class="up-panel up-heroes" style="--gc:${GUILDS[me].color}"><h4>🛡 Seus Heróis <small>${total}/12 cartas</small></h4>
+    ${g.heroes.map(h => {
+      const cards = g.inventory[h] ?? [];
+      const sl = heroSlots(c, g, h);
+      const cu = g.curses[h] && g.curses[h] !== 'sem_maldicao' ? CURSES[g.curses[h]] : null;
+      return `<div class="up-hero">
+        <div class="up-hh"><canvas width="56" height="56" data-uface="${h}" data-color="${GUILDS[me].color}"></canvas><b>${HEROES[h].name}</b><small>${sl.used}/${sl.max}</small></div>
+        ${cu ? `<div class="up-hcurse" title="${esc(cu.text)}">☠ <b>${esc(cu.name)}</b> — ${esc(cu.text)}</div>` : ''}
+        <div class="up-minis">${cards.map(mini).join('')}${'<div class="up-mini empty"></div>'.repeat(Math.max(0, sl.max - sl.used))}</div>
+      </div>`;
+    }).join('')}</section>`;
+}
+
+/** Depois de desenhar a tela: rostos dos Heróis e o botão do placar da campanha. */
+export function bindUpgradeView(root: ParentNode) {
+  root.querySelectorAll<HTMLCanvasElement>('canvas[data-uface]').forEach(cv => drawFace(cv, cv.dataset.uface!, cv.dataset.color!));
+  const pop = root.querySelector<HTMLElement>('[data-rankpop]');
+  const set = (v: boolean) => { rankOpen = v; pop?.classList.toggle('open', v); };
+  root.querySelectorAll<HTMLElement>('[data-rank]').forEach(b => { b.onclick = () => set(b.dataset.rank === '1'); });
+  if (pop) pop.onclick = e => { if (e.target === pop) set(false); };
 }
 
 /** De quem veio a mão desta rodada (as mãos passam para a esquerda, as mesmas cartas rodando). */
@@ -125,41 +158,40 @@ export function curseRevealHtml(c: CampaignState, canFlip: boolean, name: (g: Gu
 }
 
 /** Resumo: quem ficou amaldiçoado (e com qual Maldição). */
-export function curseSummaryHtml(c: CampaignState, name: (g: GuildId) => string): string {
+export function curseSummaryHtml(c: CampaignState, name: (g: GuildId) => string, me?: GuildId | null): string {
   const list = c.upgrade!.cursesDrawn;
-  const rows = c.guilds.map(g => {
+  const rows = byMeFirst(c, me).map(g => {
     const mine = list.filter(x => x.guild === g.id);
     if (!mine.length) return '';
-    return `<div class="cr-sumg"><h4>${who(g.id, name)}</h4><div class="cr-sumrow">${mine.map(x => `<div class="cr-sumhero ${x.kept === 'sem_maldicao' ? 'free' : ''}">
-      <b>${HEROES[x.hero].name}</b><small>${x.drawn.length} morte${x.drawn.length > 1 ? 's' : ''}</small>${curseCard(x.kept, 'small')}</div>`).join('')}</div></div>`;
+    return `<div class="cr-sumg ${g.id === me ? 'me' : ''}" style="--gc:${GUILDS[g.id].color}"><h4>${who(g.id, name)}${g.id === me ? ' <small>(você)</small>' : ''}</h4><div class="cr-sumrow">${mine.map(x => `<div class="cr-sumhero ${x.kept === 'sem_maldicao' ? 'free' : ''}">
+      <b>${HEROES[x.hero].name}</b><small>${x.drawn.length} morte${x.drawn.length > 1 ? 's' : ''}</small>${curseCard(x.kept, 'small')}
+      <span class="cr-sumtxt"><b>${esc(CURSES[x.kept].name)}</b>${x.kept === 'sem_maldicao' ? '' : ` — ${esc(CURSES[x.kept].text)}`}</span></div>`).join('')}</div></div>`;
   }).join('');
-  return `<div class="cp-step"><h3>☠ Quem ficou amaldiçoado</h3>
-    <p>As Maldições valem durante o próximo cenário. Uma <b>Poção de Cura</b> remove a Maldição na hora.</p>
-    ${rows}</div>`;
+  return `<div class="cp-step up-sum"><h3>☠ Quem ficou amaldiçoado <small>— valem no próximo cenário; uma <b>Poção de Cura</b> remove a Maldição na hora</small></h3>
+    <div class="up-sumgrid">${rows}</div></div>`;
 }
+
+/** As Guildas com a sua primeiro. */
+const byMeFirst = (c: CampaignState, me?: GuildId | null) => [...c.guilds.filter(g => g.id === me), ...c.guilds.filter(g => g.id !== me)];
 
 /** Depois que todos compram: o que cada Guilda comprou e descartou (as escolhidas e não compradas). */
 export function buySummaryHtml(c: CampaignState, name: (g: GuildId) => string, me?: GuildId | null): string {
   const up = c.upgrade!;
-  const rows = c.guilds.map(g => {
+  const rows = byMeFirst(c, me).map(g => {
     // o registro das compras (a IA já colocou as cartas nos Heróis, então `bought` dela pode estar vazio)
     const bought = up.purchased?.[g.id] ?? up.bought[g.id] ?? [];
     const left = (up.picked[g.id] ?? []).slice();
     for (const id of bought) { const i = left.indexOf(id); if (i >= 0) left.splice(i, 1); }
     const dropped = up.dropped?.[g.id] ?? [];
-    return `<div class="by-guild" style="--gc:${GUILDS[g.id].color}">
+    return `<div class="by-guild ${g.id === me ? 'me' : ''}" style="--gc:${GUILDS[g.id].color}">
       <h4>${who(g.id, name)} ${g.id === me ? '<small>(você)</small>' : g.controller === 'ai' ? '<small>(IA)</small>' : ''}
         <span class="by-coins">🪙 sobrou ${up.coins[g.id] ?? 0} · guarda ${g.saved}</span></h4>
-      <div class="by-cols">
-        <div><h5>🛒 Comprou</h5><div class="cp-cards small">${bought.map(id => itemCard(id)).join('') || '<span class="muted">Nada</span>'}</div></div>
-        <div><h5>🗑 Descartou</h5><div class="cp-cards small by-disc">${left.map(id => itemCard(id)).join('') || '<span class="muted">Nada</span>'}</div></div>
-      </div>
-      ${dropped.length ? `<div class="by-drop"><h5>↩ Tirou do inventário para dar lugar</h5><div class="cp-cards small by-disc">${dropped.map(id => itemCard(id)).join('')}</div></div>` : ''}</div>`;
+      <h5>🛒 Comprou</h5>${miniCards(bought)}
+      <h5>🗑 Descartou</h5>${miniCards(left, 'by-disc')}
+      ${dropped.length ? `<h5 class="by-droph">↩ Tirou do inventário para dar lugar</h5>${miniCards(dropped, 'by-disc')}` : ''}</div>`;
   }).join('');
-  void CARDS;
-  return `<div class="cp-step"><h3>🛒 Compras de todas as Guildas</h3>
-    <p>As cartas escolhidas e não compradas voltam para a caixa.</p>
-    ${rows}</div>`;
+  return `<div class="cp-step up-sum"><h3>🛒 Compras de todas as Guildas <small>— as escolhidas e não compradas voltam para a caixa</small></h3>
+    <div class="up-sumgrid">${rows}</div></div>`;
 }
 
 /** Compra: o que ainda dá para comprar com as moedas que sobram (até 3 cartas). */
