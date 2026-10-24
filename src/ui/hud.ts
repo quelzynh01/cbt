@@ -33,6 +33,9 @@ export interface HudActions {
   rest(): void;
   /** Maldição que ocupa espaço: escolher a carta que fica debaixo dela. */
   cover(heroId: string): void;
+  /** Arrastar na barra do Herói: nova ordem das cartas / carta que fica debaixo da Maldição. */
+  order(heroId: string, uids: string[]): void;
+  coverCard(heroId: string, cardUid: string): void;
   /** Cancela o ataque do seu Herói antes de rolar os dados (volta como se não tivesse atacado). Null = não dá. */
   cancelAttack: (() => void) | null;
   inspect(unitId: string | null): void;
@@ -295,6 +298,14 @@ export class Hud {
   /** Herói selecionado esperando o "▶ Ativar". */
   pendingActivate: string | null = null;
 
+  /** O Herói ainda pode ser ativado neste turno? (ex.: quem andou com as Botas de outro já não pode) */
+  private canActivate(u: Unit): boolean {
+    const g = this.game, a = g.s.activation;
+    if (a?.heroId === u.id) return false;
+    if ((g.s.activatedThisTurn ?? []).includes(u.id) && !g.activationFresh()) return g.freeMode;
+    return !a || g.activationFresh() || g.canBless(u.id) || g.freeMode;
+  }
+
   /** Botão grande "▶ Ativar Fulano" acima da barra dos Heróis. */
   private renderActPrompt() {
     const g = this.game;
@@ -304,8 +315,8 @@ export class Hud {
     const cur = g.currentGuild();
     // a tela da Entrada de Monstros vem primeiro: o "Ativar" só aparece depois que ela sair
     if (!$('#spawnbox', this.root).classList.contains('hidden')) { el.classList.add('hidden'); return; }
-    if (!u || !u.alive || u.guild !== cur.id || !this.isMine(cur.id) || g.s.activation?.heroId === u.id || g.s.winner) {
-      if (id && (!u || g.s.activation?.heroId === id || u.guild !== cur.id)) this.pendingActivate = null;
+    if (!u || !u.alive || u.guild !== cur.id || !this.isMine(cur.id) || g.s.activation?.heroId === u.id || g.s.winner || !this.canActivate(u)) {
+      if (id && (!u || g.s.activation?.heroId === id || u.guild !== cur.id || !this.canActivate(u))) this.pendingActivate = null;
       el.classList.add('hidden');
       return;
     }
@@ -877,7 +888,7 @@ export class Hud {
     const fresh = g.canRest();
     // Ativar (Herói escolhido) em cima do Descansar; depois de ativar, mostra quem está ativo
     const pa = this.pendingActivate ? g.s.units[this.pendingActivate] : null;
-    const canAct = !!pa && human && pa.alive && pa.guild === cur.id && act?.heroId !== pa.id;
+    const canAct = !!pa && human && pa.alive && pa.guild === cur.id && act?.heroId !== pa.id && this.canActivate(pa);
     const activeH = act ? g.unit(act.heroId) : null;
     const actBtn = canAct
       ? `<button id="btn-act" class="primary hb-act">▶ Ativar ${HEROES[pa!.defId].name}<small class="kbd">Enter</small></button>`
@@ -919,6 +930,7 @@ export class Hud {
     const isActive = act?.heroId === u.id;
     const mine = human && u.guild === cur.id;
     const max = g.maxHp(u);
+    // na ordem que o jogador arrumou (dá para arrastar); os espaços extras do Tomo ficam à direita
     const cards: (CardInst | null)[] = [...u.cards];
     // Maldição que ocupa espaço: aparece como uma carta no inventário (com a carta que ficou debaixo dela)
     const curseSlot = u.curse && CURSES[u.curse]?.slot ? 1 : 0;
@@ -948,13 +960,24 @@ export class Hud {
       ${u.banished ? '<div class="tag dead">👻 Banido — está no Tabuleiro de Entrada (volta na Entrada de Monstros ou ao Descansar)</div>' : ''}
       ${g.s.copied?.heroId === u.id ? `<div class="tag rr">🐒 Copiou: <b>${Object.values(HEROES).find(x => x.ability === g.s.copied!.ability)?.abilityName ?? ''}</b> (até o fim do turno)</div>` : ''}
       ${u.petrified ? `<div class="tag stun">🗿 Petrificado: −${u.petrified} de Movimento até Descansar</div>` : ''}
-      ${u.curse && !curseSlot ? `<div class="ability curse-ab" title="${CURSES[u.curse]?.text ?? ''}"><b>☠ ${CURSES[u.curse]?.name}</b> — ${CURSES[u.curse]?.text}</div>` : ''}
+      ${u.curse ? `<div class="ability curse-ab" title="${CURSES[u.curse]?.text ?? ''}"><b>☠ ${CURSES[u.curse]?.name}</b> — ${CURSES[u.curse]?.text}</div>` : ''}
       ${u.stunned ? '<div class="tag stun">✷ Atordoado — não rola Defesa até Descansar</div>' : ''}
       ${!u.alive ? '<div class="tag dead">☠ Morto — ressuscita quando a Guilda Descansar</div>' : ''}
       ${u.spent ? '<div class="tag stun">💤 Exausto — não usa de novo as cartas e habilidades que exaurem o Herói até a Guilda Descansar</div>' : ''}
       </div><div class="hb-c3">
-      ${curseSlot ? `<div class="hb-cursetxt ${mine && u.covered ? 'can-cover' : ''}" ${mine && u.covered ? 'id="hb-cover"' : ''} title="${mine && u.covered ? 'Clique para escolher qual carta fica debaixo da Maldição. ' : ''}${CURSES[u.curse!].text}">☠ <b>${CURSES[u.curse!].name}</b> — ocupa 1 espaço${u.covered ? ` · cobre <b>${CARDS[u.covered.defId].name}</b>${mine ? ' <u>trocar</u>' : ''}` : ''}</div>` : ''}
-      <div class="cards">${cards.map(c => this.cardHtml(c, u, usableIds, mine || (human && this.isMine(u.guild!)))).join('')}</div>
+      ${(() => {
+        // a Maldição que ocupa espaço fica no 1º espaço (em cima de uma carta, ou vazio com a caveira); à direita, os extras do Tomo
+        const own = mine || (human && this.isMine(u.guild!));
+        const html = cards.map((c, i) => this.cardHtml(c, u, usableIds, own, i + curseSlot >= 4));
+        if (curseSlot) {
+          const cv = u.covered;
+          const skull = `<div class="curse-x" title="${CURSES[u.curse!].name}: ${CURSES[u.curse!].text}">☠<small>${CURSES[u.curse!].name}</small></div>`;
+          const slot = cv ? this.cardHtml(cv, u, new Set(), false).replace('class="card mini', 'class="card mini cursed').replace(/<\/div>\s*$/, `${skull}</div>`)
+            : `<div class="card empty-slot cursed">${skull}</div>`;
+          html.unshift(slot);
+        }
+        return `<div class="cards" style="--n:${html.length}">${html.join('')}</div>`;
+      })()}
       <div class="tokrow"><button class="tok-bag" id="hb-bag2" title="Abrir a bolsa">🎒</button>${u.tokens.length ? `${sortTokens(u.tokens).slice(0, 3).map(t => `<img class="tok-mini" src="${tokenUrl(tokenImageId(t) ?? 'fundo')}" title="${tokenName(t)}"/>`).join('')}${u.tokens.length > 3 ? `<span class="tok-more">+${u.tokens.length - 3}</span>` : ''}` : '<span class="muted">Bolsa vazia</span>'}</div></div>
       ${actions}`;
     if (this.inspected) $('#hb-close', box).onclick = () => this.actions.inspect(null);
@@ -969,16 +992,61 @@ export class Hud {
     box.querySelectorAll<HTMLElement>('[data-useact]').forEach(b => {
       b.onclick = e => { e.stopPropagation(); if (!b.classList.contains('off')) this.actions.useCard(u.id, b.dataset.useact!); };
     });
-    const cov = box.querySelector<HTMLElement>('#hb-cover');
-    if (cov) cov.onclick = e => { e.stopPropagation(); this.actions.cover(u.id); };
+    if (mine || (human && this.isMine(u.guild!))) this.bindCardDrag(box, u);
     const openBag = () => this.showBag(u.id);
     $('#hb-bag2', box).onclick = openBag;
     if (this.bagOpen === u.id) this.showBag(u.id);
     this.bindActions(box);
   }
 
-  private cardHtml(c: CardInst | null, u: Unit, usable: Set<string>, mine = false) {
-    if (!c) return `<div class="card empty-slot"><span>vazio</span></div>`;
+  /** Arrastar as cartas na barra do Herói: soltar em outra carta troca as duas de lugar; a carta debaixo da Maldição não troca na partida. */
+  private bindCardDrag(box: HTMLElement, u: Unit) {
+    box.querySelectorAll<HTMLElement>('.cards .card[data-card]:not(.cursed)').forEach(el => {
+      el.onpointerdown = e => {
+        if (e.button !== 0 || (e.target as HTMLElement).closest('button')) return;
+        const uid = el.dataset.card!;
+        const x0 = e.clientX, y0 = e.clientY;
+        let ghost: HTMLElement | null = null, over: HTMLElement | null = null;
+        const target = (x: number, y: number) => (document.elementFromPoint(x, y) as HTMLElement | null)?.closest<HTMLElement>('.cards .card') ?? null;
+        const move = (ev: PointerEvent) => {
+          if (!ghost) {
+            if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < 8) return;
+            ghost = el.cloneNode(true) as HTMLElement;
+            ghost.classList.add('card-ghost');
+            document.body.append(ghost);
+            el.classList.add('card-dragging');
+          }
+          ghost.style.left = `${ev.clientX}px`; ghost.style.top = `${ev.clientY}px`;
+          const t = target(ev.clientX, ev.clientY);
+          if (t !== over) { over?.classList.remove('card-over'); over = t && t !== el ? t : null; over?.classList.add('card-over'); }
+        };
+        const up = (ev: PointerEvent) => {
+          window.removeEventListener('pointermove', move);
+          window.removeEventListener('pointerup', up);
+          if (!ghost) return;
+          ghost.remove(); el.classList.remove('card-dragging'); over?.classList.remove('card-over');
+          // não conta como clique (não seleciona a carta)
+          const stop = (ce: Event) => { ce.stopPropagation(); ce.preventDefault(); };
+          el.addEventListener('click', stop, { capture: true, once: true });
+          setTimeout(() => el.removeEventListener('click', stop, { capture: true }), 0);
+          const t = target(ev.clientX, ev.clientY);
+          // a carta debaixo da Maldição só troca no Descanso ou na fase de Melhoria
+          if (!t || t === el || t.classList.contains('cursed')) return;
+          const ids = u.cards.map(c => c.uid);
+          const i = ids.indexOf(uid);
+          const j = t.dataset.card ? ids.indexOf(t.dataset.card) : ids.length - 1;
+          if (i < 0 || j < 0) return;
+          [ids[i], ids[j]] = [ids[j], ids[i]];
+          this.actions.order(u.id, ids);
+        };
+        window.addEventListener('pointermove', move);
+        window.addEventListener('pointerup', up);
+      };
+    });
+  }
+
+  private cardHtml(c: CardInst | null, u: Unit, usable: Set<string>, mine = false, tomo = false) {
+    if (!c) return `<div class="card empty-slot ${tomo ? 'tomo-slot' : ''}"><span>${tomo ? '📘 Tomo' : 'vazio'}</span></div>`;
     const act = this.game.activatable(u, c);
     const actBtn = act ? (mine
       ? `<button class="c-act ${act.ok ? '' : 'off'} ${act.armed ? 'armed' : ''}" data-useact="${c.uid}" title="${act.label}${act.why ? ` — ${act.why}` : ''}">${act.toggle ? (act.armed ? '🛡️ Armado' : '🛡️ Armar') : '⚡ Usar'}</button>`
@@ -990,7 +1058,7 @@ export class Hud {
     // mini carta: nome, arte e os números (dados de ataque, Defesa, Vida, Rerrolagem); o texto fica no toque longo / mouse e na lupa
     const tip = `${d.name} — ${ITEM_LEVEL[d.level]?.name ?? ''}${d.text ? `: ${d.text}` : ''}`.replace(/"/g, '&quot;');
     const fill = CARD_ART[c.defId]?.kind === 'fill';
-    return `<div class="card mini k-${d.kind} ${c.exhausted ? 'exhausted' : ''} ${sel ? 'selected' : ''} ${usable.has(c.uid) ? 'usable' : ''}" data-card="${c.uid}" style="--lv:${itemColor(c.defId)}" title="${tip}">
+    return `<div class="card mini k-${d.kind} ${tomo ? 'tomo-slot' : ''} ${c.exhausted ? 'exhausted' : ''} ${sel ? 'selected' : ''} ${usable.has(c.uid) ? 'usable' : ''}" data-card="${c.uid}" style="--lv:${itemColor(c.defId)}" title="${tip}">
       <div class="cname">${d.name}</div>${actBtn}
       <div class="cart ${fill ? 'fill' : ''}">${itemArt(c.defId)}</div>
       ${d.kind === 'attack' ? `<div class="cicons">${medal(d.attackType === 'melee' ? 'melee' : 'ranged', d.dice + bonus, `${d.dice + bonus} dados de ataque ${d.attackType === 'melee' ? 'Próximo' : 'a Distância'}${bonus ? ` (carta ${d.dice} + ${bonus} de bônus)` : ''}`, `catk${bonus > 0 ? ' up' : ''}`)}</div>` : ''}
@@ -1287,6 +1355,8 @@ export class Hud {
         : totalW ? `−${totalW} Ferimento${totalW > 1 ? 's' : ''}!` : 'Bloqueado!';
       await wait(1500);
       if (!alive()) return;
+      // online: quem assiste na tela de combate espera o "fim" de quem atacou (aqui não há botão Continuar)
+      if (mineAtk) diceSync.mine('done');
       box.classList.add('fade');
       await wait(400);
       box.classList.add('hidden'); box.classList.remove('fade');
@@ -1425,6 +1495,57 @@ export class Hud {
 
   /** Rerrolagem no painel do centro: rola (com clique), mostra o resultado e deixa escolher os dados para rolar de novo.
    *  Na Defesa, primeiro aparece o ataque de quem atacou. O painel continua aberto e a rolagem segue nele. */
+  /** Online: outro jogador está decidindo uma Rerrolagem — mostra a rolagem dele (junto com o clique dele) e espera a escolha. */
+  private spectating = false;
+  spectateDecision(req: { heroId: string; kind: 'attack' | 'defense'; faces: DieFace[]; success: DieFace; rerolls: number; base?: number; round?: number; vs?: { id: string; faces: DieFace[]; hits: number; type: string; base?: number }; card?: { name: string; type: string; dice: number } }, who: string) {
+    const g = this.game;
+    const box = $('#dicecenter', this.root);
+    for (const t of this.centerTimers) clearTimeout(t);
+    this.centerTimers = [];
+    const token = ++this.centerRun;
+    this.carry = null;
+    this.spectating = true;
+    diceSync.beginDecision(req);
+    const sp = Math.max(1, this.speed);
+    const wait = (ms: number) => new Promise<void>(r => this.centerTimers.push(window.setTimeout(r, ms / sp)));
+    const me = g.unit(req.heroId);
+    const black = req.kind === 'attack';
+    const ok = (f: DieFace) => f === 'crit' || f === req.success;
+    const attacker = g.unit(req.kind === 'attack' ? me.id : req.vs!.id);
+    box.innerHTML = `<div class="cd-box">
+      <div class="cd-title">${req.kind === 'attack' || attacker.kind === 'hero' ? 'Ataque' : 'Reação'} · <b>${g.name(attacker)}</b>${req.card ? ` <small>${req.card.name}</small>` : ''}</div>${req.card ? atkInfo(req.card.type, req.card.dice) : ''}
+      <div class="cd-row atk"></div><div class="cd-btn atk"></div><div class="cd-sum atk"></div>
+      ${req.kind === 'defense' ? cdDefHtml(g.name(me), me.id) : ''}
+      <div class="cd-final"></div></div>`;
+    box.classList.remove('hidden', 'fade', 'interactive');
+    const settle = (row: Element, faces: DieFace[], b: boolean, s: string) => { row.innerHTML = ''; for (const f of faces) { const d = document.createElement('span'); d.className = `cd-die ${b ? 'black' : 'white'}`; d.innerHTML = dieImg(f, b); d.classList.toggle('hit', f === 'crit' || f === s); d.classList.toggle('crit', f === 'crit'); row.append(d); } };
+    (async () => {
+      if (req.vs) {
+        settle(box.querySelector('.cd-row.atk')!, req.vs.faces, true, req.vs.type);
+        box.querySelector('.cd-sum.atk')!.innerHTML = `<b>${req.vs.hits}</b> acerto${req.vs.hits === 1 ? '' : 's'}`;
+      }
+      const holder = req.kind === 'attack' ? box.querySelector('.cd-box')! : this.cdDef(me.id);
+      holder.classList?.add('show');
+      const row = (req.kind === 'attack' ? box.querySelector('.cd-row.atk') : holder.querySelector('.cd-row'))!;
+      const btn = (req.kind === 'attack' ? box.querySelector('.cd-btn.atk') : holder.querySelector('.cd-btn'))!;
+      const sum = (req.kind === 'attack' ? box.querySelector('.cd-sum.atk') : holder.querySelector('.cd-sum'))!;
+      if ((req.round ?? 1) > 1) settle(row, req.faces, black, req.success);
+      else {
+        btn.innerHTML = `<span class="cd-wait">⏳ Aguardando ${who} rolar…</span>`;
+        await diceSync.wait('roll');
+        if (token !== this.centerRun) return;
+        btn.innerHTML = '';
+        await this.rollWaves(row, req.faces, req.base ?? (black ? req.card?.dice : undefined), black, req.success, false, btn, wait, true, 'roll');
+      }
+      if (token !== this.centerRun) return;
+      const hits = req.faces.filter(ok).length;
+      sum.innerHTML = `<b>${hits}</b> ${black ? 'acerto' : 'bloqueio'}${hits === 1 ? '' : 's'}`;
+      btn.innerHTML = `<span class="cd-wait">⏳ ${who} está escolhendo quais dados rerrolar…</span>`;
+    })();
+  }
+  /** Acabou de acompanhar a Rerrolagem do outro (o resultado vem a seguir, normal). */
+  endSpectate() { if (this.spectating) { this.spectating = false; this.resetDice(); } }
+
   askDecision(req: { heroId: string; kind: 'attack' | 'defense'; faces: DieFace[]; success: DieFace; rerolls: number; base?: number; round?: number; vs?: { id: string; faces: DieFace[]; hits: number; type: string; base?: number }; card?: { name: string; type: string; dice: number } }): Promise<number[]> {
     const g = this.game;
     const box = $('#dicecenter', this.root);
@@ -1435,6 +1556,8 @@ export class Hud {
     const wait = (ms: number) => new Promise<void>(r => this.centerTimers.push(window.setTimeout(r, ms / sp)));
     const me = g.unit(req.heroId);
     const black = req.kind === 'attack';
+    this.spectating = false;
+    diceSync.beginDecision(req);
     const ok = (f: DieFace, s: string) => f === 'crit' || f === s;
     const attackerId = req.kind === 'attack' ? me.id : req.vs!.id;
     const attacker = g.unit(attackerId);
@@ -1494,7 +1617,8 @@ export class Hud {
             this.diceKey(key);
             (btn.querySelector('button') as HTMLButtonElement).onclick = go;
           });
-          dice = await this.rollWaves(row, req.faces, req.base ?? (black ? req.card?.dice : undefined), black, req.success, true, btn, wait);
+          diceSync.mine('roll'); // online: os outros veem a rolagem junto
+          dice = await this.rollWaves(row, req.faces, req.base ?? (black ? req.card?.dice : undefined), black, req.success, true, btn, wait, false, 'roll');
         }
         box.classList.add('interactive'); // a escolha abaixo precisa de clique
         // escolha dos dados para rerrolar (aqui mesmo)

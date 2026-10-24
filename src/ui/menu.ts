@@ -184,6 +184,7 @@ export class MenuPages {
     const invItems: InvItem[] = c.heroes.flatMap(h => (c.cards[h] ?? []).map(id => ({ id, to: h })));
     const invOpts: InvOptions = {
       heroes: c.heroes, color: GUILDS[c.teams[0].guild].color, discard: false, catalog: true,
+      curseSlot: h => c.curses?.[h] && CURSES[c.curses[h]]?.slot ? CURSES[c.curses[h]].name : null,
       slots: (_h, cards) => {
         const magicExtra = slotsFor(cards) - MAX_SLOTS;
         const magic = cards.filter(id => ALL_CARDS[id]?.magic && ALL_CARDS[id]?.kind === 'attack').length;

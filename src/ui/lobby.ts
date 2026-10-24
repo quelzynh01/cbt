@@ -1,7 +1,7 @@
 import { play } from '../audio/sfx';
 import { BANS_EACH } from '../engine/heroBan';
 import { GUILDS, HEROES, HERO_SETS, heroSetName, starterCards, type HeroSet } from '../engine/data';
-import { buyHint, buySummaryHtml, curseRevealHtml, curseSummaryHtml, rankingHtml } from './upgradeViews';
+import { buyHint, buySummaryHtml, curseRevealHtml, curseSummaryHtml, handFromHtml, myCursesHtml, rankingHtml, resultTabsHtml, upgradeBarHtml } from './upgradeViews';
 import { draftRounds, picksPerRound, titleHolders, type CampaignState } from '../campaign/campaign';
 import { gameConfirm } from './dialog';
 import { Game } from '../engine/game';
@@ -474,6 +474,8 @@ export class OnlineLobby {
     }
     game.drain();
     l.campaign = st.mode === 'campaign';
+    // placar da campanha visível para todos durante o cenário (menu do Esc)
+    l.camp = st.mode === 'campaign' && st.camp ? JSON.parse(JSON.stringify({ ...st.camp, upgrade: undefined })) : undefined;
     // roleta de quem começa: partida avulsa ou 1º cenário da campanha (nos outros começa quem está à esquerda do vencedor)
     l.scenario = st.mode === 'campaign' ? (st.camp?.played.length ?? 0) + 1 : 1;
     l.roulette = st.mode !== 'campaign' || l.scenario === 1;
@@ -654,12 +656,17 @@ export class OnlineLobby {
     const up = c.upgrade!;
     const g = c.guilds.find(x => x.id === me)!;
     const last = c.played[c.played.length - 1];
-    const results = `<div class="cp-results"><h4>Resultado: ${MAPS[last.mapId].name}</h4>
-      <table><tr><th>Guilda</th><th>Missões</th><th>Mortes</th><th>Moedas</th></tr>
-      ${last.guilds.map(r => `<tr class="${r.id === last.winner ? 'win' : ''}"><td><span class="dot" style="background:${GUILDS[r.id].color}"></span> ${esc(this.seatName(r.id))}${r.id === last.winner ? ' 🏆' : ''}</td><td>${r.missions}</td><td>${r.deaths}</td><td>${r.coins}</td></tr>`).join('')}</table>
-      ${up.cursesDrawn.filter(x => x.guild === me && CURSES[x.kept]).map(x => `<div class="cp-curse">☠ ${HEROES[x.hero].name}: <b>${CURSES[x.kept].name}</b> — ${CURSES[x.kept].text}</div>`).join('')}
-      ${rankingHtml(c, g => this.seatName(g))}</div>`;
     const name = (x: GuildId) => this.seatName(x);
+    // quem ainda está escolhendo nesta etapa (as IAs escolhem na hora)
+    const pending = (x: GuildId): boolean => {
+      const cg = c.guilds.find(q => q.id === x);
+      if (!cg || cg.controller !== 'human') return false;
+      return st.step === 'upgrade-draft' ? !st.upPick[x] : st.step === 'upgrade-buy' ? !st.upBuy[x] : st.step === 'upgrade-arrange' ? !st.upArr[x] : false;
+    };
+    const waitList = () => { const w = c.guilds.filter(x => x.id !== me && pending(x.id)).map(x => esc(name(x.id))); return w.length ? `<p class="up-waitlist">⏳ Aguardando ${w.join(', ')} escolher${w.length > 1 ? 'em' : ''}…</p>` : '<p class="up-waitlist">✓ Todos prontos…</p>'; };
+    // topo: as Guildas (a sua primeiro); resultado do mapa e a campanha em abas; as Maldições dos seus Heróis
+    const results = `<div class="cp-results">${upgradeBarHtml(c, me, name, ['upgrade-draft', 'upgrade-buy', 'upgrade-arrange'].includes(st.step) ? pending : undefined)}
+      <h4>Resultado: ${MAPS[last.mapId].name}</h4>${resultTabsHtml(c, name)}${myCursesHtml(c, me)}</div>`;
     // Maldições Mortais: as cartas viradas na mesa, um Herói de cada vez (todos veem); depois o resumo
     if (st.step === 'upgrade-curses') {
       if ((up.curseStep ?? 0) < up.cursesDrawn.length) {
@@ -676,9 +683,12 @@ export class OnlineLobby {
     if (st.step === 'upgrade-draft') {
       const hand = up.hands[me] ?? [];
       const need = Math.min(picksPerRound(c), hand.length);
-      if (st.upPick[me]) return `${results}<h3>Escolha de cartas — rodada ${up.round + 1} de ${draftRounds(c)}</h3><p class="tb-wait">✓ Escolha enviada. Aguardando os outros…</p>`;
+      if (st.upPick[me]) return `${results}<h3>Escolha de cartas — rodada ${up.round + 1} de ${draftRounds(c)}</h3>${waitList()}
+        <h4>Você escolheu</h4><div class="cp-cards small">${(st.upPick[me] ?? []).map(id => itemCard(id)).join('')}</div>
+        ${(up.picked[me] ?? []).length ? `<h4>Já escolhidas antes</h4><div class="cp-cards small">${up.picked[me]!.map(id => itemCard(id)).join('')}</div>` : ''}`;
       return `${results}<h3>Escolha de cartas — rodada ${up.round + 1} de ${draftRounds(c)}</h3>
         <p>Escolha <b>${need === 1 ? '1 carta' : `${need} cartas`}</b>; o resto passa para a esquerda. Ao fim você terá 6 cartas para comprar.</p>
+        ${handFromHtml(c, me, name)}
         <div class="cp-cards">${hand.map((id, i) => itemCard(id, this.upSel.has(i) ? 'sel' : '', `data-up="${i}"`)).join('')}</div>
         ${(up.picked[me] ?? []).length ? `<h4>Já escolhidas</h4><div class="cp-cards small">${up.picked[me]!.map(id => itemCard(id)).join('')}</div>` : ''}
         <div class="tb-actions"><button class="primary" id="up-go" ${this.upSel.size === need ? '' : 'disabled'}>Confirmar escolha</button></div>`;
@@ -687,7 +697,7 @@ export class OnlineLobby {
       const coins = up.coins[me] ?? 0;
       const picked = up.picked[me] ?? [];
       const spent = [...this.upSel].reduce((s, i) => s + CARDS[picked[i]].cost, 0);
-      if (st.upBuy[me]) return `${results}<h3>Compra</h3><p class="tb-wait">✓ Compra enviada. Aguardando os outros…</p>`;
+      if (st.upBuy[me]) return `${results}<h3>Compra</h3>${waitList()}<h4>Você comprou</h4><div class="cp-cards small">${(st.upBuy[me] ?? []).map(id => itemCard(id)).join('') || '<i class="muted">nada</i>'}</div>`;
       return `${results}<h3>Compra — você tem 🪙 ${coins}</h3>
         <p>Compre até <b>3 cartas</b>. Sobrando moedas, só 1 fica guardada.</p>
         <div class="cp-cards">${picked.map((id, i) => itemCard(id, this.upSel.has(i) ? 'sel' : '', `data-up="${i}"`)).join('')}</div>
@@ -696,7 +706,7 @@ export class OnlineLobby {
         <div class="tb-actions"><button class="primary" id="up-go" ${spent <= coins ? '' : 'disabled'}>Comprar e continuar</button></div>`;
     }
     // distribuição
-    if (st.upArr[me]) return `${results}<h3>Inventário</h3><p class="tb-wait">✓ Pronto. Aguardando os outros…</p>`;
+    if (st.upArr[me]) return `${results}<h3>Inventário</h3>${waitList()}`;
     if (!this.arrState) {
       this.arrState = [
         ...g.heroes.flatMap(h => (g.inventory[h] ?? []).map(id => ({ id, to: h }))),
@@ -706,7 +716,7 @@ export class OnlineLobby {
     const arr = this.arrState;
     const inv = Object.fromEntries(g.heroes.map(h => [h, arr.filter(x => x.to === h).map(x => x.id)]));
     const errs = [...validateInventory(c, g, inv), ...poolErrors(arr, true)];
-    const arOpts: InvOptions = { heroes: g.heroes, color: GUILDS[me].color, discard: true, slots: (h, cards) => heroSlots(c, g, h, cards), curse: h => g.curses[h] ? CURSES[g.curses[h]].name : null };
+    const arOpts: InvOptions = { heroes: g.heroes, color: GUILDS[me].color, discard: true, slots: (h, cards) => heroSlots(c, g, h, cards), curse: h => g.curses[h] ? CURSES[g.curses[h]].name : null, curseSlot: h => CURSES[g.curses[h]]?.slot ? CURSES[g.curses[h]].name : null };
     this.invBind = { items: arr, opts: arOpts };
     return `${results}<h3>Equipe seus Heróis</h3>
       <p>Clique num <b>espaço vazio</b> ou numa <b>carta</b> para escolher a carta (troca entre Heróis, tira ou descarta).</p>

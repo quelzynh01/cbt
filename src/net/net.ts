@@ -4,6 +4,7 @@ import type { DecisionRequest } from '../engine/game';
 import type { GameEvent, GameState, GuildId } from '../engine/types';
 import { loadMapId } from '../engine/maps';
 import { type OnlineSetup, redact } from './onlineSetup';
+import type { CampaignState } from '../campaign/campaign';
 
 // Modo online peer-to-peer: o navegador de quem cria a sala é o "servidor" (anfitrião).
 // Ele roda o motor de regras, valida as jogadas e envia eventos + estado para todos.
@@ -40,6 +41,8 @@ export interface Lobby {
   scenario?: number;
   /** Partida salva reaberta: a sala espera os jogadores voltarem (só os originais entram) até o anfitrião continuar. */
   restored?: boolean;
+  /** Campanha online: o estado da campanha (placar, tempo, cenários) para todos verem durante o cenário. */
+  camp?: CampaignState;
 }
 
 /** Jogadas da preparação. */
@@ -66,6 +69,10 @@ export type Msg =
   /** Decisão no meio de uma jogada (Rerrolagem, alvo adicional…): anfitrião -> dono da Guilda, e a resposta de volta. */
   | { t: 'decide'; id: number; req: DecisionRequest }
   | { t: 'decision'; id: number; pick: number[] | null }
+  /** Alguém está decidindo uma Rerrolagem: os outros acompanham a rolagem dele (anfitrião -> jogadores). */
+  | { t: 'spectate'; req: DecisionRequest; guild: GuildId }
+  /** Alguém está escolhendo como atacar (tela de batalha): os outros veem (jogador -> anfitrião -> todos). */
+  | { t: 'peek'; heroId: string; targetId: string | null; card: string | null; guild?: GuildId }
   /** Dados sincronizados: quem rola avisa cada passo (anfitrião repassa a todos). */
   | { t: 'diceStep'; id: string }
   /** Votação para voltar o turno: jogador -> anfitrião (abrir ou votar). */
@@ -126,6 +133,10 @@ export interface SessionEvents {
   decide?(req: DecisionRequest, id: number): void;
   /** Outro jogador rolou um passo dos dados. */
   diceStep?(id: string): void;
+  /** Outro jogador está decidindo uma Rerrolagem (acompanhar a rolagem dele). */
+  spectate?(req: DecisionRequest, guild: GuildId): void;
+  /** Outro jogador está escolhendo como atacar (targetId null = desistiu). */
+  peek?(guild: GuildId, heroId: string, targetId: string | null, card: string | null): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -287,6 +298,10 @@ export class HostSession {
       } else if (m.t === 'diceStep') {
         for (const [id, c] of this.conns) if (id !== cid && c.open) c.send(m);
         this.ev.diceStep?.(m.id);
+      } else if (m.t === 'peek') {
+        const out: Msg = { ...m, guild: seat.guild };
+        for (const [id, c] of this.conns) if (id !== cid && c.open) c.send(out);
+        this.ev.peek?.(seat.guild, m.heroId, m.targetId, m.card);
       } else if (m.t === 'ping' && this.lobby.started) {
         const out: Msg = { t: 'ping', guild: seat.guild, cell: m.cell };
         for (const [id, c] of this.conns) if (id !== cid && c.open) c.send(out);
@@ -455,6 +470,12 @@ export class HostSession {
   }
   sendPing(cell: { c: number; r: number }) { this.broadcast({ t: 'ping', guild: this.lobby.seats[0].guild, cell }); }
   sendDiceStep(id: string) { this.broadcast({ t: 'diceStep', id }); }
+  sendPeek(heroId: string, targetId: string | null, card: string | null) { this.broadcast({ t: 'peek', heroId, targetId, card, guild: this.lobby.seats[0].guild }); }
+  /** Avisa todos (menos quem decide) que uma Rerrolagem está sendo decidida. */
+  sendSpectate(req: DecisionRequest, guild: GuildId) {
+    const owner = this.lobby.seats.find(s => s.guild === guild)?.clientId;
+    for (const [id, c] of this.conns) if (id !== owner && c.open) c.send({ t: 'spectate', req, guild } satisfies Msg);
+  }
 
   /** A sala foi fechada (o anfitrião saiu). */
   closed = false;
@@ -564,6 +585,8 @@ export class ClientSession {
         case 'undoPoll': this.ev.undoPoll?.(m.poll, m.result); break;
         case 'decide': this.ev.decide?.(m.req, m.id); break;
         case 'diceStep': this.ev.diceStep?.(m.id); break;
+        case 'spectate': this.ev.spectate?.(m.req, m.guild); break;
+        case 'peek': if (m.guild) this.ev.peek?.(m.guild, m.heroId, m.targetId, m.card); break;
         case 'kicked': this.shutdown(); this.ev.status(m.reason, 'error'); break;
       }
     });
@@ -587,6 +610,7 @@ export class ClientSession {
   }
   chat(text: string) { this.send({ t: 'chat', from: this.name, text }); }
   sendDiceStep(id: string) { this.send({ t: 'diceStep', id }); }
+  sendPeek(heroId: string, targetId: string | null, card: string | null) { this.send({ t: 'peek', heroId, targetId, card }); }
   /** Resposta a um pedido de decisão do anfitrião (null = automática). */
   sendDecision(id: number, pick: number[] | null) { this.send({ t: 'decision', id, pick }); }
   /** Votação para voltar o turno: abrir (open) ou votar. */

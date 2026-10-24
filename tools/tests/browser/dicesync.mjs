@@ -98,12 +98,14 @@ await host.evaluate(async () => { const m = await import('/src/ui/diceSync.ts');
 const atkDice = () => host.evaluate(() => document.querySelectorAll('.bt-tray.atk .bdie, .cd-row.atk .cd-die').length);
 console.log('anfitrião: dados de ataque antes do clique =', await atkDice());
 const clickCli = re => cli.evaluate(src => { const b = [...document.querySelectorAll('.bt-act, .cd-roll')].find(x => new RegExp(src, 'i').test(x.textContent)); if (b) { b.click(); return b.textContent; } return null; }, re);
-let c1 = null; for (let i = 0; i < 20 && !c1; i++) { c1 = await clickCli('ataque'); if (!c1) await wait(400); }
+const clickHost = re => host.evaluate(src => { const b = [...document.querySelectorAll('.bt-act, .cd-roll')].find(x => new RegExp(src, 'i').test(x.textContent)); if (b) { b.click(); return b.textContent; } return null; }, re);
+// quem controla o Monstro nesta Reação rola o ataque (pode ser o amigo ou o anfitrião, depende de quem está na vez)
+let c1 = null; for (let i = 0; i < 20 && !c1; i++) { c1 = await clickCli('ataque') ?? await clickHost('ataque'); if (!c1) await wait(400); }
 console.log('amigo clicou:', c1);
 await wait(2500);
 console.log('anfitrião: dados de ataque depois =', await atkDice(), '| defesa ainda esperando?', JSON.stringify(await hostView()));
 // críticos do ataque (se houver) e a Defesa
-for (let i = 0; i < 30; i++) { const c = await clickCli('Crítico|Defender|defesa'); if (c) console.log('amigo clicou:', c); await wait(700); if ((await hostView()).defDice > 0 && !(await cli.evaluate(() => !!document.querySelector('.cd-crit, .bt-crit')))) break; }
+for (let i = 0; i < 30; i++) { await clickHost('Crítico'); const c = await clickCli('Crítico|Defender|defesa'); if (c) console.log('amigo clicou:', c); await wait(700); if ((await hostView()).defDice > 0 && !(await cli.evaluate(() => !!document.querySelector('.cd-crit, .bt-crit')))) break; }
 await wait(2500);
 const after = await hostView();
 console.log('enviado:', await cli.evaluate(() => window.__sent), '| recebido:', await host.evaluate(() => window.__got));

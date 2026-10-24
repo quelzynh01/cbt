@@ -19,6 +19,10 @@ export const diceSync = {
   begin(e: Attack) {
     rollKey = `${e.attackerId}|${e.dice.join('')}|${e.targets.map(t => `${t.id}:${t.defense.join('')}`).join(',')}`;
   },
+  /** Começa a rolagem de uma decisão de Rerrolagem (a chave vem do pedido, igual em todos os computadores). */
+  beginDecision(req: { heroId: string; kind: string; faces: string[]; round?: number }) {
+    rollKey = `dec|${req.heroId}|${req.kind}|${req.faces.join('')}|${req.round ?? 1}`;
+  },
   /** A Guilda que rola é de outro jogador (online)? */
   remote(g: GuildId | null | undefined) { return !!this.net && !!g && this.net.remote(g); },
   /** Eu rolei este passo: avisa os outros. */

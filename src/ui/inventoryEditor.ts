@@ -15,6 +15,8 @@ export interface InvOptions {
   slots: (hero: string, cards: string[]) => { used: number; max: number; magicExtra: number };
   /** Maldição do Herói (texto curto), se houver. */
   curse?: (hero: string) => string | null;
+  /** Maldição que ocupa um espaço (nome): ela fica no 1º espaço — a carta posta nele fica debaixo dela (indisponível). */
+  curseSlot?: (hero: string) => string | null;
   /** Pode descartar cartas (Fase de Melhorias). */
   discard: boolean;
   /** Só leitura (já confirmou). */
@@ -64,15 +66,23 @@ function statsHtml(h: string, cards: string[]): string {
 export function invEditorHtml(items: InvItem[], o: InvOptions): string {
   const heroCols = o.heroes.map(h => {
     const mine = items.map((x, i) => ({ ...x, i })).filter(x => x.to === h);
-    const sl = o.slots(h, mine.map(x => x.id));
-    const total = Math.max(sl.max + sl.magicExtra, mine.length);
     const curse = o.curse?.(h);
-    const slots: string[] = mine.map(x => `<button class="inv-slot full" data-slot="${h}" data-item="${x.i}" title="Trocar ou tirar esta carta" ${o.ready ? 'disabled' : ''}>${itemCard(x.id)}</button>`);
-    for (let k = mine.length; k < total; k++) slots.push(`<button class="inv-slot empty ${k >= sl.max ? 'magic' : ''}" data-slot="${h}" ${o.ready ? 'disabled' : ''}><span>＋</span><small>${k >= sl.max ? 'Espaço Mágico' : 'Espaço vazio'}</small></button>`);
+    const cs = o.curseSlot?.(h) ?? null;
+    const skull = cs ? `<span class="inv-skull">☠<small>${esc(cs)}</small></span>` : '';
+    // Maldição que ocupa espaço: o 1º espaço é dela — com o Herói cheio, a 1ª carta fica debaixo da caveira; senão, o espaço fica vazio com a caveira
+    const full = cs && mine.length >= 4;
+    // a carta debaixo da Maldição não vale: nem os status nem os espaços extras (Tomo)
+    const eff = full ? mine.slice(1) : mine;
+    const sl = o.slots(h, mine.map(x => x.id));
+    const slEff = full ? o.slots(h, eff.map(x => x.id)) : sl;
+    const total = Math.max(sl.max + slEff.magicExtra, mine.length);
+    const slots: string[] = mine.map((x, k) => `<button class="inv-slot full ${full && k === 0 ? 'cursed' : ''}" data-slot="${h}" data-item="${x.i}" ${full && k === 0 ? 'data-first="1"' : ''} title="${full && k === 0 ? `Debaixo da Maldição ${esc(cs!)}: indisponível no cenário. ` : ''}Trocar ou tirar esta carta (ou arraste para mudar a ordem)" ${o.ready ? 'disabled' : ''}>${itemCard(x.id)}${full && k === 0 ? skull : ''}</button>`);
+    if (cs && !full) slots.unshift(`<button class="inv-slot empty cursed" data-slot="${h}" data-first="1" title="Espaço da Maldição: a carta posta aqui fica debaixo dela (indisponível)" ${o.ready ? 'disabled' : ''}>${skull}</button>`);
+    for (let k = slots.length; k < total; k++) slots.push(`<button class="inv-slot empty ${k >= sl.max ? 'magic' : ''}" data-slot="${h}" ${o.ready ? 'disabled' : ''}><span>＋</span><small>${k >= sl.max ? 'Espaço Mágico' : 'Espaço vazio'}</small></button>`);
     return `<div class="inv-hero ${sl.used > sl.max ? 'over' : ''}" data-hero="${h}" style="--gc:${o.color}">
       <div class="inv-hh"><canvas width="56" height="56" data-iface="${h}"></canvas><div><b>${HEROES[h].name}</b><small>${HEROES[h].title}</small></div>
-        <span class="inv-count ${sl.used > sl.max ? 'bad' : ''}">${sl.used}/${sl.max}${sl.magicExtra ? ` +${sl.magicExtra}✨` : ''}</span></div>
-      ${statsHtml(h, mine.map(x => x.id))}
+        <span class="inv-count ${sl.used > sl.max ? 'bad' : ''}">${sl.used}/${sl.max}${slEff.magicExtra ? ` +${slEff.magicExtra}✨` : ''}</span></div>
+      ${statsHtml(h, eff.map(x => x.id))}
       <div class="inv-ab" title="${esc(HEROES[h].abilityText)}"><b>${esc(HEROES[h].abilityName)}</b> — ${esc(HEROES[h].abilityText)}</div>
       ${curse ? `<div class="inv-curse">☠ ${esc(curse)}</div>` : ''}
       <div class="inv-slots">${slots.join('')}</div>${o.bags ? bagHtml(h, o) : ''}</div>`;
@@ -109,7 +119,18 @@ export function bindInvEditor(root: ParentNode, items: InvItem[], o: InvOptions,
       if (dragged) { dragged = false; return; } // soltou depois de arrastar: não abre a janela
       const hero = b.dataset.slot ?? null;
       const item = b.dataset.item !== undefined ? Number(b.dataset.item) : null;
-      openPicker(items, o, hero, item, rerender);
+      // espaço vazio da Maldição: a carta escolhida vira a 1ª do Herói (fica debaixo dela)
+      const first = b.dataset.first && item === null ? hero : null;
+      const before = new Set(items.filter(x => x.to === hero));
+      openPicker(items, o, hero, item, () => {
+        const added = first ? items.find(x => x.to === first && !before.has(x)) : undefined;
+        if (added) {
+          items.splice(items.indexOf(added), 1);
+          const f = items.findIndex(x => x.to === first);
+          items.splice(f < 0 ? items.length : f, 0, added);
+        }
+        rerender();
+      });
     };
   });
   if (o.bags) bindBags(root, o, rerender);
@@ -151,12 +172,22 @@ export function bindInvEditor(root: ParentNode, items: InvItem[], o: InvOptions,
         if (!t || t === b) return;
         const cur = items[from];
         if (t.dataset.item !== undefined) {
-          // troca as duas cartas de lugar
-          const other = items[Number(t.dataset.item)];
+          // troca as duas cartas de lugar (de Herói e de posição)
+          const j = Number(t.dataset.item);
+          const other = items[j];
           if (other === cur) return;
           const was = cur.to;
           cur.to = other.to;
           other.to = was;
+          items[from] = other;
+          items[j] = cur;
+        } else if (t.dataset.first) {
+          // espaço da Maldição: a carta vira a 1ª do Herói (fica debaixo dela)
+          const h = t.dataset.slot!;
+          items.splice(from, 1);
+          cur.to = h;
+          const first = items.findIndex(x => x.to === h);
+          items.splice(first < 0 ? items.length : first, 0, cur);
         } else if (t.dataset.slot) cur.to = t.dataset.slot;
         else if (t.dataset.hero) cur.to = t.dataset.hero;
         else if (t.dataset.pool) cur.to = 'pool';

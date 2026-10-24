@@ -15,7 +15,7 @@ import { TITLES, TITLE_TEXT } from '../engine/titles';
 import { drawFace } from '../render/chibi';
 import { curseCard, heroCard, itemCard, paintCardArt } from './cardview';
 import { CARD_ART } from './cardArt';
-import { buyHint, buySummaryHtml, curseRevealHtml, curseSummaryHtml, rankingHtml } from './upgradeViews';
+import { buyHint, buySummaryHtml, curseRevealHtml, curseSummaryHtml, handFromHtml, myCursesHtml, rankingHtml, resultTabsHtml, upgradeBarHtml } from './upgradeViews';
 import { attachMapPeek, closeMapPeek, mapChoiceCard } from './mapInfo';
 import { bindInvEditor, invEditorHtml, poolErrors, type InvItem, type InvOptions } from './inventoryEditor';
 import { fmtTime, getSettings } from './settings';
@@ -259,7 +259,7 @@ export class CampaignUI {
     const errs = [...validateInventory(c, me, inv), ...poolErrors(items, false)];
     const btg = c.edition === 'btg';
     if (btg && items.filter(x => x.to === 'descartar').length !== 1 && !errs.length) errs.push('Descarte 1 das 6 cartas iniciais.');
-    const opts: InvOptions = { heroes: me.heroes, color: GUILDS[me.id].color, discard: btg, slots: (h, cards) => heroSlots(c, me, h, cards), curse: h => curseLabel(me.curses[h]) };
+    const opts: InvOptions = { heroes: me.heroes, color: GUILDS[me.id].color, discard: btg, slots: (h, cards) => heroSlots(c, me, h, cards), curse: h => curseLabel(me.curses[h]), curseSlot: h => CURSES[me.curses[h]]?.slot ? CURSES[me.curses[h]].name : null };
     this.show('Campanha · Equipamento inicial', `
       <div class="cp-step"><h3>Equipe seus Heróis</h3>
       <p>Clique num <b>espaço vazio</b> ou numa <b>carta</b> para escolher qual carta vai nele (trocar entre Heróis também). Mapa: <b>${MAPS[st.map!].name}</b>.</p>
@@ -336,6 +336,7 @@ export class CampaignUI {
         </section>
         ${others}
         <section class="hub-sec hub-prog"><h3>🏰 Campanha</h3><div class="hub-circles">${circles}</div></section>
+        ${c.played.length ? `<section class="hub-sec hub-score">${rankingHtml(c, guildName)}</section>` : ''}
       </div>`);
     paintCardArt(this.page);
     this.page.querySelectorAll<HTMLCanvasElement>('[data-face]').forEach(cv => drawFace(cv, cv.dataset.face!, cv.dataset.color!));
@@ -365,7 +366,7 @@ export class CampaignUI {
     const st = this.orgState;
     const inv = Object.fromEntries(me.heroes.map(h => [h, st.filter(x => x.to === h).map(x => x.id)]));
     const errs = [...validateInventory(c, me, inv), ...poolErrors(st, true)];
-    const opts: InvOptions = { heroes: me.heroes, color: GUILDS[me.id].color, discard: true, slots: (h, cards) => heroSlots(c, me, h, cards), curse: h => curseLabel(me.curses[h]) };
+    const opts: InvOptions = { heroes: me.heroes, color: GUILDS[me.id].color, discard: true, slots: (h, cards) => heroSlots(c, me, h, cards), curse: h => curseLabel(me.curses[h]), curseSlot: h => CURSES[me.curses[h]]?.slot ? CURSES[me.curses[h]].name : null };
     this.show('Campanha · Organizar itens', `
       <div class="cp-step"><h3>🎒 Organize as cartas dos seus Heróis</h3>
       <p>Toque num <b>espaço vazio</b> ou numa <b>carta</b> para trocar entre os Heróis (ou descartar). Cada Herói tem 4 espaços; até 12 cartas na Guilda; 1 armadura por Herói.</p>
@@ -389,11 +390,9 @@ export class CampaignUI {
     const up = c.upgrade!;
     const me = human(c);
     const last = c.played[c.played.length - 1];
-    const results = `<div class="cp-results"><h3>Resultado: ${MAPS[last.mapId].name}</h3>
-      <table><tr><th>Guilda</th><th>Missões</th><th>Mortes</th><th>Moedas</th></tr>
-      ${last.guilds.map(r => `<tr class="${r.id === last.winner ? 'win' : ''}"><td><span class="dot" style="background:${GUILDS[r.id].color}"></span> ${guildName(r.id)}${r.id === last.winner ? ' 🏆' : ''}</td><td>${r.missions}</td><td>${r.deaths}</td><td>${r.coins}</td></tr>`).join('')}</table>
-      ${up.cursesDrawn.length ? `<h4>Maldições Mortais</h4><div class="cp-curses">${up.cursesDrawn.map(x => `<div><span class="dot" style="background:${GUILDS[x.guild].color}"></span> ${HEROES[x.hero].name}: comprou ${x.drawn.map(d => CURSES[d].name).join(', ')} → <b>${CURSES[x.kept].name}</b> <small>${esc(CURSES[x.kept].text)}</small></div>`).join('')}</div>` : ''}
-      ${rankingHtml(c, guildName)}
+    // topo: as Guildas (a sua primeiro); resultado do mapa e a campanha em abas; as Maldições dos seus Heróis
+    const results = `<div class="cp-results">${upgradeBarHtml(c, me.id, guildName)}
+      <h3>Resultado: ${MAPS[last.mapId].name}</h3>${resultTabsHtml(c, guildName)}${myCursesHtml(c, me.id)}
     </div>`;
     // antes das Melhorias: as Maldições Mortais (cartas viradas na mesa, um Herói de cada vez)
     if (!up.curseDone) { this.curses(); return; }
@@ -405,6 +404,7 @@ export class CampaignUI {
       this.show(`Fase de Melhorias · Nível ${up.level}`, `${results}
         <div class="cp-step"><h3>1. Escolha de cartas — rodada ${up.round + 1} de ${draftRounds(c)}</h3>
         <p>Escolha <b>${picksPerRound(c) === 1 ? '1 carta' : '2 cartas'}</b> da sua mão. O resto passa para o jogador à esquerda (as IAs fazem o mesmo). No fim você terá 6 cartas para comprar.</p>
+        ${handFromHtml(c, me.id, guildName)}
         <div class="cp-cards">${hand.map((id, i) => cardHtml(id, this.sel.has(`${i}`) ? 'sel' : '', `data-i="${i}"`)).join('')}</div>
         ${up.picked[me.id]!.length ? `<h4>Já escolhidas</h4><div class="cp-cards small">${up.picked[me.id]!.map(id => cardHtml(id)).join('')}</div>` : ''}
         <button class="primary cp-big" id="cp-ok" ${this.sel.size === Math.min(picksPerRound(c), hand.length) ? '' : 'disabled'}>Confirmar escolha</button></div>`, false);
@@ -509,7 +509,7 @@ export class CampaignUI {
     const st = this.arrangeState;
     const inv = Object.fromEntries(me.heroes.map(h => [h, st.filter(x => x.to === h).map(x => x.id)]));
     const errs = [...validateInventory(c, me, inv), ...poolErrors(st, true)];
-    const opts: InvOptions = { heroes: me.heroes, color: GUILDS[me.id].color, discard: true, slots: (h, cards) => heroSlots(c, me, h, cards), curse: h => curseLabel(me.curses[h]) };
+    const opts: InvOptions = { heroes: me.heroes, color: GUILDS[me.id].color, discard: true, slots: (h, cards) => heroSlots(c, me, h, cards), curse: h => curseLabel(me.curses[h]), curseSlot: h => CURSES[me.curses[h]]?.slot ? CURSES[me.curses[h]].name : null };
     this.show('Fase de Melhorias · Inventário', `
       <div class="cp-step"><h3>3. Equipe seus Heróis</h3>
       <p>Clique num <b>espaço vazio</b> ou numa <b>carta</b> para escolher a carta (troca entre Heróis, tira ou descarta). Cada Herói tem 4 espaços (o Tomo da Iluminação dá +2 para Mágicas; algumas Maldições ocupam 1). Até 12 cartas na Guilda; 1 armadura por Herói; 1 Bomba por Guilda.</p>

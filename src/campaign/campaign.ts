@@ -268,7 +268,8 @@ export function recordResult(c: CampaignState, game: Game) {
     // cartas ao fim do cenário (inclui Recompensas ganhas)
     const before = Object.values(cg.inventory).flat();
     // a carta que ficou debaixo de uma Maldição volta para o inventário
-    cg.inventory = Object.fromEntries(heroes.map(h => [h.defId, [...h.cards, ...(h.covered ? [h.covered] : [])].map(x => x.defId)]));
+    // a carta debaixo da Maldição volta como a 1ª (o espaço da Maldição é o 1º)
+    cg.inventory = Object.fromEntries(heroes.map(h => [h.defId, [...(h.covered ? [h.covered] : []), ...h.cards].map(x => x.defId)]));
     // cartas sem Herói (Recompensa com o inventário cheio): vão para o primeiro Herói e são organizadas na Fase de Melhorias
     const spare = (game.s.spare?.[cg.id] ?? []).map(x => x.defId);
     if (spare.length && heroes[0]) cg.inventory[heroes[0].defId] = [...(cg.inventory[heroes[0].defId] ?? []), ...spare];
@@ -427,7 +428,9 @@ export function finishBuy(c: CampaignState, g: CGuild, ids: string[]) {
 // ------------------------------------------------------------------ inventário
 export function heroSlots(c: CampaignState, g: CGuild, hero: string, cards = g.inventory[hero] ?? []): { used: number; max: number; magicExtra: number } {
   const curse = g.curses[hero] ? CURSES[g.curses[hero]] : null;
-  const magicExtra = cards.reduce((s, id) => s + (CARDS[id]?.fx.magicSlots ?? 0), 0);
+  // Maldição que ocupa espaço com o Herói cheio: a 1ª carta fica debaixo dela e não vale (ex.: o Tomo coberto não dá espaços extras)
+  const eff = curse?.slot && cards.length >= 4 ? cards.slice(1) : cards;
+  const magicExtra = eff.reduce((s, id) => s + (CARDS[id]?.fx.magicSlots ?? 0), 0);
   const magic = cards.filter(id => CARDS[id]?.magic && CARDS[id]?.kind === 'attack').length;
   // Maldição que ocupa espaço não tira carta: se o Herói tiver 4, a última fica debaixo dela no próximo cenário (p.24)
   void curse;
@@ -439,7 +442,10 @@ export function heroSlots(c: CampaignState, g: CGuild, hero: string, cards = g.i
 export function validateInventory(c: CampaignState, g: CGuild, inv: Record<string, string[]>): string[] {
   const errs: string[] = [];
   const total = Object.values(inv).flat().length;
-  if (total > MAX_CARDS) errs.push(`A Guilda pode ter no máximo ${MAX_CARDS} cartas (tem ${total}). Descarte ${total - MAX_CARDS}.`);
+  // 12 cartas (3 Heróis × 4 espaços) + os espaços extras que o Tomo da Iluminação dá para magias
+  const extra = g.heroes.reduce((n, h) => n + (inv[h] ?? []).reduce((k, id) => k + (CARDS[id]?.fx.magicSlots ?? 0), 0), 0);
+  const max = MAX_CARDS + extra;
+  if (total > max) errs.push(`A Guilda pode ter no máximo ${max} cartas${extra ? ` (12 + ${extra} do Tomo)` : ''} (tem ${total}). Descarte ${total - max}.`);
   for (const h of g.heroes) {
     const cards = inv[h] ?? [];
     const sl = heroSlots(c, g, h, cards);
@@ -527,7 +533,7 @@ export function medals(c: CampaignState): Medal[] {
     { name: 'Vencedor', winners: best(count((r, s) => s.winner === r.id)) },
     { name: 'Menos Mortes', winners: best(leastDeaths) },
     { name: 'Mais Moedas', winners: best(mostCoins) },
-    { name: 'Ganhou Recompensa', winners: best(count(r => r.reward)) },
+    { name: 'Recebeu Recompensa', winners: best(count(r => r.reward)) },
     { name: 'Recebeu Título', winners: best(count(r => r.title)) },
   ];
 }

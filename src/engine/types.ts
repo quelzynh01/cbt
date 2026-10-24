@@ -111,6 +111,8 @@ export interface Activation {
   attacked: boolean;
   /** Cartas ativáveis já usadas nesta ativação. */
   used?: string[];
+  /** Botas usadas aos poucos nesta ativação: passos que ainda sobram (por carta). */
+  bootLeft?: Record<string, number>;
   /** Algo já aconteceu nesta ativação (ex.: as Botas moveram um Aliado): não dá mais para trocar de Herói nem Descansar. */
   committed?: boolean;
   /** Ativação só para o Movimento (Mente Brilhante): não pode atacar. */

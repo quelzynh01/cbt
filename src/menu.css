@@ -566,3 +566,42 @@
 .we-areas { display: inline-flex; gap: 4px; align-items: center; margin-left: 6px; color: var(--muted); }
 .we-areas button { min-width: 34px; padding: 4px 8px; }
 .we-areas button.on { border-color: var(--gold); background: rgba(255,200,80,.25); }
+
+/* Fase de Melhorias: Guildas no topo, abas de resultado, Maldições */
+.up-bar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.up-g { display: flex; gap: 8px; align-items: center; padding: 6px 12px; border-radius: 10px; border: 2px solid var(--gc); background: color-mix(in srgb, var(--gc) 14%, transparent); font-size: 14px; }
+.up-g.me { box-shadow: 0 0 0 2px var(--gold); }
+.up-g b { color: var(--gc); }
+.up-st.wait { color: #ffd27a; animation: pulse 1s infinite alternate; }
+.up-st.ok { color: #7fe08a; }
+.up-tabs { margin: 8px 0; }
+.up-tabbar { display: flex; gap: 6px; margin-bottom: 6px; }
+.up-tabbar button { padding: 4px 12px; border-radius: 8px; }
+.up-tabs[data-tab="map"] .t-map, .up-tabs[data-tab="all"] .t-all { border-color: var(--gold); background: rgba(255,200,80,.2); }
+.up-tabs[data-tab="map"] .tab-all, .up-tabs[data-tab="all"] .tab-map { display: none; }
+.up-curses { margin: 8px 0; padding: 8px 12px; border-radius: 10px; border: 1px solid rgba(192,107,255,.6); background: rgba(120,40,180,.18); display: grid; gap: 3px; font-size: 14px; }
+.up-curses > b { color: #e2b8ff; }
+.up-from { color: var(--muted); }
+.up-waitlist { padding: 8px 12px; border-radius: 10px; background: rgba(0,0,0,.3); color: #ffe7a8; font-weight: 700; }
+/* editor de inventário: espaço da Maldição (1º) */
+.inv-slot.cursed { position: relative; border-color: #b45cff !important; }
+.inv-slot.cursed .inv-skull { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 2px; background: rgba(60,10,80,.55); border-radius: inherit; color: #f0d8ff; font-size: 40px; line-height: 1; text-shadow: 0 0 8px #b45cff; pointer-events: none; }
+.inv-slot.empty.cursed .inv-skull { background: rgba(60,10,80,.3); }
+.inv-slot.cursed .inv-skull small { font-size: 12px; font-weight: 800; text-shadow: none; }
+
+/* Placar da campanha (como a folha do Livro de Campanha) */
+.cs-sheet { display: grid; gap: 8px; }
+.cs-table { border-collapse: separate; border-spacing: 4px; width: 100%; }
+.cs-table th { font-size: 12px; font-weight: 800; color: #f3e6cf; text-transform: uppercase; text-align: center; }
+.cs-table th.cs-map { text-align: left; text-transform: none; font-size: 13px; padding: 4px 8px; border-radius: 6px; background: linear-gradient(#d9692a, #b04a17); color: #fff4e0; white-space: nowrap; }
+.cs-table th.cs-map.final { background: linear-gradient(#3a4ab0, #26307a); }
+.cs-table tr.cs-medal th.cs-map { background: none; color: var(--gold); font-size: 14px; }
+.cs-cell { min-height: 28px; min-width: 64px; border-radius: 6px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12); display: flex; flex-wrap: wrap; gap: 3px; align-items: center; justify-content: center; padding: 3px; }
+.cs-medal .cs-cell { background: rgba(255,200,80,.12); border-color: rgba(255,200,80,.5); }
+.cs-mk { display: inline-block; width: 16px; height: 16px; border-radius: 50%; background: var(--gc); border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,.5); }
+.cs-totals { display: flex; flex-wrap: wrap; gap: 14px; font-size: 14px; }
+.cs-titles { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; }
+.cs-tgroup h5 { margin: 0 0 4px; color: var(--gold); text-transform: uppercase; font-size: 13px; }
+.cs-title { display: flex; gap: 6px; align-items: center; padding: 4px 8px; border-radius: 6px; background: rgba(255,255,255,.06); margin-bottom: 4px; font-size: 13px; }
+.cs-title small { color: var(--muted); flex: 1; }
+.cs-title.got { background: rgba(255,200,80,.12); }

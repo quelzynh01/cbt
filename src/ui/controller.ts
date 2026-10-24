@@ -7,13 +7,15 @@ import { showRoulette } from './roulette';
 import { actingGuild, applyAction, type Action } from '../engine/actions';
 import type { GameState } from '../engine/types';
 import { diceSync } from './diceSync';
+import { rankingHtml } from './upgradeViews';
+import type { CampaignState } from '../campaign/campaign';
 import type { ClientSession, HostSession, Lobby, Session, SessionEvents, UndoPoll } from '../net/net';
 import { key, parseKey, sameCell } from '../engine/board';
 import { setCursor } from '../render/cursors';
 import { CARDS, GUILDS, HEROES, MONSTERS } from '../engine/data';
 import { type TestConfig, loadTestConfig } from './testConfig';
 import { Game } from '../engine/game';
-import { getMap } from '../engine/maps';
+import { MAPS, getMap } from '../engine/maps';
 import type { Cell, DiceMode, GameEvent, GuildId, Token } from '../engine/types';
 import { Renderer } from '../render/renderer';
 import { BattlePanel } from './battle';
@@ -83,6 +85,8 @@ export class Controller {
         const bm = getSettings().battle;
         const minePart = e.t === 'attack' && ((!!e.ctl && this.isMine(e.ctl)) || [e.attackerId, ...e.targets.map(t => t.id)].some(id => { const u = this.game.unit(id); return u.kind === 'hero' && this.isMine(u.guild!); }));
         const showBattle = e.t === 'attack' && (bm === 'never' ? false : bm === 'mine' ? minePart : (humanInvolved || this.renderer.speed < 4));
+        // online: o que estava só sendo acompanhado (escolha da arma / Rerrolagem do outro) dá lugar ao ataque de verdade
+        if (e.t === 'attack') { this.hud.endSpectate(); if (!showBattle) this.battle.closeSpectate(); }
         this.hud.onEvent(e, showBattle);
         // se a rolagem já começou na tela de combate do centro (Rerrolagem), continua nela — sem abrir outra tela
         if (showBattle && e.t === 'attack' && (this.battle.hasCarry || !this.hud.hasCarry)) {
@@ -186,6 +190,11 @@ export class Controller {
       endTurn: () => this.tryEndTurn(),
       rest: () => this.openRest(),
       cancelAttack: null,
+      order: (heroId, uids) => this.act({ type: 'order', heroId, uids }, 'ordem das cartas'),
+      coverCard: (heroId, cardUid) => {
+        if (!this.isHumanTurn()) { this.hud.toast('Escolha no seu turno.', '#c0392b'); return; }
+        this.act({ type: 'cover', heroId, cardUid }, 'Maldição');
+      },
       cover: async id => {
         const g = this.game, h = g.unit(id);
         if (!h.covered || !this.isHumanTurn()) { this.hud.toast('Escolha no seu turno.', '#c0392b'); return; }
@@ -517,8 +526,11 @@ export class Controller {
           const req = e.req;
           // decisão de outro jogador (online): pergunta pela rede e espera a resposta
           const owner = 'choice' in req ? req.guild : req.guild ?? this.game.unit(req.heroId).guild;
+          // online: os outros jogadores acompanham a rolagem de quem está decidindo a Rerrolagem
+          if (this.mode === 'host' && owner && !('choice' in req)) (this.net as HostSession).sendSpectate(req, owner);
           if (owner && this.remoteHuman(owner)) {
             this.hud.setHint(`Aguardando ${this.hud.nameOf(owner) ?? guildShort(owner)} decidir…`);
+            if (!('choice' in req)) this.hud.spectateDecision(req, this.hud.nameOf(owner) ?? guildShort(owner));
             void (this.net as HostSession).askDecision(owner, req).then(pick => { decided.push(pick ?? [AUTO_PICK]); attempt(); });
             return;
           }
@@ -556,7 +568,7 @@ export class Controller {
     // ataque do seu Herói: dá para cancelar antes de rolar os dados (volta para este estado)
     this.preAttack = a.type === 'attack' ? { snap, histLen: this.history.length } : null;
     this.hud.actions.cancelAttack = this.preAttack ? () => this.cancelAttack() : null;
-    const guild = (a.type === 'place' || a.type === 'placeMany' || a.type === 'ready') ? this.myDeployGuild() : actingGuild(this.game);
+    const guild = (a.type === 'place' || a.type === 'placeMany' || a.type === 'ready') ? this.myDeployGuild() : a.type === 'order' ? this.game.unit(a.heroId).guild : actingGuild(this.game);
     if (!guild) return false;
     let result: boolean | null = null;
     this.withDecisions(() => applyAction(this.game, guild, a), ok => {
@@ -760,6 +772,8 @@ export class Controller {
       undoPoll: (poll, result) => this.showUndoPoll(poll, result),
       decide: (req, id) => this.decideForHost(req, id),
       diceStep: id => diceSync.receive(id),
+      spectate: (req, gid) => { if (!('choice' in req)) this.hud.spectateDecision(req, this.hud.nameOf(gid) ?? guildShort(gid)); },
+      peek: (gid, heroId, targetId, card) => this.showPeek(gid, heroId, targetId, card),
     };
   }
 
@@ -1647,8 +1661,23 @@ export class Controller {
     this.act({ type: 'move', cell });
   }
 
+  /** Online: outro jogador está escolhendo como atacar (targetId null = desistiu). */
+  private showPeek(gid: GuildId, heroId: string, targetId: string | null, card: string | null) {
+    if (!this.game?.s.units[heroId]) return;
+    const who = this.hud.nameOf(gid) ?? guildShort(gid);
+    if (!targetId) { this.battle.closeSpectate(); this.hud.setHint(''); return; }
+    if (getSettings().battle === 'never') { this.hud.setHint(`⚔ ${who} está escolhendo como atacar ${this.game.name(this.game.unit(targetId))}…`); return; }
+    this.battle.spectatePrepare(heroId, targetId, card, who);
+  }
+  private sendPeek(heroId: string, targetId: string | null, card: string | null) {
+    if (this.mode !== 'local') (this.net as HostSession | ClientSession | null)?.sendPeek(heroId, targetId, card);
+  }
+
   private openBattle(heroId: string, targetId: string) {
     this.hud.tooltip(null);
+    // online: os outros veem a tela de batalha enquanto você escolhe a arma
+    this.sendPeek(heroId, targetId, this.hud.selectedCard);
+    this.battle.onPrepSelect = uid => this.sendPeek(heroId, targetId, uid);
     this.battle.openPrepare(heroId, targetId, this.hud.selectedCard, async (cardUid, sacrifice, boosts) => {
       this.hud.selectedCard = cardUid;
       // Reação de Alerta por atacar outro alvo estando Perto de Monstros: avisa antes
@@ -1661,13 +1690,13 @@ export class Controller {
           `<p><b>${g.name(h)}</b> vai atacar <b>${g.name(t)}</b> estando Perto de Monstro${alerts.length > 1 ? 's' : ''} que não ${alerts.length > 1 ? 'são' : 'é'} o alvo — depois do ataque, recebe ${alerts.length > 1 ? `<b>${alerts.length} ataques</b>` : '<b>1 ataque</b>'} de Alerta:</p><ul>${rows}</ul>
            <p class="muted">Defesa de ${g.name(h)}: ${g.defenseDice(h)} dado${g.defenseDice(h) === 1 ? '' : 's'} · Vida: ${g.maxHp(h) - h.wounds}/${g.maxHp(h)}</p>`,
           'Atacar mesmo assim', 'Cancelar');
-        if (!ok || this.game !== g) { this.battle.close(); this.refresh(); return; }
+        if (!ok || this.game !== g) { this.battle.close(); this.sendPeek(heroId, null, null); this.refresh(); return; }
       }
       // sem tela de confronto: fecha a janela da arma antes do ataque (a luta aparece só no mapa)
       if (getSettings().battle === 'never') this.battle.close();
       const ok = this.act({ type: 'attack', cardUid, targetId, sacrifice, boosts });
-      if (!ok) this.battle.close();
-    }, () => this.refresh());
+      if (!ok) { this.battle.close(); this.sendPeek(heroId, null, null); }
+    }, () => { this.sendPeek(heroId, null, null); this.refresh(); });
   }
 
   private click(x: number, y: number) {
@@ -1960,11 +1989,13 @@ export class Controller {
       const c = cells.find(x => area.some(y => sameCell(x, y))) ?? cells[0];
       if (c) res[h.id] = c;
     }
+    // a carta debaixo da Maldição também pode ser reorganizada (depois a Maldição volta para cima de uma carta)
+    const held = (h: (typeof heroes)[number]) => [...(h.covered ? [h.covered] : []), ...h.cards];
     this.restDraft = {
-      cards: Object.fromEntries(heroes.flatMap(h => h.cards.map(c => [c.uid, h.id]))),
+      cards: Object.fromEntries(heroes.flatMap(h => held(h).map(c => [c.uid, h.id]))),
       tokens: Object.fromEntries(heroes.flatMap(h => h.tokens.filter(t => t.type !== 'missao').map(t => [t.id, h.id]))),
       res, picking: null, chosen: [],
-      items: [...heroes.flatMap(h => h.cards.map(c => ({ id: c.defId, to: h.defId, uid: c.uid }))),
+      items: [...heroes.flatMap(h => held(h).map(c => ({ id: c.defId, to: h.defId, uid: c.uid }))),
         ...(this.game.s.spare?.[g.id] ?? []).map(c => ({ id: c.defId, to: 'pool', uid: c.uid }))],
     };
     for (const c of this.game.s.spare?.[g.id] ?? []) this.restDraft.cards[c.uid] = 'pool';
@@ -1975,7 +2006,9 @@ export class Controller {
     const d = this.restDraft!;
     const heroes = this.game.heroesOf(this.game.currentGuild().id);
     const by = (m: Record<string, string>) => Object.fromEntries(heroes.map(h => [h.id, Object.keys(m).filter(k => m[k] === h.id)]));
-    return { cards: by(d.cards), tokens: by(d.tokens), resurrect: d.res };
+    // as cartas na ordem arrumada no editor (a 1ª fica debaixo da Maldição que ocupa espaço)
+    const cards = Object.fromEntries(heroes.map(h => [h.id, d.items.filter(x => x.uid && d.cards[x.uid] === h.id).map(x => x.uid!)]));
+    return { cards, tokens: by(d.tokens), resurrect: d.res };
   }
 
   private paintRest() {
@@ -2016,10 +2049,14 @@ export class Controller {
       },
       heroes: heroes.map(h => h.defId), color: g.color, discard: false,
       slots: (hd, ids) => {
-        const s = this.game.slotsUsed(byDef(hd), ids.map((defId, i) => ({ uid: `_${i}`, defId, exhausted: false, uses: 0 })));
-        return { used: s.used, max: s.max, magicExtra: ids.reduce((n, id) => n + (CARDS[id]?.fx.magicSlots ?? 0), 0) };
+        const h = byDef(hd);
+        const s = this.game.slotsUsed(h, ids.map((defId, i) => ({ uid: `_${i}`, defId, exhausted: false, uses: 0 })));
+        // a Maldição que ocupa espaço fica em cima de uma das cartas: não tira um espaço
+        const over = h.curse && CURSES[h.curse]?.slot && ids.length ? 1 : 0;
+        return { used: s.used - over, max: s.max, magicExtra: ids.reduce((n, id) => n + (CARDS[id]?.fx.magicSlots ?? 0), 0) };
       },
-      curse: hd => { const h = byDef(hd); return h.curse ? `${CURSES[h.curse]?.name}${CURSES[h.curse]?.slot ? ` (ocupa 1 espaço${h.covered ? ` · cobre ${CARDS[h.covered.defId].name}` : ''})` : ''}` : null; },
+      curse: hd => { const h = byDef(hd); return h.curse ? `${CURSES[h.curse]?.name}${CURSES[h.curse]?.slot ? ' (ocupa o 1º espaço: a carta posta nele fica debaixo da caveira)' : ''}` : null; },
+      curseSlot: hd => { const h = byDef(hd); return h.curse && CURSES[h.curse]?.slot ? CURSES[h.curse].name : null; },
     };
     // cartas sem Herói podem continuar sem Herói (ficam guardadas até o próximo Descanso)
     const poolErr: string[] = [];
@@ -2150,6 +2187,36 @@ export class Controller {
 
   private canRestart() { return this.mode !== 'client'; }
 
+  /** Campanha local: o estado da campanha (main.ts liga isto) — para o placar no menu do Esc. */
+  campaignState: (() => CampaignState | null) | null = null;
+  private campaignNow(): CampaignState | null {
+    if (this.mode !== 'local') return this.lobby?.camp ?? null;
+    return this.campaignEnd ? this.campaignState?.() ?? null : null;
+  }
+
+  /** Placar geral da campanha: medalhas, cenários jogados e o tempo total. */
+  private showCampaignScore() {
+    const c = this.campaignNow();
+    if (!c) return;
+    const name = (g: GuildId) => this.hud.nameOf(g) ?? guildShort(g);
+    const total = (c.elapsed ?? 0) + (this.game.s.elapsed ?? 0);
+    const played = c.played.map((p, i) => `<tr><td>${i + 1}º</td><td>${MAPS[p.mapId]?.name ?? p.mapId}</td><td><span class="dot" style="background:${GUILDS[p.winner].color}"></span> ${name(p.winner)}</td><td>${p.ms ? fmtTime(p.ms) : '—'}</td></tr>`).join('');
+    document.getElementById('campscore')?.remove();
+    const el = document.createElement('div');
+    el.id = 'campscore';
+    el.innerHTML = `<div class="cs-box"><button class="cs-x" title="Fechar">✕</button>
+      <div class="cs-h">🏆 Placar da campanha</div>
+      <div class="cs-time">⏱ Tempo total: <b>${fmtTime(total)}</b> · Cenário ${c.played.length + 1} de 6: <b>${this.game.map.name}</b> (${fmtTime(this.game.s.elapsed ?? 0)})</div>
+      ${rankingHtml(c, name)}
+      <h4>Cenários jogados</h4>
+      ${played ? `<table class="cs-played"><tr><th></th><th>Cenário</th><th>Vencedor</th><th>Tempo</th></tr>${played}</table>` : '<p class="muted">Este é o primeiro cenário.</p>'}
+    </div>`;
+    document.body.append(el);
+    const close = () => el.remove();
+    (el.querySelector('.cs-x') as HTMLElement).onclick = close;
+    el.onclick = e => { if (e.target === el) close(); };
+  }
+
   openMenu() {
     const el = document.getElementById('gamemenu')!;
     this.menuOpen = true;
@@ -2166,10 +2233,11 @@ export class Controller {
         ${online ? item('gm-vote', '🗳️', 'Votar: voltar a jogada', this.poll ? 'Já há uma votação aberta' : 'Todos votam; a maioria decide', '', !!this.poll)
           : item('gm-turn', '⏮', 'Reiniciar turno', 'Volta para o começo deste turno', '', !this.turnStart)}
         ${item('gm-restart', '🔄', 'Reiniciar partida', host ? 'Começa este mapa de novo' : 'Só o anfitrião', '', !host)}
+        ${this.campaignNow() ? item('gm-score', '🏆', 'Placar da campanha', 'Medalhas, cenários e tempo total') : ''}
         ${item('gm-lib', '📚', 'Biblioteca', 'Heróis, cartas, regras')}
         ${item('gm-set', '⚙️', 'Configurações', 'Som, tela, velocidade')}
       </div>
-      ${item('gm-exit', '🚪', this.campaignEnd ? 'Sair do cenário' : 'Sair da partida', this.campaignEnd ? 'A campanha continua salva' : 'Voltar ao menu inicial', 'danger')}
+      ${item('gm-exit', '🚪', this.campaignEnd ? 'Sair do cenário' : 'Sair da partida', this.campaignEnd ? 'O cenário fica salvo: continue depois' : this.mode === 'host' ? 'A partida fica salva' : 'Voltar ao menu inicial', 'danger')}
     </div>`;
     el.classList.remove('hidden');
     const close = () => { el.classList.add('hidden'); this.menuOpen = false; };
@@ -2186,10 +2254,12 @@ export class Controller {
     if (gv) gv.onclick = () => { close(); this.undoVote(true); };
     (el.querySelector('#gm-undo') as HTMLElement).onclick = () => { close(); this.undoMove(); };
     (el.querySelector('#gm-lib') as HTMLElement).onclick = () => { close(); this.openLibrary(); };
+    const gs = el.querySelector('#gm-score') as HTMLElement | null;
+    if (gs) gs.onclick = () => { close(); this.showCampaignScore(); };
     (el.querySelector('#gm-set') as HTMLElement).onclick = () => { close(); this.openSettings(); };
     (el.querySelector('#gm-exit') as HTMLElement).onclick = async () => {
-      const body = this.campaignEnd ? 'O progresso <b>deste cenário</b> será perdido. A campanha continua salva e você pode voltar depois.'
-        : this.mode === 'host' ? 'Você é o <b>anfitrião</b>: sair encerra a partida para todos os jogadores.' : 'O progresso desta partida será perdido.';
+      const body = this.campaignEnd ? 'O cenário <b>fica salvo</b>: na campanha, aparece "Continuar" para voltar de onde parou.'
+        : this.mode === 'host' ? 'Você é o <b>anfitrião</b>: sair fecha a sala para todos, mas a partida <b>fica salva</b> (Online → Partidas salvas).' : 'O progresso desta partida será perdido.';
       if (!await gameConfirm({ icon: '🚪', title: this.campaignEnd ? 'Sair do cenário?' : 'Sair da partida?', body, yes: 'Sair', no: 'Continuar jogando', danger: true })) return;
       close();
       this.battle.close();

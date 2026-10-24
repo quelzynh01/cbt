@@ -34,7 +34,9 @@ export class BattlePanel {
   private fighters: Fighter[] = [];
   private raf = 0;
   private resolveBtn: (() => void) | null = null;
-  mode: 'closed' | 'prepare' | 'play' = 'closed';
+  mode: 'closed' | 'prepare' | 'play' | 'spectate' = 'closed';
+  /** Online: avisa os outros jogadores qual arma está marcada na preparação. */
+  onPrepSelect: ((cardUid: string | null) => void) | null = null;
   onCancel: (() => void) | null = null;
   /** Alvo escolhido na preparação (para a Rerrolagem do ataque acontecer nesta mesma tela). */
   private prepTarget: string | null = null;
@@ -219,7 +221,7 @@ export class BattlePanel {
         if (sac0 && sac1) sac0.replaceWith(sac1);
         this.el.querySelectorAll<HTMLElement>('.bt-weapon').forEach(b => b.classList.toggle('sel', b.dataset.uid === sel));
       }
-      this.el.querySelectorAll<HTMLButtonElement>('.bt-weapon').forEach(b => { b.onclick = () => { sel = b.dataset.uid!; render(); }; });
+      this.el.querySelectorAll<HTMLButtonElement>('.bt-weapon').forEach(b => { b.onclick = () => { sel = b.dataset.uid!; this.onPrepSelect?.(sel); render(); }; });
       this.el.querySelectorAll<HTMLInputElement>('[data-boost]').forEach(cb => { cb.onchange = () => { if (cb.checked) boosts.add(cb.dataset.boost!); else boosts.delete(cb.dataset.boost!); render(); }; });
       const sac = this.el.querySelector('#bt-sac') as HTMLInputElement | null;
       if (sac) sac.onchange = () => { sacrifice = sac.checked; };
@@ -236,6 +238,40 @@ export class BattlePanel {
     render();
     this.show();
   }
+
+  /** Online: outro jogador está escolhendo como atacar — a mesma tela, só para ver (a arma marcada acompanha a dele). */
+  spectatePrepare(heroId: string, targetId: string, cardUid: string | null, who: string) {
+    if (this.mode === 'prepare' || this.mode === 'play') return;
+    const g = this.deps.game();
+    const h = g.unit(heroId), t = g.unit(targetId);
+    if (!h || !t) return;
+    const fresh = this.mode !== 'spectate' || this.prepTarget !== targetId;
+    this.mode = 'spectate';
+    this.prepTarget = targetId;
+    this.carry = null;
+    const pool = g.attackCardPool(h);
+    const weapons = pool.map(c => {
+      const d = CARDS[c.defId];
+      return `<button class="bt-weapon ${c.uid === cardUid ? 'sel' : ''}" data-uid="${c.uid}" disabled style="--lv:${itemColor(c.defId)}">
+        <div class="bw-art ${CARD_ART[c.defId]?.kind === 'fill' ? 'fill' : ''}">${itemArt(c.defId)}</div>
+        <b>${d.name}</b><span class="bw-dice">${medal(d.attackType === 'melee' ? 'melee' : 'ranged', d.dice, `${d.dice} dados de ataque`)}</span>
+        <small>${d.attackType === 'melee' ? 'Próximo' : 'Distância'} · ${d.group}</small></button>`;
+    }).join('');
+    if (fresh) {
+      this.el.innerHTML = `<div class="bt-box">
+        <div class="bt-head"><span class="bt-reason">Batalha</span><span class="bt-title">⚔ ${who} está escolhendo o ataque</span></div>
+        <div class="bt-arena">${this.fighterHtml(h, 'left', h.wounds)}<div class="bt-vs">VS</div>${this.fighterHtml(t, 'right', t.wounds)}</div>
+        <div class="bt-weapons">${weapons}</div>
+        <div class="bt-btns"><span class="bt-wait">⏳ Aguardando ${who} atacar…</span></div>
+      </div>`;
+      this.mountFighters(h, t);
+      this.show();
+    } else {
+      this.el.querySelectorAll<HTMLElement>('.bt-weapon').forEach(b => b.classList.toggle('sel', b.dataset.uid === cardUid));
+    }
+  }
+  /** O outro jogador desistiu do ataque: fecha a tela de ver. */
+  closeSpectate() { if (this.mode === 'spectate') this.close(); }
 
   cancel() {
     if (this.mode !== 'prepare') return;
@@ -276,10 +312,10 @@ export class BattlePanel {
     if (notesEl) notesEl.innerHTML = e.notes.join(' · ');
     for (const t of e.targets) this.defWrap(t.id);
     const btns = this.el.querySelector('.bt-btns') as HTMLElement;
-    const waitRemote = async (who: GuildId, step: string, what: string) => {
+    const waitRemote = async (who: GuildId, step: string, what: string, ms?: number) => {
       const b = this.el.querySelector('.bt-btns') as HTMLElement;
       b.innerHTML = `<span class="bt-wait">⏳ Aguardando ${diceSync.net?.name(who) ?? ''} ${what}…</span>`;
-      await diceSync.wait(step);
+      await diceSync.wait(step, ms);
       b.innerHTML = '';
     };
     const button = (label: string, primary = true) => new Promise<void>(res => {
@@ -361,7 +397,9 @@ export class BattlePanel {
       }
     }
     result.innerHTML = lines.join('');
-    if (humanInvolved) await button('Continuar ▶');
+    // online: quem assiste segue junto com o "Continuar" de quem atacou
+    if (humanInvolved) { await button('Continuar ▶'); if (humanAtk) diceSync.mine('done'); }
+    else if (atkRemote) { await wait(600); await waitRemote(atkOwner!, 'done', 'continuar', 15000); }
     else await wait(1300);
     this.linger(sp);
     done();
@@ -422,6 +460,7 @@ export class BattlePanel {
     const me = g.unit(req.heroId);
     const sp = Math.max(1, this.deps.speed());
     this.mode = 'play';
+    diceSync.beginDecision(req);
     // ainda sobrou Rerrolagem: a próxima rodada continua com os mesmos dados na mesma bandeja
     if ((req.round ?? 1) > 1 && this.carry) {
       const c = this.carry;
@@ -457,7 +496,8 @@ export class BattlePanel {
       if (mon) await this.ask(`🎲 Rolar ataque de ${g.name(me)} (${req.base ?? req.faces.length} dado${(req.base ?? req.faces.length) > 1 ? 's' : ''})`);
       const f = this.fighter(me.id);
       if (f) f.lungeT = performance.now() + 500 / sp;
-      const dice = await this.rollTray(tray, req.faces, req.success, ATK_FACES, sp, false, req.base ?? req.card?.dice, true);
+      diceSync.mine('roll'); // online: os outros veem a rolagem junto
+      const dice = await this.rollTray(tray, req.faces, req.success, ATK_FACES, sp, false, req.base ?? req.card?.dice, true, false, 'roll');
       const idx = await this.pick(tray, dice, req, this.el.querySelector('.bt-count.atk') as HTMLElement);
       this.carry!.atk = { dice, before: req.faces.slice(), idx, settled: false };
       return idx;
@@ -482,7 +522,8 @@ export class BattlePanel {
     const tray = wrap.querySelector('.bt-tray') as HTMLElement;
     tray.innerHTML = '';
     await this.ask(`🛡 Defender ${g.name(me)} (${req.faces.length} dado${req.faces.length > 1 ? 's' : ''})`);
-    const dice = await this.rollTray(tray, req.faces, req.success, DEF_FACES, sp, false, req.base, true);
+    diceSync.mine('roll');
+    const dice = await this.rollTray(tray, req.faces, req.success, DEF_FACES, sp, false, req.base, true, false, 'roll');
     const idx = await this.pick(tray, dice, req, wrap.querySelector('.bt-count') as HTMLElement);
     this.carry!.def = { heroId: me.id, dice, before: req.faces.slice(), idx };
     return idx;

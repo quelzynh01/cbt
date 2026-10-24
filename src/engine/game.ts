@@ -197,9 +197,9 @@ export class Game {
           wounds: 0, alive: true, stunned: false, cards, tokens: [], deaths: 0, num: num++,
           curse: p.curses?.[hid] && p.curses[hid] !== 'sem_maldicao' ? p.curses[hid] : undefined,
         };
-        // Maldição que ocupa um espaço com o inventário cheio: a última carta fica debaixo dela (indisponível)
+        // Maldição que ocupa um espaço com o inventário cheio: ela fica no 1º espaço — a 1ª carta fica debaixo dela (indisponível)
         const hu = s.units[id];
-        if (hu.curse && CURSES[hu.curse]?.slot && g.slotsUsed(hu).used > g.slotsUsed(hu).max && hu.cards.length) hu.covered = hu.cards.pop();
+        if (hu.curse && CURSES[hu.curse]?.slot && g.slotsUsed(hu).used > g.slotsUsed(hu).max && hu.cards.length) hu.covered = hu.cards.shift();
         gs.heroIds.push(id);
       });
       s.guilds[p.guild] = gs;
@@ -630,7 +630,8 @@ export class Game {
   // Caminhos (Movimento p.14): 1 PM por Espaço, abrir porta ou usar portal.
   // =========================================================================
   /** openDoors: o caminho pode incluir abrir portas (Monstros em Vingança e a IA). O jogador abre portas manualmente. */
-  reachable(u: Unit, mp: number, from: Cell = u.cell!, openDoors = u.kind === 'monster'): Map<string, PathNode> {
+  /** `noPortal`: sem usar portais (movimento das Botas). */
+  reachable(u: Unit, mp: number, from: Cell = u.cell!, openDoors = u.kind === 'monster', noPortal = false): Map<string, PathNode> {
     const res = new Map<string, PathNode>();
     const start: PathNode = { cell: from, mp: 0, cost: 0, prev: null, canEnd: true };
     res.set(key(from), start);
@@ -675,7 +676,7 @@ export class Game {
       const pc = this.board.portalAt(n.cell);
       const portalOk = pc && !(this.map.barrier?.portalColor === pc && !this.passesBarrier(u))
         && !(this.map.portalTitle?.color === pc && !(u.kind === 'hero' && this.hasTitle(u.guild!, this.map.portalTitle.title)));
-      if (pc && portalOk) for (const p of this.board.portalCells(pc)) if (!sameCell(p, n.cell)) relax(p, 1, { portal: true }, 0);
+      if (pc && portalOk && !noPortal) for (const p of this.board.portalCells(pc)) if (!sameCell(p, n.cell)) relax(p, 1, { portal: true }, 0);
     }
     // o próprio Espaço inicial sempre é um final válido
     start.canEnd = true;
@@ -1552,6 +1553,16 @@ export class Game {
     return { used: cards.length - Math.min(magic, magicExtra) + curseSlot, max: 4 };
   }
 
+  /** Muda a ordem das cartas de um Herói (o jogador arruma; a Maldição que ocupa espaço fica no 1º). */
+  reorderCards(guild: GuildId, heroId: string, uids: string[]): boolean {
+    const h = this.unit(heroId);
+    if (!h || h.guild !== guild || h.kind !== 'hero') return false;
+    const cur = h.cards.map(c => c.uid);
+    if (uids.length !== cur.length || !uids.every(u => cur.includes(u)) || new Set(uids).size !== uids.length) return false;
+    h.cards = uids.map(u => h.cards.find(c => c.uid === u)!);
+    return true;
+  }
+
   /** Maldição que ocupa espaço com o inventário cheio: troca a carta que fica debaixo dela (antes de usar a carta). */
   setCurseCover(heroId: string, cardUid: string): boolean {
     const h = this.unit(heroId);
@@ -1955,6 +1966,8 @@ export class Game {
       if (!h.alive || h.spent) return no(label, h.spent ? 'Herói já exausto' : 'Herói morto');
       if (a?.heroId === h.id && !fresh) return no(label, 'Use antes de agir com este Herói');
       if (!this.heroesOf(h.guild!).some(x => !x.alive)) return no(label, 'Nenhum Aliado morto');
+      // ressuscita Perto deste Herói (mesmo Espaço ou ao lado, sem parede no meio)
+      if (!h.cell || !this.heroesOf(h.guild!).some(x => !x.alive && this.resurrectCells(x).some(c => this.board.isClose(c, h.cell!)))) return no(label, 'Sem Espaço livre Perto deste Herói');
       return { label, ok: true, pick: 'dead' };
     }
     if (fx.swapAlly) {
@@ -1968,10 +1981,19 @@ export class Game {
       return { label, ok: true, pick: 'ally' };
     }
     if (fx.bootMove) {
-      const label = `Mover este Herói ${fx.bootMove} Espaço${fx.bootMove > 1 ? 's' : ''}`;
+      // dá para usar aos poucos (ex.: Die Booten: 1 passo, depois outro)
+      const left = a?.bootLeft?.[c.uid];
+      const n = left ?? fx.bootMove;
+      const label = `Mover este Herói ${n} Espaço${n > 1 ? 's' : ''}${left !== undefined ? ' (o que sobrou)' : ''}`;
       if (!myTurn || !a) return no(label, 'Ative outro Herói primeiro');
       if (a.heroId === h.id) return no(label, 'Funciona quando outro Herói está ativado');
-      if (usedAct) return no(label, 'Já usado nesta ativação');
+      if (usedAct || left === 0) return no(label, 'Já usado nesta ativação');
+      if (left !== undefined) {
+        // continuação: vale enquanto o Herói ativado ainda não andou nem atacou
+        if (a.moved || a.attacked) return no(label, 'Só logo ao ativar outro Herói');
+        if (!h.alive || !h.cell) return no(label, 'Herói fora do tabuleiro');
+        return { label, ok: true, pick: 'cell' };
+      }
       // "Quando você ativa um Herói diferente": só logo ao ativar, antes de o Herói ativado mover ou atacar
       if (a.moved || a.attacked || a.mp < this.startMp(this.unit(a.heroId)) || a.committed) return no(label, 'Só logo ao ativar outro Herói');
       if (!h.alive || !h.cell) return no(label, 'Herói fora do tabuleiro');
@@ -1989,9 +2011,9 @@ export class Game {
 
   /** Espaços para onde o Herói das Botas pode ir agora. */
   bootCells(h: Unit, c: CardInst): Cell[] {
-    const n = this.cardDef(c).fx.bootMove ?? 0;
+    const n = this.s.activation?.bootLeft?.[c.uid] ?? this.cardDef(c).fx.bootMove ?? 0;
     if (!n || !h.cell) return [];
-    return [...this.reachable(h, n, h.cell, false)].filter(([, nd]) => nd.canEnd && nd.prev !== null).map(([k]) => parseKey(k));
+    return [...this.reachable(h, n, h.cell, false, true)].filter(([, nd]) => nd.canEnd && nd.prev !== null).map(([k]) => parseKey(k));
   }
 
   /** Usa uma carta ativável. `target`: Aliado (troca/ressurreição); `cell`: destino (Botas). */
@@ -2033,6 +2055,7 @@ export class Game {
       const who = dead.find(x => x.id === target) ?? dead[0];
       if (!who) return false;
       const near = h.cell ? this.resurrectCells(who).find(x => this.board.isClose(x, h.cell!)) : undefined;
+      if (!near) return false; // só Perto deste Herói (sem parede no meio)
       h.spent = true;
       this.emit({ t: 'skill', id: h.id, skill: 'escudo_almas', name: 'Escudo das Almas' });
       this.resurrect(who, near);
@@ -2055,10 +2078,15 @@ export class Game {
     }
     if (fx.bootMove) {
       if (!cell || !h.cell) return false;
-      const nodes = this.reachable(h, fx.bootMove, h.cell, false);
+      // as Botas não passam por portal (teletransporte); dá para usar aos poucos (o que sobra fica para depois)
+      const left = a?.bootLeft?.[c.uid] ?? fx.bootMove;
+      if (left <= 0) return false;
+      const nodes = this.reachable(h, left, h.cell, false, true);
       const nd = nodes.get(key(cell));
       if (!nd || !nd.canEnd || nd.prev === null) return false;
-      markAct();
+      const rest = Math.max(0, left - Math.ceil(nd.mp));
+      if (a) a.bootLeft = { ...(a.bootLeft ?? {}), [c.uid]: rest };
+      if (rest === 0) markAct();
       // usou as Botas: não dá mais para trocar de Herói, e o Herói das Botas não pode ser ativado neste turno
       if (this.s.activation) this.s.activation.committed = true;
       if (!(this.s.activatedThisTurn ?? []).includes(h.id)) this.s.activatedThisTurn = [...(this.s.activatedThisTurn ?? []), h.id];
@@ -2086,13 +2114,16 @@ export class Game {
   validateRest(g: GuildId, o: RestOptions): string | null {
     const heroes = this.heroesOf(g);
     if (o.cards) {
-      const pool = [...heroes.flatMap(h => h.cards), ...(this.s.spare?.[g] ?? [])];
+      // a carta debaixo da Maldição também entra na reorganização (depois o jogador escolhe de novo onde a Maldição fica)
+      const pool = [...heroes.flatMap(h => [...h.cards, ...(h.covered ? [h.covered] : [])]), ...(this.s.spare?.[g] ?? [])];
       const given = Object.values(o.cards).flat();
       if (new Set(given).size !== given.length || given.some(uid => !pool.some(c => c.uid === uid))) return 'Cartas inválidas.';
       for (const h of heroes) {
         const cards = (o.cards[h.id] ?? []).map(uid => pool.find(c => c.uid === uid)!);
         const sl = this.slotsUsed(h, cards);
-        if (sl.used > sl.max) return `${HEROES[h.defId].name}: ${sl.used} cartas para ${sl.max} espaços.`;
+        // Maldição que ocupa espaço: ela fica em cima de uma das cartas (que fica indisponível), então cabe +1
+        const over = h.curse && CURSES[h.curse]?.slot && cards.length ? 1 : 0;
+        if (sl.used > sl.max + over) return `${HEROES[h.defId].name}: ${sl.used - over} cartas para ${sl.max} espaços.`;
         if (cards.filter(c => this.cardDef(c).fx.armor).length > 1) return `${HEROES[h.defId].name}: só 1 armadura por Herói.`;
       }
     }
@@ -2127,8 +2158,17 @@ export class Game {
     this.s.activation = null;
     this.emit({ t: 'rest', guild: g.id });
     if (o.cards) {
-      const pool = [...heroes.flatMap(h => h.cards), ...(this.s.spare?.[g.id] ?? [])];
-      for (const h of heroes) h.cards = (o.cards[h.id] ?? []).map(uid => pool.find(c => c.uid === uid)!);
+      const pool = [...heroes.flatMap(h => [...h.cards, ...(h.covered ? [h.covered] : [])]), ...(this.s.spare?.[g.id] ?? [])];
+      const before = new Map(heroes.map(h => [h.id, h.covered?.uid]));
+      for (const h of heroes) { h.cards = (o.cards[h.id] ?? []).map(uid => pool.find(c => c.uid === uid)!); h.covered = undefined; }
+      // Maldição que ocupa espaço com o inventário cheio: ela fica no 1º espaço — a 1ª carta (na ordem que o jogador arrumou) fica debaixo dela
+      void before;
+      for (const h of heroes) {
+        if (!h.curse || !CURSES[h.curse]?.slot) continue;
+        const sl = this.slotsUsed(h);
+        if (sl.used <= sl.max || !h.cards.length) continue;
+        h.covered = h.cards.shift();
+      }
       // o que não foi equipado continua com as cartas sem Herói
       const used = new Set(Object.values(o.cards).flat());
       (this.s.spare ??= {})[g.id] = pool.filter(c => !used.has(c.uid));

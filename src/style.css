@@ -1272,7 +1272,7 @@ html.touch :is(.cd-roll, .bt-act, #rr-roll, #rr-go, #cd-rr, #bt-rr)::after { con
   #herobox .hb-c2 { display: grid; gap: 4px; width: 230px; max-height: 150px; overflow: auto; }
   #herobox .hb-c2:empty { display: none; }
   #herobox .hb-c3 { display: grid; gap: 4px; }
-  #herobox .cards { grid-template-columns: repeat(4, 82px); margin-top: 0; }
+  #herobox .cards { grid-template-columns: repeat(var(--n, 4), 82px); margin-top: 0; }
   #herobox .cards .card.empty-slot { height: 118px; }
   #herobox .tokrow { margin: 0; }
   #herobox .actions { display: grid; gap: 10px; margin: 0; }
@@ -1319,7 +1319,7 @@ html.touch :is(.cd-roll, .bt-act, #rr-roll, #rr-go, #cd-rr, #bt-rr)::after { con
   #herobox .hb-c2 .ability, #herobox .hb-c2 .tag, #herobox .hb-c2 .mcard, #herobox .hb-c2 .hb-note { margin: 0; }
   /* coluna 3: cartas e bolsa */
   #herobox .hb-c3 { gap: 6px; }
-  #herobox .cards { grid-template-columns: repeat(4, 78px); gap: 6px; }
+  #herobox .cards { grid-template-columns: repeat(var(--n, 4), 78px); gap: 6px; }
   #herobox .cards .card, #herobox .cards .card.empty-slot { height: 112px; }
   #herobox .tokrow { display: flex; align-items: center; gap: 6px; min-height: 30px; }
   #herobox .tokrow .tok-bag { width: 32px; height: 30px; padding: 0; }
@@ -1435,3 +1435,29 @@ html.touch :is(.cd-roll, .bt-act, #rr-roll, #rr-go, #cd-rr, #bt-rr)::after { con
 
 /* online: esperando o outro jogador rolar */
 .cd-wait, .bt-wait { display: inline-block; padding: 6px 12px; border-radius: 10px; background: rgba(0,0,0,.35); color: #ffe7a8; font-weight: 700; animation: pulse 1s infinite alternate; }
+
+/* espaços extras do Tomo da Iluminação (à direita) */
+.card.tomo-slot { border-color: #6a8cff !important; box-shadow: 0 0 0 2px rgba(106,140,255,.45), inset 0 0 12px rgba(106,140,255,.25); }
+.card.empty-slot.tomo-slot span { color: #a9bcff; }
+/* Maldição em cima de uma carta: caveira por cima, carta indisponível */
+.card.cursed { position: relative; filter: grayscale(.6); }
+.card.cursed.can-cover { cursor: pointer; }
+.card.cursed .curse-x { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 2px; background: rgba(60,10,80,.55); border-radius: inherit; color: #f0d8ff; font-size: 34px; line-height: 1; text-shadow: 0 0 8px #b45cff; pointer-events: none; }
+.card.cursed .curse-x small { font-size: 11px; font-weight: 800; text-shadow: none; }
+.card.empty-slot.cursed { border-color: #b45cff; }
+
+/* Placar da campanha (menu do Esc) */
+#campscore { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; background: rgba(0,0,0,.5); }
+.cs-box { position: relative; width: min(720px, calc(100vw - 32px)); max-height: 86vh; overflow: auto; background: var(--panel); border: 2px solid var(--gold); border-radius: 16px; padding: 16px 18px; display: grid; gap: 10px; }
+.cs-h { font-size: 22px; font-weight: 800; color: var(--gold); }
+.cs-x { position: absolute; top: 10px; right: 10px; }
+.cs-time { color: var(--muted); }
+.cs-box table { width: 100%; border-collapse: collapse; }
+.cs-box th, .cs-box td { padding: 4px 6px; border-bottom: 1px solid rgba(255,255,255,.08); text-align: left; }
+.cs-box .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
+/* arrastar cartas na barra do Herói */
+.card-ghost { position: fixed; z-index: 300; pointer-events: none; transform: translate(-50%, -60%) rotate(-4deg) scale(1.05); opacity: .9; width: 82px; }
+.card-dragging { opacity: .35; }
+.cards .card.card-over { outline: 3px solid var(--gold); outline-offset: 2px; }
+#herobox .cards .card[data-card]:not(.cursed) { cursor: grab; }
+.cs-box .cs-sheet > h4 { display: none; }

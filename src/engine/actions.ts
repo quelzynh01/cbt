@@ -15,6 +15,8 @@ export type Action =
   | { type: 'tomb' }
   /** Maldição que ocupa um espaço: escolhe qual carta do Herói fica debaixo dela (indisponível). */
   | { type: 'cover'; heroId: string; cardUid: string }
+  /** Nova ordem das cartas de um Herói (arrastar na barra do Herói). */
+  | { type: 'order'; heroId: string; uids: string[] }
   | { type: 'rest'; opts?: RestOptions }
   | { type: 'end' }
   /** doors: portas Perto do Monstro que ele abre/fecha antes de mover (1 ponto de Movimento cada). */
@@ -39,6 +41,8 @@ export function applyAction(g: Game, by: GuildId, a: Action): boolean {
     if (g.s.pending?.controller !== by) return false;
     return g.resolveVengeance(a.dest, a.attack, a.doors ?? []);
   }
+  // arrumar a ordem das cartas dos seus Heróis pode a qualquer hora
+  if (a.type === 'order') return g.reorderCards(by, a.heroId, a.uids);
   if (g.currentGuild().id !== by || g.s.pending) return false;
   if (a.type === 'puppetPick' || a.type === 'puppet' || a.type === 'puppetSkip') {
     if (g.s.puppet?.guild !== by) return false;

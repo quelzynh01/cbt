@@ -109,6 +109,7 @@ camp.onPlay = async mapId => {
     if (ok) resume = m.state;
   }
   enterGame();
+  getController().campaignState = () => camp.c;
   getController().startCampaign(mapId, gameOptions(c), game => {
     recordResult(camp.c!, game);
     backToCampaign();

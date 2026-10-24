@@ -5,7 +5,7 @@ import { CARDS } from '../engine/cards';
 import { CARD_ART } from '../ui/cardArt';
 import { drawTokenImage, tokenImage, tokenImageId } from './tokens';
 import { key, sameCell } from '../engine/board';
-import { GUILDS, MONSTERS } from '../engine/data';
+import { GUILDS, MONSTERS, teamName } from '../engine/data';
 import type { Game } from '../engine/game';
 import type { Cell, GameEvent, Token } from '../engine/types';
 import {
@@ -55,6 +55,8 @@ interface UnitView {
   spin?: { t0: number; dur: number } | null;
   flip: boolean;
   dir: Dir;
+  /** Itens da bolsa mostrados girando (só entram quando a animação de pegar acontece). */
+  bag: Token[];
 }
 
 interface Floater { text: string; color: string; x: number; y: number; t0: number; dur: number; size: number }
@@ -376,7 +378,7 @@ export class Renderer {
       const nv: UnitView = {
         id: u.id, kind: u.kind, defId: u.defId, guild: u.guild, num: u.num,
         cell: u.alive && u.cell ? { ...u.cell } : null, wounds: u.wounds, maxHp: g.maxHp(u), alive: u.alive && !!u.cell,
-        stunned: u.stunned, pos: v?.pos ?? { gx: 0, gy: 0 }, tween: null, alpha: 1, fade: null,
+        stunned: u.stunned, pos: v?.pos ?? { gx: 0, gy: 0 }, tween: null, alpha: 1, fade: null, bag: u.tokens.slice(),
         hurtT0: v?.hurtT0 ?? -9, lunge: null, flip: v?.flip ?? false, dir: v?.dir ?? this.centerDir(u.cell),
       };
       this.units.set(u.id, nv);
@@ -418,7 +420,7 @@ export class Renderer {
     const out = new Map<string, { gx: number; gy: number }>();
     for (const list of byCell.values()) {
       list.sort((a, b) => a.id.localeCompare(b.id));
-      const hasMission = (this.floor[key(list[0].cell!)] ?? []).some(t => t.type === 'missao');
+      const hasMission = (this.floor[key(list[0].cell!)] ?? []).some(t => this.openMission(t));
       list.forEach((u, i) => {
         const cx = u.cell!.c + 0.5, cy = u.cell!.r + 0.5;
         // marcador de Missão ocupa um lugar: o personagem sozinho fica no outro
@@ -443,7 +445,7 @@ export class Renderer {
     const same = (x: Cell) => x.c === c.c && x.r === c.r;
     const portal = this.game.map.portals.some(p => same(p.cell));
     const entry = this.game.s.entryMarkers.some(m => same(m.cell));
-    const mission = (this.floor[key(c)] ?? []).some(t => t.type === 'missao');
+    const mission = (this.floor[key(c)] ?? []).some(t => this.openMission(t));
     return {
       // o portal fica sempre no meio do Espaço; o resto vai para os cantos
       portal: [0.5, 0.5],
@@ -452,6 +454,9 @@ export class Renderer {
       tomb: portal && entry ? [0.8, 0.22] : portal || entry ? [0.22, 0.22] : [0.78, 0.28],
     };
   }
+
+  /** Marcador de Missão à vista (os escondidos entre os de Exploração ficam virados, como "?"). */
+  private openMission(t: Token) { return t.type === 'missao' && (t.faceUp || !!this.game.s.debug.revealTokens); }
 
   private missionSlot(c: number, r: number) {
     return { gx: c + 0.5 - 0.17 + 0.1, gy: r + 0.5 + 0.17 + 0.1 };
@@ -628,6 +633,7 @@ export class Renderer {
       }
       case 'pickup': {
         const u = this.units.get(e.heroId);
+        if (u && !u.bag.some(t => t.id === e.token.id)) u.bag.push({ ...e.token });
         for (const k of Object.keys(this.floor)) {
           this.floor[k] = this.floor[k].filter(t => t.id !== e.token.id);
           if (!this.floor[k].length) delete this.floor[k];
@@ -753,6 +759,7 @@ export class Renderer {
       v.alive = u.alive && !!u.cell;
       v.cell = v.alive ? { ...u.cell! } : null;
       v.wounds = u.wounds;
+      v.bag = u.tokens.slice();
       v.maxHp = g.maxHp(u);
       v.stunned = u.stunned;
       if (!v.alive) { v.fade = null; v.alpha = 1; }
@@ -1067,7 +1074,7 @@ export class Renderer {
       }
     // Marcadores de Missão: Espaço destacado no chão (visível mesmo com Monstro em cima)
     for (const [k, toks] of Object.entries(this.floor)) {
-      const mt = toks.find(t => t.type === 'missao');
+      const mt = toks.find(t => this.openMission(t));
       if (!mt) continue;
       const [c, r] = k.split(',').map(Number);
       const col = hexRgb(gemColor(mt.color));
@@ -1093,6 +1100,19 @@ export class Renderer {
       if (p.color === 'magenta' || p.color === 'rosa') ctx.filter = 'hue-rotate(150deg) saturate(1.4)';
       drawPortal(ctx, 0, 0, tt);
       ctx.restore();
+      // portal que só quem tem o Título usa (ex.: portais vermelhos e o "Senhor das Águias"): aviso em cima
+      const pt = this.game.map.portalTitle;
+      if (pt && pt.color === p.color) {
+        const who = this.game.guilds().filter(x => this.game.hasTitle(x.id, pt.title));
+        const txt = who.length ? `Só ${who.map(x => teamName(x.id)).join(' e ')} pode usar` : 'Ninguém pode usar';
+        ctx.save();
+        ctx.font = '800 15px "Baloo 2", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        const w = ctx.measureText(`🔒 ${txt}`).width + 18, y = c.y - 46;
+        ctx.fillStyle = 'rgba(30,12,30,0.82)'; ctx.beginPath(); ctx.roundRect(c.x - w / 2, y - 12, w, 24, 12); ctx.fill();
+        ctx.strokeStyle = who.length ? GUILDS[who[0].id].color : '#c0306a'; ctx.lineWidth = 2; ctx.stroke();
+        ctx.fillStyle = '#fff'; ctx.fillText(`🔒 ${txt}`, c.x, y + 1);
+        ctx.restore();
+      }
       }
     // minas das Bombas
     for (const mn of this.game.s.mines ?? []) {
@@ -1342,7 +1362,8 @@ export class Renderer {
     // itens/marcadores no chão (fundo do Espaço)
     for (const [k, toks] of Object.entries(this.floor)) {
       const [c, r] = k.split(',').map(Number);
-      toks.filter(t => t.type === 'missao').forEach(t => {
+      // marcador de Missão escondido entre os de Exploração (virado) aparece como os outros: "?"
+      toks.filter(t => this.openMission(t)).forEach(t => {
         // deitado no chão, num dos dois lugares do Espaço (como um personagem); dá para subir em cima
         const s0 = this.missionSlot(c, r);
         list.push({
@@ -1358,7 +1379,7 @@ export class Renderer {
           },
         });
       });
-      toks.filter(t => t.type !== 'missao').forEach((t, i) => {
+      toks.filter(t => !this.openMission(t)).forEach((t, i) => {
         const [ox, oy] = TOKEN_SLOTS[(i + 1) % TOKEN_SLOTS.length];
         const gx = c + ox, gy = r + oy;
         list.push({
@@ -1525,7 +1546,7 @@ export class Renderer {
     if (spinFx && spinFront) spinFx();
     if (u.stunned) this.drawStun(ctx, -78 * L.scale - 6, tt);
     // em volta do corpo, girando: 1 caveirinha roxa (Maldição) e, pequenos, os itens que o Herói carrega na bolsa
-    const bag = u.alive && u.kind === 'hero' ? this.game?.s.units[u.id]?.tokens ?? [] : [];
+    const bag = u.alive && u.kind === 'hero' ? u.bag : [];
     const orbit: (Token | null)[] = [...(cursed ? [null] : []), ...bag.slice(0, 6)];
     if (orbit.length) {
       ctx.save();
@@ -1698,7 +1719,7 @@ export class Renderer {
     const ctx = this.ctx;
     const total = this.game.map.missionMarkers.length;
     for (const [k, toks] of Object.entries(this.floor)) {
-      if (!toks.some(t => t.type === 'missao')) continue;
+      if (!toks.some(t => this.openMission(t))) continue;
       const [c, r] = k.split(',').map(Number);
       const marks = this.game.s.guildOrder.map(gid => ({ gid, n: (arena[gid] ?? []).filter(x => x === k).length })).filter(m => m.n);
       if (!marks.length) continue;

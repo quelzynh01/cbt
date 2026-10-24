@@ -64,6 +64,7 @@ sh tools/tests/run-engine.sh xrules        # habilidades dos heróis extras  -> 
 sh tools/tests/run-engine.sh btgrules      # Beyond the Grave                -> "TUDO OK"
 sh tools/tests/run-engine.sh rules         # Core
 sh tools/tests/run-engine.sh vdoor         # monstros abrindo/fechando portas na Vingança
+sh tools/tests/run-engine.sh boots         # Botas usadas aos poucos (Die Booten: 1 passo + 1 passo)
 sh tools/tests/run-engine.sh xsim 30 mix   # partidas IA x IA (mix|core|extra; MAP=id, V=1 detalha) -> 0 travadas/0 erros
 ALL=1 sh tools/tests/run-engine.sh reach2  # alcance de todos os mapas       -> "TODOS OS MAPAS OK"
 ```
@@ -80,6 +81,8 @@ node tools/tests/browser/curse.mjs <pasta-prints>                   # Maldiçõe
 node tools/tests/browser/saveon.mjs <pasta-prints>                  # partida online salva: sair e voltar (partida e Fase de Melhorias)
 node tools/tests/browser/savecamp.mjs <pasta-prints>                # campanha local: sair no meio do cenário e continuar
 node tools/tests/browser/dicesync.mjs <pasta-prints>                # online: dados sincronizados (o outro só vê depois do clique de quem rola)
+node tools/tests/browser/peek.mjs <pasta-prints>                    # online: quem assiste vê a tela de escolha do ataque do outro
+node tools/tests/browser/rrspec.mjs <pasta-prints>                  # online: o anfitrião acompanha a Rerrolagem do amigo
 ```
 
 O jogo expõe `window.cbt` (o controller) para os testes manipularem o estado. Modo Teste via `localStorage['cbt.test']`.
