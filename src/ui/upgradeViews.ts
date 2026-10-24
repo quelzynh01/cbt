@@ -1,7 +1,7 @@
 import { CARDS, CURSES } from '../engine/cards';
 import { GUILDS, HEROES } from '../engine/data';
 import type { GuildId } from '../engine/types';
-import { heroSlots, medals, type CampaignState } from '../campaign/campaign';
+import { heroSlots, medals, victoryRank, type CampaignState } from '../campaign/campaign';
 import { MAPS, campaignList } from '../engine/maps';
 import { TITLES } from '../engine/titles';
 import { drawFace } from '../render/chibi';
@@ -133,6 +133,39 @@ export function rankingHtml(c: CampaignState, name: (g: GuildId) => string): str
       <tr class="cs-medal"><th class="cs-map">Ganhador da Medalha</th>${ms.map(m => `<td><div class="cs-cell">${mark(m.winners)}</div></td>`).join('')}</tr></table>
     <div class="cs-totals">${c.guilds.slice().sort((a, b) => total(b.id) - total(a.id)).map(g => `<span>${who(g.id, name)}: <b>${total(g.id)}</b> medalha${total(g.id) === 1 ? '' : 's'}</span>`).join('')}</div>
     <div class="cs-titles">${titles}</div></div>`;
+}
+
+/** Fim da campanha (igual na campanha local e online): parabéns ao vencedor, o saldo final de cada Guilda e o placar.
+ *  O botão `#cp-finish` (finalizar e sair) é ligado por quem mostra a tela. */
+export function campaignFinalHtml(c: CampaignState, name: (g: GuildId) => string, me?: GuildId | null, elapsed?: string): string {
+  const last = c.played[c.played.length - 1];
+  if (!last) return '';
+  const winner = last.winner;
+  const ms = medals(c);
+  const medalsOf = (g: GuildId) => ms.filter(m => m.winners.includes(g)).length;
+  const rank = victoryRank(medalsOf(winner));
+  const sum = (g: GuildId, f: (r: (typeof last.guilds)[number]) => number) => c.played.reduce((s, p) => s + f(p.guilds.find(x => x.id === g) ?? { id: g, coins: 0, deaths: 0, missions: 0, reward: false, title: false, deathsByHero: {} }), 0);
+  const rows = c.guilds.map(g => ({
+    id: g.id, medals: medalsOf(g.id), wins: c.played.filter(p => p.winner === g.id).length, titles: g.titles.length,
+    coins: sum(g.id, r => r.coins), missions: sum(g.id, r => r.missions), deaths: sum(g.id, r => r.deaths),
+  })).sort((a, b) => (b.id === winner ? 1 : 0) - (a.id === winner ? 1 : 0) || b.medals - a.medals || b.wins - a.wins);
+  const youWon = me === winner;
+  return `<div class="cf-wrap" style="--gc:${GUILDS[winner].color}">
+    <div class="cf-hero">
+      <div class="cf-trophy">🏆</div>
+      <div class="cf-congrats">${youWon ? 'Parabéns! Você venceu a campanha!' : `Parabéns, ${esc(name(winner))}!`}</div>
+      <div class="cf-winner">${who(winner, name)} libertou Arcadia</div>
+      <div class="cf-rank"><b>${esc(rank.title)}</b> — ${esc(rank.text)}</div>
+      ${elapsed ? `<div class="cf-time">⏱ Tempo total da campanha: <b>${elapsed}</b></div>` : ''}
+      <div class="cf-btns"><button class="primary cp-big" id="cp-finish">🏁 Finalizar campanha e sair</button></div>
+    </div>
+    <h3>📊 Saldo final</h3>
+    <table class="cf-table"><tr><th>Guilda</th><th title="Medalhas do Livro de Campanha">🏅 Medalhas</th><th title="Cenários vencidos">🏆 Vitórias</th><th title="Títulos">🎖 Títulos</th><th title="Missões cumpridas">🎯 Missões</th><th title="Moedas ganhas nos cenários">🪙 Moedas</th><th title="Mortes dos Heróis">💀 Mortes</th></tr>
+      ${rows.map((r, i) => `<tr class="${r.id === winner ? 'win' : ''} ${r.id === me ? 'me' : ''}"><td>${i === 0 ? '👑 ' : ''}${who(r.id, name)}${r.id === me ? ' <small>(você)</small>' : ''}</td><td>${r.medals}</td><td>${r.wins}</td><td>${r.titles}</td><td>${r.missions}</td><td>${r.coins}</td><td>${r.deaths}</td></tr>`).join('')}</table>
+    <h3>🗺 Cenários</h3>
+    <ol class="cf-maps">${c.played.map(p => `<li>${esc(MAPS[p.mapId]?.name ?? p.mapId)} — ${who(p.winner, name)}</li>`).join('')}</ol>
+    ${rankingHtml(c, name)}
+  </div>`;
 }
 
 /** Herói da vez nas Maldições: as cartas na mesa (viradas ou não). `canFlip`: quem está olhando pode virar a próxima. */

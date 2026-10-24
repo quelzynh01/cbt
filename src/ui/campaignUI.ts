@@ -15,7 +15,7 @@ import { TITLES, TITLE_TEXT } from '../engine/titles';
 import { drawFace } from '../render/chibi';
 import { curseCard, heroCard, itemCard, paintCardArt } from './cardview';
 import { CARD_ART } from './cardArt';
-import { bindUpgradeView, buyHint, curseLabel, buySummaryHtml, curseRevealHtml, curseSummaryHtml, handFromHtml, miniCards, myHeroesHtml, rankingHtml, resultHtml, upgradeBarHtml, upgradeLayout } from './upgradeViews';
+import { bindUpgradeView, buyHint, campaignFinalHtml, curseLabel, buySummaryHtml, curseRevealHtml, curseSummaryHtml, handFromHtml, miniCards, myHeroesHtml, rankingHtml, resultHtml, upgradeBarHtml, upgradeLayout } from './upgradeViews';
 import { attachMapPeek, closeMapPeek, mapChoiceCard } from './mapInfo';
 import { bindInvEditor, invEditorHtml, poolErrors, type InvItem, type InvOptions } from './inventoryEditor';
 import { fmtTime, getSettings } from './settings';
@@ -526,23 +526,10 @@ export class CampaignUI {
   // ---------------------------------------------------------------- fim
   final() {
     const c = this.c!;
-    const last = c.played[c.played.length - 1];
-    const ms = medals(c);
-    const count = (id: string) => ms.filter(m => m.winners.includes(id as never)).length;
-    const winner = last.winner;
-    const rank = victoryRank(count(winner));
-    this.show('Fim da Campanha', `
-      <div class="cp-final" style="--gc:${GUILDS[winner].color}">
-        <div class="go-title">Arcadia está livre! 🏆 ${guildName(winner)}</div>
-        <div class="cp-rank"><b>${rank.title}</b> — ${rank.text}</div>
-        <table><tr><th>Medalha</th><th>Guilda(s)</th></tr>${ms.map(m => `<tr><td>🎖 ${m.name}</td><td>${m.winners.map(g => `<span class="dot" style="background:${GUILDS[g].color}"></span> ${guildName(g)}`).join(', ') || '—'}</td></tr>`).join('')}</table>
-        <h4>Cenários</h4>
-        <ol>${c.played.map(p => `<li>${MAPS[p.mapId].name} — ${guildName(p.winner)}${p.ms ? ` <small>(${fmtTime(p.ms)})</small>` : ''}</li>`).join('')}</ol>
-        <p>Tempo total da campanha: <b>${fmtTime(c.elapsed ?? 0)}</b></p>
-        <p>Medalhas: ${c.guilds.map(g => `${guildName(g.id)} ${count(g.id)}`).join(' · ')}</p>
-        <button class="primary cp-big" id="cp-new">Nova campanha</button>
-      </div>`);
-    (this.page.querySelector('#cp-new') as HTMLElement).onclick = () => { this.c = null; this.save(); this.setup(); };
+    this.show('Fim da Campanha', `${campaignFinalHtml(c, guildName, human(c).id, fmtTime(c.elapsed ?? 0))}`);
+    play('pick-item');
+    // finalizar: a campanha é apagada e volta para o menu
+    (this.page.querySelector('#cp-finish') as HTMLElement).onclick = () => { this.c = null; this.save(); this.close(); };
   }
 
   /** Chamado ao terminar um cenário da campanha. */

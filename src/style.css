@@ -1480,3 +1480,8 @@ html.touch :is(.cd-roll, .bt-act, #rr-roll, #rr-go, #cd-rr, #bt-rr)::after { con
 .cv-opt { padding: 0; background: none; border: none; box-shadow: none; width: 96px; height: 163px; overflow: hidden; border-radius: 10px; }
 .cv-opt .acard { zoom: .448; pointer-events: none; }
 .cv-opt:hover { transform: translateY(-3px); filter: brightness(1.15) drop-shadow(0 0 8px #c66aff); }
+/* Descanso: ressuscitar é opcional — lembrete de quem não vai ressuscitar */
+.rb-dead.no { color: #ffc4b8; }
+.rb-dead.ok { color: #c9f5cf; }
+.rb-dead button { margin-left: 6px; }
+.rb-remind { padding: 8px 12px; border-radius: 10px; background: rgba(224,160,58,.15); border: 2px solid #e0a03a; color: #ffe2b0; font-size: 13px; animation: actPulse 1.6s ease-in-out infinite; }

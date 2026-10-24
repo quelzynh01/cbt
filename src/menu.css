@@ -674,3 +674,22 @@
   .up-main .cp-cards > .acard { zoom: .7; }
 }
 .up-table .up-actions { background: linear-gradient(transparent, #120e08 35%); }
+
+/* Fim da campanha: parabéns, saldo final e o placar */
+.cf-wrap { display: grid; gap: 12px; }
+.cf-hero { display: grid; justify-items: center; gap: 6px; text-align: center; padding: 18px 12px; border-radius: 18px;
+  background: radial-gradient(ellipse at 50% 0%, color-mix(in srgb, var(--gc) 45%, transparent), rgba(0,0,0,.35) 70%); border: 3px solid color-mix(in srgb, var(--gc) 70%, var(--gold)); }
+.cf-trophy { font-size: 64px; line-height: 1; animation: cfBounce 1.6s ease-in-out infinite; filter: drop-shadow(0 0 18px #ffd34d); }
+@keyframes cfBounce { 50% { transform: translateY(-8px) scale(1.06); } }
+.cf-congrats { font-size: 32px; font-weight: 900; color: var(--gold); text-shadow: 0 2px 0 #000, 0 0 18px rgba(255,210,80,.6); }
+.cf-winner { font-size: 20px; font-weight: 800; }
+.cf-rank { font-size: 15px; color: #f3e6cf; max-width: 720px; }
+.cf-time { color: var(--muted); }
+.cf-wrap h3 { margin: 4px 0 0; color: var(--gold); }
+.cf-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.cf-table th, .cf-table td { padding: 6px 8px; border-bottom: 1px solid rgba(255,255,255,.1); text-align: center; }
+.cf-table th:first-child, .cf-table td:first-child { text-align: left; }
+.cf-table tr.win td { color: #ffe9a8; font-weight: 800; background: rgba(255,200,80,.1); }
+.cf-table tr.me td:first-child { box-shadow: inset 4px 0 0 var(--gold); }
+.cf-maps { margin: 0; padding-left: 22px; display: grid; gap: 2px; }
+.cf-btns { display: flex; justify-content: center; padding: 6px 0 4px; }

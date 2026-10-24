@@ -1,7 +1,7 @@
 import { play } from '../audio/sfx';
 import { BANS_EACH } from '../engine/heroBan';
 import { GUILDS, HEROES, HERO_SETS, heroSetName, starterCards, type HeroSet } from '../engine/data';
-import { bindUpgradeView, buyHint, curseLabel, buySummaryHtml, curseRevealHtml, curseSummaryHtml, handFromHtml, miniCards, myHeroesHtml, rankingHtml, resultHtml, upgradeBarHtml, upgradeLayout } from './upgradeViews';
+import { bindUpgradeView, buyHint, campaignFinalHtml, curseLabel, buySummaryHtml, curseRevealHtml, curseSummaryHtml, handFromHtml, miniCards, myHeroesHtml, rankingHtml, resultHtml, upgradeBarHtml, upgradeLayout } from './upgradeViews';
 import { draftRounds, picksPerRound, titleHolders, type CampaignState } from '../campaign/campaign';
 import { gameConfirm } from './dialog';
 import { Game } from '../engine/game';
@@ -585,12 +585,7 @@ export class OnlineLobby {
         <div class="cp-votes tb-votes">${av.map(id => mapChoiceCard(MAPS[id], { cls: chooser === me ? '' : 'off', attrs: chooser === me ? `data-next="${id}"` : '', level: scenarioLevel(camp), sub: `${MAPS[id].circle} · Monstros Nível ${scenarioLevel(camp)}`, titles: titleHolders(camp, id, g => this.seatName(g)) })).join('')}</div>
         ${chooser === me ? '' : '<p class="tb-wait">Aguardando a escolha…</p>'}`;
     } else if (st.step === 'final' && camp) {
-      const ms = medals(camp);
-      const last = camp.played[camp.played.length - 1];
-      const count = (g: string) => ms.filter(m => m.winners.includes(g as never)).length;
-      const rank = victoryRank(count(last.winner));
-      center = `<h3>Fim da campanha! 🏆 ${esc(name(last.winner))}</h3><p><b>${rank.title}</b> — ${rank.text}</p>
-        <table class="cp-vtable">${ms.map(m => `<tr><td>🎖 ${m.name}</td><td>${m.winners.map(g => `<span class="dot" style="background:${GUILDS[g].color}"></span> ${esc(name(g))}`).join(', ') || '—'}</td></tr>`).join('')}</table>`;
+      center = campaignFinalHtml(camp, g => name(g), me);
     } else if (st.step === 'done') {
       center = `<h3>Todos prontos!</h3><p>Mapa: <b>${MAPS[st.nextMap ?? st.map!].name}</b>. A partida vai começar — cada um posiciona seus Heróis na Área Inicial.</p>`;
     } else center = '<h3>Você está assistindo</h3>';
@@ -623,6 +618,9 @@ export class OnlineLobby {
     const pick = this.page.querySelector('#tb-pick') as HTMLElement | null;
     if (pick) pick.onclick = () => { if (this.pickHero) this.send({ t: 'draft', hero: this.pickHero }); };
     this.bindUpgrade(st, me);
+    // fim da campanha: sair da sala (a campanha online já não fica salva)
+    const fin = this.page.querySelector('#cp-finish') as HTMLElement | null;
+    if (fin) fin.onclick = () => this.leave();
     this.page.querySelectorAll<HTMLElement>('[data-next]').forEach(el => {
       el.onclick = () => this.send({ t: 'pickmap', map: el.dataset.next! });
     });

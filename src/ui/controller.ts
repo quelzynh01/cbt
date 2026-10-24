@@ -455,6 +455,25 @@ export class Controller {
       this.hud.monsterPanel(null);
       this.paintReward(req, resolve);
       return;
+    } else if (req.choice === 'multi') {
+      // Lorde Presas: quem controla a Reação escolhe quais Heróis Perto do alvo também são atingidos (um só ataque)
+      if (this.multiSel?.req !== req) this.multiSel = { req, sel: new Set((req.units ?? []).map((id, i) => ({ id, i })).filter(x => !this.isMine(g.unit(x.id).guild!)).map(x => x.i)) };
+      const ms = this.multiSel;
+      hl.activeUnit = h.id;
+      hl.attackUnits = new Set((req.units ?? []).filter((_, i) => ms.sel.has(i)));
+      const opts = (req.units ?? []).map((id, i) => { const u = g.unit(id); return `<button class="${ms.sel.has(i) ? 'primary' : ''} mt-opt" data-t="${i}"><img class="cf-face" src="${this.hud.portraitOf(u)}"/> ${ms.sel.has(i) ? '✔' : '✕'} ${g.name(u)}</button>`; }).join('');
+      html = `<div class="panel-h">✷ ${req.source} — quem mais é atingido?</div>
+        <div class="mc-body">
+          <p>${req.text ?? ''}</p>
+          <div class="mc-btns">${opts}</div>
+          <div class="mc-btns"><button class="primary" id="mt-ok">✔ Atacar ${ms.sel.size ? `+${ms.sel.size}` : 'só o alvo'}</button></div>
+        </div>`;
+      this.hud.setHint(`${req.source}: toque nos Heróis para marcar ou desmarcar e confirme`);
+      const elm = this.hud.monsterPanel(html);
+      elm.classList.toggle('over', this.battle.isOpen);
+      elm.querySelectorAll<HTMLElement>('[data-t]').forEach(b => { b.onclick = () => { const i = Number(b.dataset.t); if (ms.sel.has(i)) ms.sel.delete(i); else ms.sel.add(i); this.refresh(); }; });
+      (elm.querySelector('#mt-ok') as HTMLElement).onclick = () => { const mask = [...ms.sel].reduce((m, i) => m | (1 << i), 0); this.multiSel = null; resolve(mask); };
+      return;
     } else if (req.choice === 'cover') {
       // Maldição que ocupa espaço (Confronto Final): qual carta fica debaixo dela
       hl.activeUnit = h.id;
@@ -513,6 +532,9 @@ export class Controller {
     el.querySelectorAll<HTMLElement>('[data-i]').forEach(b => { b.onclick = () => resolve(Number(b.dataset.i)); });
     (el.querySelector('#ch-none') as HTMLElement).onclick = () => resolve(-1);
   }
+
+  /** Escolha de vários alvos (Lorde Presas): os marcados até confirmar. */
+  private multiSel: { req: ChoiceRequest; sel: Set<number> } | null = null;
 
   /** Recompensa com o inventário cheio: as cartas dos Heróis da Guilda e a carta nova, para arrastar (o mesmo editor do inventário).
    *  Só valem as escolhas da regra: trocar por uma carta do Herói, dar a um Aliado com espaço ou guardar sem Herói. */
@@ -2138,13 +2160,8 @@ export class Controller {
     if (!this.game.canRest()) { this.hud.toast(this.game.s.extraTurnOn ? 'No turno adicional não dá para Descansar.' : 'Só é possível Descansar se nenhum Herói agiu neste turno.', '#c0392b'); return; }
     const g = this.game.currentGuild();
     const heroes = this.game.heroesOf(g.id);
+    // ressuscitar é escolha do jogador: nenhum Espaço pré-escolhido (quem ficar sem Espaço continua morto)
     const res: Record<string, Cell> = {};
-    for (const h of heroes) if (!h.alive) {
-      const area = this.game.map.startAreas[g.startArea];
-      const cells = this.game.resurrectCells(h).filter(c => Object.values(res).filter(x => sameCell(x, c)).length + this.game.unitsAt(c).length < 2);
-      const c = cells.find(x => area.some(y => sameCell(x, y))) ?? cells[0];
-      if (c) res[h.id] = c;
-    }
     // a carta debaixo da Maldição também pode ser reorganizada (depois a Maldição volta para cima de uma carta)
     const held = (h: (typeof heroes)[number]) => [...(h.covered ? [h.covered] : []), ...h.cards];
     this.restDraft = {
@@ -2164,7 +2181,9 @@ export class Controller {
     const by = (m: Record<string, string>) => Object.fromEntries(heroes.map(h => [h.id, Object.keys(m).filter(k => m[k] === h.id)]));
     // as cartas na ordem arrumada no editor (a 1ª fica debaixo da Maldição que ocupa espaço)
     const cards = Object.fromEntries(heroes.map(h => [h.id, d.items.filter(x => x.uid && d.cards[x.uid] === h.id).map(x => x.uid!)]));
-    return { cards, tokens: by(d.tokens), resurrect: d.res };
+    // mortos sem Espaço escolhido não ressuscitam neste Descanso
+    const stayDead = heroes.filter(h => !h.alive && !d.res[h.id]).map(h => h.id);
+    return { cards, tokens: by(d.tokens), resurrect: d.res, ...(stayDead.length ? { stayDead } : {}) };
   }
 
   private paintRest() {
@@ -2186,7 +2205,8 @@ export class Controller {
     const sel = (cur: string, aliveOnly: boolean, attr: string) => `<select ${attr}>${heroes.filter(h => !aliveOnly || h.alive).map(h => `<option value="${h.id}" ${cur === h.id ? 'selected' : ''}>${HEROES[h.defId].name}</option>`).join('')}</select>`;
     // ressuscitar e marcadores de Exploração (por Herói); as cartas ficam no editor (o mesmo da campanha)
     const extras = heroes.map(h => {
-      const dead = !h.alive ? `<div class="rb-dead">☠ Morto — ressuscita em <b>${d.res[h.id] ? `(${d.res[h.id].c},${d.res[h.id].r})` : '—'}</b> <button data-pick="${h.id}" class="${d.picking === h.id ? 'on' : ''}">${d.picking === h.id ? 'clique no mapa…' : 'Escolher no mapa'}</button></div>` : '';
+      const dead = !h.alive ? `<div class="rb-dead ${d.res[h.id] ? 'ok' : 'no'}">☠ Morto — ${d.res[h.id] ? `ressuscita em <b>(${d.res[h.id].c},${d.res[h.id].r})</b>` : '<b>não vai ressuscitar</b>'}
+        <button data-pick="${h.id}" class="${d.picking === h.id ? 'on' : d.res[h.id] ? '' : 'primary'}">${d.picking === h.id ? 'clique no mapa…' : d.res[h.id] ? 'Trocar o Espaço' : '📍 Escolher no mapa'}</button>${d.res[h.id] ? `<button data-unres="${h.id}">Não ressuscitar</button>` : ''}</div>` : '';
       return dead ? `<div class="rb-col"><h4>${h.num}. ${HEROES[h.defId].name}</h4>${dead}</div>` : '';
     }).join('');
     const byDef = (defId: string) => heroes.find(h => h.defId === defId)!;
@@ -2200,7 +2220,7 @@ export class Controller {
       bags: {
         toks: bagToks,
         // o morto também recebe: ele ressuscita neste mesmo Descanso (p.18)
-        canHold: hd => byDef(hd).alive || this.game.resurrectCells(byDef(hd)).length > 0,
+        canHold: hd => byDef(hd).alive || !!d.res[byDef(hd).id],
         move: (id, hd) => { if (d.tokens[id] !== undefined) d.tokens[id] = byDef(hd).id; },
       },
       heroes: heroes.map(h => h.defId), color: g.color, discard: false,
@@ -2226,9 +2246,10 @@ export class Controller {
     const el = this.hud.panel('restbox', `
       <div class="panel-h">💤 Descansar a Guilda</div>
       <div class="rb-body">
-        <p>Todas as cartas serão restauradas e os Heróis Atordoados se recuperam. Toque num <b>espaço vazio</b> ou numa <b>carta</b> para trocar as cartas entre os Heróis (marcadores de Missão e Maldições não se movem). Heróis mortos ressuscitam na <b>Área Inicial</b> ou <b>Perto de um Aliado</b> que já está no tabuleiro.</p>
-        ${invEditorHtml(d.items, invOpts)}
+        <p>Todas as cartas serão restauradas e os Heróis Atordoados se recuperam. Toque num <b>espaço vazio</b> ou numa <b>carta</b> para trocar as cartas entre os Heróis (marcadores de Missão e Maldições não se movem). Heróis mortos <b>podem</b> ressuscitar: escolha o Espaço no mapa (<b>Área Inicial</b> ou <b>Perto de um Aliado</b> que já está no tabuleiro) — quem ficar sem Espaço continua morto.</p>
         ${extras ? `<div class="rb-cols">${extras}</div>` : ''}
+        ${(() => { const left = heroes.filter(h => !h.alive && !d.res[h.id]); return left.length ? `<div class="rb-remind">⚠ ${left.map(h => `<b>${HEROES[h.defId].name}</b>`).join(' e ')} ${left.length > 1 ? 'não vão' : 'não vai'} ressuscitar neste Descanso. Toque em <b>📍 Escolher no mapa</b> para ressuscitar (ou descanse assim — não é obrigatório).</div>` : ''; })()}
+        ${invEditorHtml(d.items, invOpts)}
         ${err || poolErr.length ? `<div class="rb-err">${[...poolErr, err].filter(Boolean).join('<br/>')}</div>` : ''}
         <div class="rb-btns"><button id="rb-cancel">Cancelar</button><button class="primary" id="rb-ok" ${err || poolErr.length ? 'disabled' : ''}>💤 Descansar</button></div>
       </div>`);
@@ -2237,6 +2258,14 @@ export class Controller {
       for (const it of d.items) d.cards[it.uid] = it.to === 'pool' ? 'pool' : byDef(it.to).id;
       this.refresh();
     });
+    el.querySelectorAll<HTMLElement>('[data-unres]').forEach(b => { b.onclick = () => {
+      delete d.res[b.dataset.unres!];
+      d.chosen = d.chosen.filter(x => x !== b.dataset.unres);
+      // marcadores que iam para ele voltam para um Herói vivo
+      const alive = heroes.find(x => x.alive);
+      for (const [tid, to] of Object.entries(d.tokens)) if (to === b.dataset.unres && alive) d.tokens[tid] = alive.id;
+      this.refresh();
+    }; });
     el.querySelectorAll<HTMLElement>('[data-pick]').forEach(b => { b.onclick = () => {
       d.picking = b.dataset.pick!;
       this.renderer.fitCells(this.game.resurrectCells(this.game.unit(d.picking)));
@@ -2245,8 +2274,8 @@ export class Controller {
     (el.querySelector('#rb-cancel') as HTMLElement).onclick = () => this.closeRest();
     (el.querySelector('#rb-ok') as HTMLElement).onclick = async () => {
       // morto sem lugar escolhido: avisa que ele nasce na base (Área Inicial)
-      const auto = heroes.filter(h => !h.alive && d.res[h.id] && !d.chosen.includes(h.id));
-      if (auto.length && !await gameConfirm({ icon: '💤', title: 'Ressuscitar na base?', body: `Você não escolheu onde ${auto.map(h => `<b>${HEROES[h.defId].name}</b>`).join(' e ')} ${auto.length > 1 ? 'vão' : 'vai'} ressuscitar. Sem escolher, ${auto.length > 1 ? 'nascem' : 'nasce'} na <b>base</b> (Área Inicial da Guilda).`, yes: 'Descansar assim', no: 'Escolher o lugar' })) return;
+      const left = heroes.filter(h => !h.alive && !d.res[h.id]);
+      if (left.length && !await gameConfirm({ icon: '☠', title: left.length > 1 ? 'Ninguém vai ressuscitar?' : `Não ressuscitar ${HEROES[left[0].defId].name}?`, body: `Você não escolheu onde ${left.map(h => `<b>${HEROES[h.defId].name}</b>`).join(' e ')} ${left.length > 1 ? 'vão' : 'vai'} ressuscitar. Assim ${left.length > 1 ? 'eles continuam mortos' : 'ele continua morto'} até o próximo Descanso.`, yes: 'Descansar assim', no: 'Escolher o lugar' })) return;
       if (this.restDraft !== d) return;
       const o = this.restOptions();
       this.closeRest();

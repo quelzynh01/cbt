@@ -67,6 +67,7 @@ sh tools/tests/run-engine.sh vdoor         # monstros abrindo/fechando portas na
 sh tools/tests/run-engine.sh boots         # Botas usadas aos poucos (Die Booten: 1 passo + 1 passo)
 sh tools/tests/run-engine.sh pushportal    # empurrão (Rajada de Vento, Tiro Explosivo) não atravessa portal -> "EMPURRÃO SEM PORTAL OK"
 sh tools/tests/run-engine.sh deathcurse    # Templo: Maldição a cada morte (troca se maior, carta coberta) e Grito de Guerra depois da morte
+sh tools/tests/run-engine.sh presas        # Descanso sem ressuscitar; Lorde Presas se cura na Vingança e sobrevive; escolha de quem mais é atingido
 sh tools/tests/run-engine.sh xsim 30 mix   # partidas IA x IA (mix|core|extra; MAP=id, V=1 detalha) -> 0 travadas/0 erros
 ALL=1 sh tools/tests/run-engine.sh reach2  # alcance de todos os mapas       -> "TODOS OS MAPAS OK"
 ```

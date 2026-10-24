@@ -44,7 +44,7 @@ export interface ChoiceRequest {
   /** confirm: pergunta sim (0) ou não (−1). loot: qual marcador pegar de quem você matou (índice em `tokens`).
    *  reward: inventário cheio — trocar uma carta do Herói (índice em `cards`), dar a um Aliado (cards.length + índice em `units`)
    *  ou guardar sem Herói (−1). */
-  choice: 'push' | 'extra' | 'confirm' | 'loot' | 'reward' | 'cover';
+  choice: 'push' | 'extra' | 'confirm' | 'loot' | 'reward' | 'cover' | 'multi';
   /** Recompensa: a carta nova e as cartas do Herói (defIds). */
   newCard?: string;
   cards?: string[];
@@ -100,6 +100,8 @@ export interface RestOptions {
   cards?: Record<string, string[]>;
   tokens?: Record<string, string[]>;
   resurrect?: Record<string, Cell>;
+  /** Heróis mortos que o jogador escolheu NÃO ressuscitar neste Descanso (continuam mortos). */
+  stayDead?: string[];
 }
 
 export class Game {
@@ -1448,6 +1450,8 @@ export class Game {
   private finishAttack(dying: string[], h: Unit) {
     for (const id of dying) {
       const m = this.unit(id);
+      // a Reação de Vingança acontece antes de morrer (p.21): se ele se curou nela (Lorde Presas), sobrevive
+      if (m.alive && m.wounds < this.monDef(m, h).hp) { this.log(`${this.name(m)} se curou e continua vivo!`); continue; }
       if (m.alive) this.monsterDies(m, h, false);
     }
     this.pickupAfterCombat();
@@ -2171,6 +2175,7 @@ export class Game {
       if (JSON.stringify(movable) !== JSON.stringify(given)) return 'Marcadores inválidos (marcadores de Missão não podem ser movidos).';
       // p.18: os marcadores passam entre quaisquer Heróis — o morto também, porque ressuscita neste mesmo Descanso
       for (const h of heroes) if (!h.alive && (o.tokens[h.id] ?? []).length && !this.resurrectCells(h).length) return 'Este Herói morto não tem onde ressuscitar: não pode receber marcadores.';
+      for (const h of heroes) if (!h.alive && (o.tokens[h.id] ?? []).length && o.stayDead?.includes(h.id)) return `${HEROES[h.defId].name} não vai ressuscitar: não pode receber marcadores.`;
     }
     if (o.resurrect) {
       const count = new Map<string, number>();
@@ -2220,7 +2225,7 @@ export class Game {
       if (h.alive && h.stunned) this.setStun(h, false);
       h.spent = false;
       h.petrified = 0;
-      if (!h.alive) this.resurrect(h, o.resurrect?.[h.id]);
+      if (!h.alive) { if (!o.stayDead?.includes(h.id)) this.resurrect(h, o.resurrect?.[h.id]); else this.log(`${this.name(h)} continua morto (não ressuscitou neste Descanso).`); }
       else if (h.banished) { this.s.entryBoard = this.s.entryBoard.filter(x => x !== h.id); this.resurrect(h, o.resurrect?.[h.id], true); this.log(`${this.name(h)} volta do Tabuleiro de Entrada.`); }
       // Hora do Lanche (Pigsy): cura todos os Ferimentos
       if (h.alive && h.wounds && this.ab(h) === 'hora_lanche') {
@@ -3144,7 +3149,18 @@ export class Game {
     // Troll: atinge todos os Heróis Perto; Lorde Presas: também os Inimigos Perto do alvo
     let targets = [h];
     if (md.hitsAll) targets = [h, ...this.onBoard().filter(u => u.kind === 'hero' && u.id !== h.id && this.board.isClose(m.cell!, u.cell!))];
-    if (ab.includes('splash')) targets = [h, ...this.onBoard().filter(u => u.kind === 'hero' && u.id !== h.id && this.board.isClose(h.cell!, u.cell!))];
+    if (ab.includes('splash')) {
+      // "pode atingir qualquer número de Inimigos Perto do alvo": quem controla a Reação escolhe (os mesmos acertos para todos)
+      const near = this.onBoard().filter(u => u.kind === 'hero' && u.id !== h.id && this.board.isClose(h.cell!, u.cell!));
+      const ctl = this.monsterControllerGuild();
+      let pick = near.filter(u => u.guild !== ctl);
+      if (near.length && this.choiceHook) {
+        const mask = this.choiceHook({ choice: 'multi', guild: ctl, heroId: m.id, source: md.attackName, units: near.map(u => u.id),
+          text: `<b>${md.name}</b> ataca <b>${this.name(h)}</b>. Escolha quais Heróis Perto dele também são atingidos (qualquer número) — um só ataque: cada um rola a Defesa contra os mesmos acertos.` });
+        if (mask !== 'auto') pick = near.filter((_, k) => mask > 0 && ((mask >> k) & 1) === 1);
+      }
+      targets = [h, ...pick];
+    }
     if (targets.length > 1) notes.push(md.hitsAll ? 'Atinge todos os Heróis Perto!' : 'Atinge também os Heróis Perto do alvo!');
     if (this.ab(h) === 'furia' && h.wounds > 0 && !h.stunned) notes.push('Fúria de Combate: +1 dado de Defesa');
     const res = targets.map(t => {
@@ -3168,6 +3184,8 @@ export class Game {
       this.retaliate(r.t, r.dr, Math.min(atk.successes, r.dr.successes), m);
     }
     if (ab.includes('critHeal') && atk.crits && m.alive && m.wounds) {
+      // Ferimentos além da Vida não contam: com a Vida a zero, cada ✷ ainda cura 2
+      m.wounds = Math.min(m.wounds, MONSTERS[m.defId].hp);
       const x = Math.min(m.wounds, atk.crits * 2);
       m.wounds -= x;
       this.emit({ t: 'heal', id: m.id, amount: x, wounds: m.wounds });
