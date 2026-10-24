@@ -1634,9 +1634,12 @@ export class Renderer {
     }
     // Lápide: os Monstros que dá para ativar piscam (claro/normal)
     const blink = this.puppetIds().has(u.id);
-    if (blink) ctx.filter = `brightness(${1.25 + 0.45 * Math.sin(tt * 7)}) drop-shadow(0 0 8px rgba(184,146,255,0.95))`;
+    // Sombra do Lorde Presas: em preto e branco
+    const isShadow = !!this.game?.s.units[u.id]?.shadow;
+    const fx = [isShadow ? 'grayscale(1) contrast(1.15) brightness(0.9)' : '', blink ? `brightness(${1.25 + 0.45 * Math.sin(tt * 7)}) drop-shadow(0 0 8px rgba(184,146,255,0.95))` : ''].filter(Boolean).join(' ');
+    if (fx) ctx.filter = fx;
     drawCharacter(ctx, u.defId, { dir, flip, t: idleT, hurt, alpha: 1, stunned: u.stunned, lunge: 0, scale: L.scale * 0.66 });
-    if (blink) ctx.filter = 'none';
+    if (fx) ctx.filter = 'none';
     if (spinFx && spinFront) spinFx();
     if (u.stunned) this.drawStun(ctx, -78 * L.scale - 6, tt);
     // em volta do corpo, girando: 1 caveirinha roxa (Maldição) e, pequenos, os itens que o Herói carrega na bolsa

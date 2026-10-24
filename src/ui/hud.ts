@@ -2,7 +2,7 @@ import { TITLES, TITLE_TEXT } from '../engine/titles';
 import { diceSync } from './diceSync';
 import { CARDS, GUILDS, GUILD_NAMES, HEROES, MONSTERS, TOKEN_INFO, setGuildNames, teamName } from '../engine/data';
 import type { Game } from '../engine/game';
-import type { CardInst, DieFace, GameEvent, GuildId, RerollInfo, Token, Unit } from '../engine/types';
+import type { CardInst, Cell, DieFace, GameEvent, GuildId, RerollInfo, Token, Unit } from '../engine/types';
 import { tokenImageId, tokenUrl } from '../render/tokens';
 import { dieImg } from '../render/dice';
 import { play, playOnce } from '../audio/sfx';
@@ -225,13 +225,14 @@ export class Hud {
     this.refresh();
   }
 
-  private portrait(lookId: string, color: string): string {
-    const k = `${lookId}|${color}|${getArtVersion()}`;
+  private portrait(lookId: string, color: string, gray = false): string {
+    const k = `${lookId}|${color}|${getArtVersion()}${gray ? '|g' : ''}`;
     let url = this.portraitCache.get(k);
     if (!url) {
       const cv = document.createElement('canvas');
       cv.width = 96; cv.height = 96;
       drawFace(cv, lookId, color);
+      if (gray) { const c2 = cv.getContext('2d')!; c2.filter = 'grayscale(1) contrast(1.15)'; c2.drawImage(cv, 0, 0); c2.filter = 'none'; }
       url = cv.toDataURL();
       this.portraitCache.set(k, url);
     }
@@ -528,7 +529,41 @@ export class Hud {
     });
   }
   /** Retrato de um personagem (para listas de escolha). */
-  portraitOf(u: Unit): string { return this.portrait(u.defId, u.guild ? this.game.guild(u.guild).color : '#4a3a5a'); }
+  portraitOf(u: Unit): string { return this.portrait(u.defId, u.guild ? this.game.guild(u.guild).color : '#4a3a5a', !!u.shadow); }
+
+  /** Pisou no marcador Vermelho/Verde: a rolagem das Entradas para a Sombra do Lorde Presas, no centro da tela para todos. */
+  showSummon(e: Extract<GameEvent, { t: 'summonRoll' }>, done?: () => void, onLand?: (cell: Cell) => void) {
+    const g = this.game;
+    const box = $('#awardbox', this.root);
+    const h = g.s.units[e.heroId], mon = g.s.units[e.monsterId];
+    const name = mon ? MONSTERS[mon.defId].name : 'Lorde Presas';
+    const face = mon ? `<img class="sm-face" src="${this.portrait(mon.defId, '#4a3a5a', true)}"/>` : '';
+    box.innerHTML = `<div class="aw-box sm-box"><div class="aw-kind">🌑 Sombra do ${name}</div>
+      ${face}
+      <div class="sm-who">${h ? g.name(h) : ''} pisou no marcador ${e.color ? `<b>${e.color === 'vermelho' ? 'Vermelho' : e.color === 'verde' ? 'Verde' : e.color}</b>` : 'de Missão'}: o marcador sai da partida e os dados rolam contra as Entradas de Monstro…</div>
+      <div class="sm-dice"><span class="die black">${dieImg('blank', true)}</span><span class="die black">${dieImg('blank', true)}</span></div>
+      <div class="sm-res"></div></div>`;
+    box.classList.remove('hidden');
+    play('dice', 0.7);
+    const sp = Math.max(1, this.speed);
+    const pool: DieFace[] = ['crit', 'melee', 'ranged', 'blank'];
+    const dice = box.querySelector('.sm-dice') as HTMLElement;
+    const spin = window.setInterval(() => dice.querySelectorAll('.die').forEach(d => { d.innerHTML = dieImg(pool[Math.floor(Math.random() * 4)], true); }), 70);
+    window.setTimeout(() => {
+      clearInterval(spin);
+      dice.innerHTML = e.faces.map(f => `<span class="die black hit">${dieImg(f, true)}</span>`).join('');
+      const res = box.querySelector('.sm-res') as HTMLElement;
+      const ok = !!e.cell;
+      box.querySelector('.sm-box')?.classList.add(ok ? 'in' : 'out');
+      res.className = `sm-res ${ok ? 'bad' : 'good'}`;
+      res.innerHTML = ok ? `☠ A Sombra do ${name} <b>entra</b> na Entrada de Monstro (${e.cell!.c},${e.cell!.r})!`
+        : e.target ? `A Entrada sorteada (${e.target.c},${e.target.r}) está ocupada: a Sombra <b>não entra</b> — fica fora do tabuleiro.`
+        : 'Os dados não indicam nenhuma Entrada: a Sombra <b>não entra</b> — fica fora do tabuleiro.';
+      play(ok ? 'pick-item' : 'dice', 0.8);
+      if (ok || e.target) onLand?.((e.cell ?? e.target)!);
+      window.setTimeout(() => { box.classList.add('hidden'); done?.(); }, 3000 / sp);
+    }, 1300 / sp);
+  }
   get confirming() { return !$('#confirmbox', this.root).classList.contains('hidden'); }
 
   /** Começo da partida: quem tem Título com vantagem neste mapa (todos veem). */
@@ -951,7 +986,7 @@ export class Hud {
     if (u.kind === 'monster') {
       const md = MONSTERS[u.defId];
       box.innerHTML = `<div class="hb-c1">
-        <div class="hb-head"><img src="${this.portrait(u.defId, '#7a2b8f')}"/><div><div class="hb-name">${md.name}</div><div class="hb-sub">${md.category} · Nível ${md.level}</div></div><button class="lupa" id="hb-card" title="Ver a carta com os valores atuais">🔍</button><button class="x" id="hb-close">✕</button></div>
+        <div class="hb-head"><img src="${this.portrait(u.defId, '#7a2b8f', !!u.shadow)}"/><div><div class="hb-name">${g.name(u)}</div><div class="hb-sub">${md.category} · Nível ${md.level}</div></div><button class="lupa" id="hb-card" title="Ver a carta com os valores atuais">🔍</button><button class="x" id="hb-close">✕</button></div>
         <div class="stats hb-meds">
           ${u.alive && md.hp - u.wounds > 0 ? medal('hp', md.hp - u.wounds, `Vida: ${md.hp - u.wounds} de ${md.hp}`, `hbm${u.wounds ? ' down' : ''}`) : ''}
           ${Number.isFinite(md.exterm) && md.exterm > 0 ? medal('skull', md.exterm, `Extermínio: ${md.exterm} Ferimentos num só ataque matam sem Vingança`, 'hbm') : ''}

@@ -97,6 +97,8 @@ export interface Unit {
   spent?: boolean;
   /** Olhar Petrificante (Elysia): marcadores que tiram 1 Ponto de Movimento cada (Descansar remove). */
   petrified?: number;
+  /** Sombra do Lorde Presas (invocada pelo marcador): aparece em preto e branco. */
+  shadow?: boolean;
   /** Banido: está no Tabuleiro de Entrada (fora do tabuleiro, mas vivo, com Ferimentos e marcadores). */
   banished?: boolean;
 }
@@ -327,6 +329,8 @@ export type GameEvent =
   | { t: 'cemetery'; id: string; count: number; full: boolean }
   | { t: 'spawnStart'; ids: string[] }
   /** target: a Entrada de Monstro que os dados indicaram (mesmo ocupada, para a câmera mostrar). */
+  /** Invocação (Sombra do Lorde Presas): 2 dados contra as Entradas de Monstro; `cell` = onde surgiu (null = ficou fora do tabuleiro). */
+  | { t: 'summonRoll'; heroId: string; monsterId: string; faces: DieFace[]; cell: Cell | null; target?: Cell; color?: string }
   | { t: 'spawnRoll'; id: string; faces: DieFace[]; cell: Cell | null; reason: string; target?: Cell }
   | { t: 'respawn'; id: string; cell: Cell }
   | { t: 'coins'; guild: GuildId; amount: number; reason: string }

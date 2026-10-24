@@ -119,7 +119,9 @@ export class BattlePanel {
     const lk = (now - f.lungeT) / 380;
     const lunge = lk >= 0 && lk <= 1 ? Math.sin(lk * Math.PI) * 26 * (f.flip ? -1 : 1) : 0;
     const hurt = Math.max(0, 1 - (now - f.hurtT) / 420);
+    if (u.shadow) ctx.filter = 'grayscale(1) contrast(1.15) brightness(0.9)';
     drawCharacter(ctx, u.defId, { flip: f.flip, t: now / 1000, hurt, alpha: 1, stunned: u.stunned, lunge, scale: s });
+    if (u.shadow) ctx.filter = 'none';
     ctx.restore();
   }
 

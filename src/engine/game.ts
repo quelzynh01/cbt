@@ -339,7 +339,7 @@ export class Game {
   cardDef(c: CardInst): CardDef { return CARDS[c.defId]; }
   name(u: Unit): string {
     if (u.kind === 'hero') return `${HEROES[u.defId].name} (${GUILDS[u.guild!].name.split(' (')[0].replace('Guilda ', '')})`;
-    return MONSTERS[u.defId].name;
+    return u.shadow ? `Sombra do ${MONSTERS[u.defId].name}` : MONSTERS[u.defId].name;
   }
   floorAt(c: Cell): Token[] { return this.s.floor[key(c)] ?? []; }
   private addFloor(c: Cell, t: Token) { (this.s.floor[key(c)] ??= []).push(t); }
@@ -2846,17 +2846,20 @@ export class Game {
   }
 
   /** Pisar no marcador invoca um Monstro numa Entrada de Monstro sorteada (Sombra do Lorde Presas). */
-  private summon(m: MissionDef, h: Unit) {
+  private summon(m: MissionDef, h: Unit, color?: string) {
     const type = m.summon ?? 'lorde_presas';
     const mon = this.units().find(u => u.kind === 'monster' && baseId(u.defId) === type && !u.alive && !this.s.entryBoard.includes(u.id));
     if (!mon) { this.log('O Monstro invocado já está em jogo.'); return; }
+    // o marcador sai da partida e rola 2 dados contra as Entradas de Monstro (só a Sombra pode surgir)
     const r = this.roll(2, ATTACK_DIE, 'melee', 'normal', false).faces;
     const match = this.s.entryMarkers.find(em => { const p = em.pair.slice(); return r.every(f => { const i = p.indexOf(f); if (i < 0) return false; p.splice(i, 1); return true; }); });
-    if (match && this.cellLoad(match.cell) < 2) {
-      mon.alive = true; mon.wounds = 0; mon.stunned = false; mon.cell = { ...match.cell };
-      this.log(`${this.name(h)} invocou a Sombra: ${MONSTERS[mon.defId].name} surge em (${match.cell.c},${match.cell.r})!`);
-      this.emit({ t: 'spawn', id: mon.id, cell: { ...match.cell } });
-    } else this.log(`${this.name(h)} tentou invocar ${MONSTERS[mon.defId].name}, mas os dados não abriram nenhuma Entrada.`);
+    const free = !!match && this.cellLoad(match.cell) + this.weight(mon) <= 2;
+    this.emit({ t: 'summonRoll', heroId: h.id, monsterId: mon.id, faces: r.slice(), cell: free ? { ...match!.cell } : null, ...(match && !free ? { target: { ...match.cell } } : {}), ...(color ? { color } : {}) });
+    if (free) {
+      mon.alive = true; mon.wounds = 0; mon.stunned = false; mon.cell = { ...match!.cell }; mon.shadow = true;
+      this.log(`${this.name(h)} invocou a Sombra: ${this.name(mon)} surge na Entrada de Monstro (${match!.cell.c},${match!.cell.r})!`);
+      this.emit({ t: 'spawn', id: mon.id, cell: { ...match!.cell } });
+    } else this.log(`${this.name(h)} tentou invocar a Sombra do ${MONSTERS[mon.defId].name}: ${match ? 'a Entrada sorteada está ocupada' : 'os dados não indicam nenhuma Entrada'} — ela fica fora do tabuleiro.`);
   }
 
   /** Emboscada: o marcador escondido vira um Monstro que ataca quem o encontrou. */
@@ -3009,7 +3012,7 @@ export class Game {
         if (m.rule === 'summon') {
           t.faceUp = true;
           this.log(`${this.name(h)} pisou no marcador ${t.color ?? ''}.`);
-          this.summon(m, h);
+          this.summon(m, h, t.color);
           continue;
         }
         if (m.rule === 'escort') {

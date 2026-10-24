@@ -1488,3 +1488,17 @@ html.touch :is(.cd-roll, .bt-act, #rr-roll, #rr-go, #cd-rr, #bt-rr)::after { con
 /* de onde vêm os dados de Defesa (carta + itens + habilidades) */
 .bt-defsrc, .cd-defsrc { display: block; font-size: 11px; font-weight: 600; color: #cdbfa8; line-height: 1.2; margin-top: 1px; }
 .bt-lbl .bt-defsrc { white-space: normal; overflow: visible; text-overflow: clip; max-width: 170px; }
+/* Sombra do Lorde Presas: rolagem das Entradas no centro da tela */
+.sm-box { max-width: 460px; text-align: center; }
+.sm-face { width: 84px; height: 84px; border-radius: 50%; border: 3px solid #8a8a8a; filter: drop-shadow(0 0 12px rgba(0,0,0,.7)); }
+.sm-who { font-size: 14px; color: #e8dccb; }
+.sm-dice { display: flex; gap: 10px; justify-content: center; }
+.sm-dice .die { width: 48px; height: 48px; display: grid; place-items: center; }
+.sm-dice .die img, .sm-dice .die svg { width: 44px; height: 44px; }
+.sm-res { font-size: 16px; font-weight: 800; min-height: 22px; }
+.sm-res.bad { color: #ff9a7a; }
+.sm-res.good { color: #9fe8b0; }
+.sm-box.in { border-color: #c0392b; box-shadow: 0 0 30px rgba(192,57,43,.6); }
+.sm-box.in .sm-face { animation: smIn .8s ease-out; border-color: #e0e0e0; }
+@keyframes smIn { from { transform: scale(.4); opacity: 0; filter: blur(4px); } }
+.sm-box.out .sm-face { opacity: .45; }

@@ -108,6 +108,7 @@ export class Controller {
         }
         if (e.t === 'reward' || e.t === 'title') { this.hud.showAward(e, () => this.renderer.release()); return true; }
         if (e.t === 'curseDraw') { this.hud.showCurseDraw(e, () => this.renderer.release()); return true; }
+        if (e.t === 'summonRoll') { this.hud.showSummon(e, () => this.renderer.release(), cell => this.renderer.glideCells([cell])); return true; }
         if (e.t === 'useToken') { this.hud.showUsed(e.heroId, e.token, () => this.renderer.release()); return true; }
         if (e.t === 'spawnRoll') {
           // a câmera vai até a Entrada que os dados indicaram (mesmo ocupada); sem Entrada com esses símbolos, mostra todas
