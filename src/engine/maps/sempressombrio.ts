@@ -27,7 +27,9 @@ export const SEMPRESSOMBRIO: MapDef = {
   ],
 
   // Esconderijo do Troll (impresso no tabuleiro, sem porta neste cenário) e a sala de jantar
-  pillars: [C(0, 5), C(8, 0), C(8, 1), C(0, 0), C(2, 0), C(2, 8), C(6, 8), C(8, 8), C(2, 6), C(6, 3), C(6, 2), C(5, 2)],
+  pillars: [C(0, 5), C(8, 0), C(8, 1), C(0, 0), C(2, 0), C(2, 8), C(6, 8), C(8, 8), C(2, 6), C(6, 3), C(6, 2), C(5, 2),
+    // ao lado da Área Inicial do J3 (só os 2 Espaços dela ficam livres)
+    C(0, 6)],
   rooms: [C(0, 0), C(3, 1), C(5, 0), C(0, 3), C(1, 3), C(2, 4), C(2, 5), C(3, 4), C(3, 5), C(5, 3), C(5, 4), C(5, 5), C(8, 3), C(8, 5), C(3, 8), C(4, 8), C(5, 8), C(4, 7), C(4, 0), C(3, 0), C(3, 2), C(6, 5)],
 
   walls: [

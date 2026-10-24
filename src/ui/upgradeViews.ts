@@ -13,6 +13,12 @@ import { curseCard, itemCard } from './cardview';
 const esc = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 const who = (g: GuildId, name: (g: GuildId) => string) => `<span class="dot" style="background:${GUILDS[g].color}"></span> ${esc(name(g))}`;
 
+/** Maldição do Herói no editor de cartas: nome e o que faz (as que ocupam espaço cobrem a 4ª carta, p.24). */
+export const curseLabel = (id?: string) => {
+  const c = id ? CURSES[id] : null;
+  return c ? `${c.name} — ${c.text}${c.slot ? ' Com 4 cartas, a última fica debaixo da Maldição (indisponível até uma Poção de Cura).' : ''}` : null;
+};
+
 /** Topo da Fase de Melhorias: as Guildas (a sua primeiro) com moedas e medalhas; `waiting` marca quem ainda está escolhendo. */
 export function upgradeBarHtml(c: CampaignState, me: GuildId, name: (g: GuildId) => string, waiting?: (g: GuildId) => boolean): string {
   const up = c.upgrade;

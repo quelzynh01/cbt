@@ -76,6 +76,7 @@ export class Controller {
       inspect: id => this.hud.showCard(id),
     });
     this.hud.busy = () => this.renderer.busy;
+    this.hud.view = id => this.renderer.viewUnit(id);
     this.renderer.hooks = {
       onEvent: e => {
         this.followEvent(e);
@@ -576,7 +577,7 @@ export class Controller {
         const s = g.slotsUsed(heroes.find(x => x.defId === id)!, ids.map((defId, i) => ({ uid: `_${i}`, defId, exhausted: false, uses: 0 })));
         return { ...s, magicExtra: ids.reduce((k, c) => k + (CARDS[c]?.fx.magicSlots ?? 0), 0) };
       },
-      curse: id => { const u = heroes.find(x => x.defId === id)!; return u.curse ? CURSES[u.curse]?.name ?? null : null; },
+      curse: id => { const u = heroes.find(x => x.defId === id)!; return u.curse && CURSES[u.curse] ? `${CURSES[u.curse].name} — ${CURSES[u.curse].text}` : null; },
     };
     const now = d.pick >= 0 && d.pick < n ? `🔁 <b>${cname(nc)}</b> fica com <b>${HEROES[hd].name}</b>; <b>${cname(d.mine[d.pick].id)}</b> vai para as cartas sem Herói (equipe no próximo Descanso).`
       : d.pick >= n ? `🎁 <b>${cname(nc)}</b> vai para <b>${HEROES[allies[d.pick - n]].name}</b>.`
@@ -2182,7 +2183,7 @@ export class Controller {
         const over = h.curse && CURSES[h.curse]?.slot && ids.length ? 1 : 0;
         return { used: s.used - over, max: s.max, magicExtra: ids.reduce((n, id) => n + (CARDS[id]?.fx.magicSlots ?? 0), 0) };
       },
-      curse: hd => { const h = byDef(hd); return h.curse ? `${CURSES[h.curse]?.name}${CURSES[h.curse]?.slot ? ' (ocupa o 1º espaço: a carta posta nele fica debaixo da caveira)' : ''}` : null; },
+      curse: hd => { const h = byDef(hd); return h.curse && CURSES[h.curse] ? `${CURSES[h.curse].name} — ${CURSES[h.curse].text}${CURSES[h.curse].slot ? ' (ocupa o 1º espaço: a carta posta nele fica debaixo da caveira)' : ''}` : null; },
       curseSlot: hd => { const h = byDef(hd); return h.curse && CURSES[h.curse]?.slot ? CURSES[h.curse].name : null; },
     };
     // cartas sem Herói podem continuar sem Herói (ficam guardadas até o próximo Descanso)

@@ -151,6 +151,7 @@ export class Renderer {
     this.units.clear(); // personagens da partida anterior não podem continuar no mapa
     this.spawnFlash.clear();
     this.queue = [];
+    this.pickupsAlong = [];
     this.current = null;
     this.floaters = [];
     this.projectiles = [];
@@ -194,10 +195,16 @@ export class Renderer {
 
   /** Ferimentos que estão sendo mostrados agora (antes de aplicar o dano animado). */
   viewWounds(id: string): number { return this.units.get(id)?.wounds ?? 0; }
+  /** O personagem como está na tela agora (Vida, vivo, Atordoado): o HUD usa isto para não adiantar o resultado. */
+  viewUnit(id: string): { wounds: number; alive: boolean; stunned: boolean } | null {
+    const v = this.units.get(id);
+    return v ? { wounds: v.wounds, alive: v.alive, stunned: !!v.stunned } : null;
+  }
 
   /** Descarta animações pendentes e ressincroniza com o estado (usado ao Desfazer). */
   reset() {
     this.queue = [];
+    this.pickupsAlong = [];
     this.current = null;
     this.hitPause = 0;
     this.waitUntil = 0;
@@ -633,8 +640,8 @@ export class Renderer {
         break;
       }
       case 'pickup': {
+        // o marcador só entra na bolsa (e na cabeça do Herói) quando a animação de virar acabar (finishEvent)
         const u = this.units.get(e.heroId);
-        if (u && !u.bag.some(t => t.id === e.token.id)) u.bag.push({ ...e.token });
         for (const k of Object.keys(this.floor)) {
           this.floor[k] = this.floor[k].filter(t => t.id !== e.token.id);
           if (!this.floor[k].length) delete this.floor[k];
@@ -686,6 +693,7 @@ export class Renderer {
       if (q.t === 'move' || q.t === 'attack' || q.t === 'turn' || q.t === 'death') break;
       if (q.t === 'pickup' && q.heroId === heroId) {
         out.push(q);
+        this.pickupsAlong.push(q);
         for (const k of Object.keys(this.floor)) {
           this.floor[k] = this.floor[k].filter(t => t.id !== q.token.id);
           if (!this.floor[k].length) delete this.floor[k];
@@ -696,7 +704,17 @@ export class Renderer {
     return out;
   }
 
+  /** Marcadores que saíram da fila junto com um 'pickup' (takePickups): entram na bolsa quando ele terminar. */
+  private pickupsAlong: Extract<GameEvent, { t: 'pickup' }>[] = [];
+
   private finishEvent(e: GameEvent) {
+    if (e.t === 'pickup') {
+      for (const p of [e, ...this.pickupsAlong]) {
+        const u = this.units.get(p.heroId);
+        if (u && !u.bag.some(t => t.id === p.token.id)) u.bag.push({ ...p.token });
+      }
+      this.pickupsAlong = [];
+    }
     if (e.t === 'death') {
       const u = this.units.get(e.id)!;
       u.alive = false;
@@ -1685,7 +1703,8 @@ export class Renderer {
       ctx.fillStyle = '#fff'; ctx.fillText(String(u.num), -bw / 2 - 9, top + 6);
     }
     // marcador de Missão carregado (escolta, Tomos…): grande, em cima da cabeça, com brilho
-    const carried = u.kind === 'hero' ? (this.game.s.units[u.id]?.tokens ?? []).filter(t => t.type === 'missao') : [];
+    // o que já apareceu na tela (a bolsa animada), não o estado do jogo: sem spoiler antes do marcador virar
+    const carried = u.kind === 'hero' ? u.bag.filter(t => t.type === 'missao') : [];
     carried.forEach((t, i) => {
       const img = tokenImage(tokenImageId(t));
       const S = 84;

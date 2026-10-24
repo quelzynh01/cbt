@@ -49,6 +49,14 @@ export function applyAction(g: Game, by: GuildId, a: Action): boolean {
     return a.type === 'puppetPick' ? g.puppetPick(a.monsterId) : a.type === 'puppet' ? g.puppetAct(a.dest, a.targetId) : g.puppetSkip();
   }
   if (g.s.puppet) return false;
+  const ok = turnAction(g, a);
+  // Botas usadas aos poucos: o resto só vale logo em seguida — qualquer outra jogada (andar, atacar, Poção, carta, habilidade…) fecha
+  const left = g.s.activation?.bootLeft;
+  if (ok && left && a.type !== 'cover' && !(a.type === 'card' && a.cardUid in left)) for (const k of Object.keys(left)) left[k] = 0;
+  return ok;
+}
+
+function turnAction(g: Game, a: Action): boolean {
   switch (a.type) {
     case 'activate': return g.activate(a.heroId);
     case 'move': return g.moveTo(a.cell, !!a.openDoors);
@@ -62,6 +70,7 @@ export function applyAction(g: Game, by: GuildId, a: Action): boolean {
     case 'rest': return g.rest(a.opts ?? {});
     case 'end': return g.endTurn();
   }
+  return false;
 }
 
 /** Guilda que precisa agir agora (decisão de Vingança pendente ou a da vez). */

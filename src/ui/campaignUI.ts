@@ -15,7 +15,7 @@ import { TITLES, TITLE_TEXT } from '../engine/titles';
 import { drawFace } from '../render/chibi';
 import { curseCard, heroCard, itemCard, paintCardArt } from './cardview';
 import { CARD_ART } from './cardArt';
-import { bindUpgradeView, buyHint, buySummaryHtml, curseRevealHtml, curseSummaryHtml, handFromHtml, miniCards, myHeroesHtml, rankingHtml, resultHtml, upgradeBarHtml, upgradeLayout } from './upgradeViews';
+import { bindUpgradeView, buyHint, curseLabel, buySummaryHtml, curseRevealHtml, curseSummaryHtml, handFromHtml, miniCards, myHeroesHtml, rankingHtml, resultHtml, upgradeBarHtml, upgradeLayout } from './upgradeViews';
 import { attachMapPeek, closeMapPeek, mapChoiceCard } from './mapInfo';
 import { bindInvEditor, invEditorHtml, poolErrors, type InvItem, type InvOptions } from './inventoryEditor';
 import { fmtTime, getSettings } from './settings';
@@ -28,11 +28,6 @@ export function cardHtml(id: string, extra = '', attrs = ''): string {
   return itemCard(id, extra, attrs);
 }
 
-/** Maldição do Herói no editor de cartas (as que ocupam espaço cobrem a 4ª carta, p.24). */
-const curseLabel = (id?: string) => {
-  const c = id ? CURSES[id] : null;
-  return c ? `${c.name} — ${c.text}${c.slot ? ' Com 4 cartas, a última fica debaixo da Maldição (indisponível até uma Poção de Cura).' : ''}` : null;
-};
 
 export class CampaignUI {
   private page: HTMLElement;

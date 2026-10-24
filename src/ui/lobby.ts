@@ -1,7 +1,7 @@
 import { play } from '../audio/sfx';
 import { BANS_EACH } from '../engine/heroBan';
 import { GUILDS, HEROES, HERO_SETS, heroSetName, starterCards, type HeroSet } from '../engine/data';
-import { bindUpgradeView, buyHint, buySummaryHtml, curseRevealHtml, curseSummaryHtml, handFromHtml, miniCards, myHeroesHtml, rankingHtml, resultHtml, upgradeBarHtml, upgradeLayout } from './upgradeViews';
+import { bindUpgradeView, buyHint, curseLabel, buySummaryHtml, curseRevealHtml, curseSummaryHtml, handFromHtml, miniCards, myHeroesHtml, rankingHtml, resultHtml, upgradeBarHtml, upgradeLayout } from './upgradeViews';
 import { draftRounds, picksPerRound, titleHolders, type CampaignState } from '../campaign/campaign';
 import { gameConfirm } from './dialog';
 import { Game } from '../engine/game';
@@ -718,7 +718,7 @@ export class OnlineLobby {
     const arr = this.arrState;
     const inv = Object.fromEntries(g.heroes.map(h => [h, arr.filter(x => x.to === h).map(x => x.id)]));
     const errs = [...validateInventory(c, g, inv), ...poolErrors(arr, true)];
-    const arOpts: InvOptions = { heroes: g.heroes, color: GUILDS[me].color, discard: true, slots: (h, cards) => heroSlots(c, g, h, cards), curse: h => g.curses[h] ? CURSES[g.curses[h]].name : null, curseSlot: h => CURSES[g.curses[h]]?.slot ? CURSES[g.curses[h]].name : null };
+    const arOpts: InvOptions = { heroes: g.heroes, color: GUILDS[me].color, discard: true, slots: (h, cards) => heroSlots(c, g, h, cards), curse: h => curseLabel(g.curses[h]), curseSlot: h => CURSES[g.curses[h]]?.slot ? CURSES[g.curses[h]].name : null };
     this.invBind = { items: arr, opts: arOpts };
     return `${bar}<h3>3. Equipe seus Heróis</h3>
       <p>Clique num <b>espaço vazio</b> ou numa <b>carta</b> para escolher a carta (troca entre Heróis, tira ou descarta).</p>

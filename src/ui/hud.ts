@@ -436,11 +436,12 @@ export class Hud {
     const gc = g.guild(mine).color;
     el.innerHTML = g.heroesOf(mine).map(h => {
       const max = g.maxHp(h);
-      const state = !h.alive || !h.cell ? 'dead' : a?.heroId === h.id ? 'on' : done.includes(h.id) && !g.canBless(h.id) ? 'used' : '';
+      const v = this.shown(h);
+      const state = !v.alive || !h.cell ? 'dead' : a?.heroId === h.id ? 'on' : done.includes(h.id) && !g.canBless(h.id) ? 'used' : '';
       const tag = state === 'dead' ? '☠' : state === 'on' ? '✔' : state === 'used' ? '✓' : '';
       return `<button class="hp-hero ${state} ${this.pendingActivate === h.id ? 'sel' : ''}" data-hp="${h.id}" ${state === 'dead' ? 'disabled' : ''} title="${HEROES[h.defId].name}">
-        <img src="${this.portrait(h.defId, gc)}"/><span class="hp-num">${h.num}</span>${tag ? `<span class="hp-tag">${tag}</span>` : ''}${h.stunned ? '<span class="hp-stun">✷</span>' : ''}
-        <span class="hp-life"><i style="width:${h.alive ? ((max - h.wounds) / max) * 100 : 0}%"></i></span></button>`;
+        <img src="${this.portrait(h.defId, gc)}"/><span class="hp-num">${h.num}</span>${tag ? `<span class="hp-tag">${tag}</span>` : ''}${v.stunned ? '<span class="hp-stun">✷</span>' : ''}
+        <span class="hp-life"><i style="width:${v.alive ? ((max - v.wounds) / max) * 100 : 0}%"></i></span></button>`;
     }).join('');
     el.classList.remove('hidden');
     el.querySelectorAll<HTMLElement>('[data-hp]').forEach(b => { b.onclick = () => (choosing ? this.actions.pick(b.dataset.hp!) : this.actions.inspect(b.dataset.hp!)); });
@@ -561,8 +562,10 @@ export class Hud {
   }
 
   /** Placar: uma linha por Guilda; aberto, mostra os detalhes. */
-  private renderScore() {
+  private renderScore(force = false) {
     const g = this.game;
+    // moedas, mortes e Monstros mortos só depois da animação do lance (sem spoiler); Missão cumprida atualiza na hora (force)
+    if (!force && this.busy() && $('#score', this.root).innerHTML) return;
     const cur = g.currentGuild();
     $('#scoresub', this.root).textContent = `(vence com ${g.s.missionsToWin} Missões)`;
     $('#score', this.root).innerHTML = g.s.guildOrder.map(id => {
@@ -852,13 +855,14 @@ export class Hud {
     const html = g.guilds().filter(gs => !(gs.id === viewer && this.isMine(viewer))).map(gs => {
       const heroes = g.heroesOf(gs.id).map(h => {
         const max = g.maxHp(h);
-        const hp = h.alive ? max - h.wounds : 0;
-        const cls = ['tl-hero', !h.alive ? 'dead' : '', act?.heroId === h.id ? 'active' : '', gs.id === cur.id && this.isMine(gs.id) && h.alive ? 'clickable' : '', this.inspected === h.id ? 'insp' : ''].join(' ');
+        const v = this.shown(h);
+        const hp = v.alive ? max - v.wounds : 0;
+        const cls = ['tl-hero', !v.alive ? 'dead' : '', act?.heroId === h.id ? 'active' : '', gs.id === cur.id && this.isMine(gs.id) && h.alive ? 'clickable' : '', this.inspected === h.id ? 'insp' : ''].join(' ');
         return `<div class="${cls}" data-hero="${h.id}" title="${HEROES[h.defId].name}">
           <img src="${this.portrait(h.defId, gs.color)}"/>
           <span class="num" style="background:${gs.color}">${h.num}</span>
-          ${h.stunned ? '<span class="stun">✷</span>' : ''}
-          ${!h.alive ? '<span class="skull">☠</span>' : ''}
+          ${v.stunned ? '<span class="stun">✷</span>' : ''}
+          ${!v.alive ? '<span class="skull">☠</span>' : ''}
           <div class="hpbar"><i style="width:${(hp / max) * 100}%"></i></div>
         </div>`;
       }).join('');
@@ -880,6 +884,9 @@ export class Hud {
   lastActor: string | null = null;
   /** Animação / dados de um lance ainda rolando: a barra e o placar não mostram o resultado antes (sem spoiler). */
   busy: () => boolean = () => false;
+  /** O personagem como aparece no mapa agora (sem adiantar dano, morte ou Atordoado da animação que ainda vai passar). */
+  view: (id: string) => { wounds: number; alive: boolean; stunned: boolean } | null = () => null;
+  private shown(h: Unit) { const v = this.view(h.id); return v ?? { wounds: h.wounds, alive: h.alive, stunned: h.stunned }; }
   private boxShown: string | null | undefined = undefined;
 
   private renderHeroBox() {
@@ -1146,7 +1153,7 @@ export class Hud {
       case 'mission':
         play('mission');
         { const l = (this.shownMissions[e.guild] ??= []); if (!l.includes(e.missionId)) l.push(e.missionId); }
-        this.renderScore();
+        this.renderScore(true);
         this.renderMissions();
         this.renderScoreBar(true);
         this.banner(`Missão cumprida!`, GUILDS[e.guild].color, `${guildShort(e.guild)}: ${e.name}${e.how ? ` — ${e.how}` : ''}${e.first ? ' (+1 moeda de Primeiro Bônus)' : ''}`);
