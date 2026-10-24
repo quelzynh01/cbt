@@ -28,7 +28,7 @@ export const ARENA_DO_SOL: MapDef = {
   ],
 
   pillars: [],
-  rooms: [C(5, 0), C(0, 4), C(8, 4), C(3, 8), C(4, 8), C(5, 8)],
+  rooms: [C(5, 0), C(0, 4), C(8, 4), C(3, 8), C(4, 8), C(5, 8), C(8, 5), C(0, 5)],
 
   walls: [
     // Áreas Iniciais (salas laranja)
@@ -38,9 +38,11 @@ export const ARENA_DO_SOL: MapDef = {
     [C(5, 5), C(5, 4)], [C(6, 5), C(6, 4)], [C(5, 5), C(4, 5)], [C(5, 6), C(4, 6)],
     // salas das pontas
     [C(5, 0), C(5, 1)],
-    [C(0, 4), C(0, 3)], [C(0, 4), C(0, 5)],
-    [C(8, 4), C(8, 3)], [C(8, 4), C(8, 5)],
+    [C(0, 4), C(0, 3)], 
+    [C(8, 4), C(8, 3)], 
     [C(3, 8), C(3, 7)], [C(5, 8), C(5, 7)],
+    // revisão dos mapas
+    [C(7, 5), C(8, 5)], [C(0, 5), C(1, 5)],
   ],
 
   doors: [
