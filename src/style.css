@@ -1467,3 +1467,16 @@ html.touch :is(.cd-roll, .bt-act, #rr-roll, #rr-go, #cd-rr, #bt-rr)::after { con
 #restbox .rw-body .inv-pool { border: 2px solid var(--gold); border-radius: 12px; padding: 6px 8px; background: rgba(240,194,67,.08); }
 #restbox .rw-body .inv-ed { display: flex; flex-direction: column; gap: 8px; }
 #restbox .rw-body .inv-pool { order: -1; }
+/* Confronto Final: Maldição comprada na morte (todos veem) */
+.cdw-row { display: flex; gap: 18px; align-items: flex-end; justify-content: center; }
+.cdw-slot { display: grid; justify-items: center; gap: 4px; transition: opacity .35s, transform .35s, filter .35s; }
+.cdw-slot small { color: #e8d8c0; font-weight: 800; font-size: 12px; text-transform: uppercase; }
+.cdw-slot .acard { zoom: .62; }
+.cdw-flip { animation: cdwFlip .9s ease-out; }
+@keyframes cdwFlip { 0% { transform: rotateY(90deg) scale(.8); filter: brightness(.2); } 60% { transform: rotateY(0) scale(1.06); } 100% { transform: none; } }
+.cdw-box.done .cdw-slot.out { opacity: .4; filter: grayscale(.8); transform: scale(.92); }
+.cdw-box.done .cdw-slot.keep { transform: scale(1.06); filter: drop-shadow(0 0 14px #c66aff); }
+.cv-opts { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.cv-opt { padding: 0; background: none; border: none; box-shadow: none; width: 96px; height: 163px; overflow: hidden; border-radius: 10px; }
+.cv-opt .acard { zoom: .448; pointer-events: none; }
+.cv-opt:hover { transform: translateY(-3px); filter: brightness(1.15) drop-shadow(0 0 8px #c66aff); }

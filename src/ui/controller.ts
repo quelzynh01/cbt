@@ -107,6 +107,7 @@ export class Controller {
           return true;
         }
         if (e.t === 'reward' || e.t === 'title') { this.hud.showAward(e, () => this.renderer.release()); return true; }
+        if (e.t === 'curseDraw') { this.hud.showCurseDraw(e, () => this.renderer.release()); return true; }
         if (e.t === 'useToken') { this.hud.showUsed(e.heroId, e.token, () => this.renderer.release()); return true; }
         if (e.t === 'spawnRoll') {
           // a câmera vai até a Entrada que os dados indicaram (mesmo ocupada); sem Entrada com esses símbolos, mostra todas
@@ -454,6 +455,21 @@ export class Controller {
       this.hud.monsterPanel(null);
       this.paintReward(req, resolve);
       return;
+    } else if (req.choice === 'cover') {
+      // Maldição que ocupa espaço (Confronto Final): qual carta fica debaixo dela
+      hl.activeUnit = h.id;
+      const opts = (req.cards ?? []).map((id, i) => `<button class="cv-opt" data-i="${i}">${itemCard(id)}</button>`).join('');
+      html = `<div class="panel-h">☠ ${req.source} — qual carta fica coberta?</div>
+        <div class="mc-body">
+          <p>${req.text ?? ''}</p>
+          <div class="cv-opts">${opts}</div>
+        </div>`;
+      this.hud.setHint('Maldição: escolha a carta que fica debaixo dela');
+      const elc = this.hud.monsterPanel(html);
+      elc.classList.add('over');
+      paintCardArt(elc);
+      elc.querySelectorAll<HTMLElement>('[data-i]').forEach(b => { b.onclick = () => resolve(Number(b.dataset.i)); });
+      return;
     } else if (req.choice === 'loot') {
       hl.activeUnit = h.id;
       const opts = (req.tokens ?? []).map((t, i) => { const img = tokenImageId(t); return `<button class="primary lt-opt" data-i="${i}">${img ? `<img src="${tokenUrl(img)}"/>` : ''}${TOKEN_INFO[t.type]?.name ?? t.type}${t.type === 'bau' ? ` (${t.value})` : ''}</button>`; }).join('');
@@ -629,7 +645,7 @@ export class Controller {
           if (this.mode === 'host' && owner && !('choice' in req)) (this.net as HostSession).sendSpectate(req, owner);
           if (owner && this.remoteHuman(owner)) {
             this.hud.setHint(`Aguardando ${this.hud.nameOf(owner) ?? guildShort(owner)} decidir…`);
-            if (!('choice' in req)) this.hud.spectateDecision(req, this.hud.nameOf(owner) ?? guildShort(owner));
+            if (!('choice' in req)) this.spectateDecision(req, this.hud.nameOf(owner) ?? guildShort(owner));
             void (this.net as HostSession).askDecision(owner, req).then(pick => { decided.push(pick ?? [AUTO_PICK]); attempt(); });
             return;
           }
@@ -871,7 +887,7 @@ export class Controller {
       undoPoll: (poll, result) => this.showUndoPoll(poll, result),
       decide: (req, id) => this.decideForHost(req, id),
       diceStep: id => diceSync.receive(id),
-      spectate: (req, gid) => { if (!('choice' in req)) this.hud.spectateDecision(req, this.hud.nameOf(gid) ?? guildShort(gid)); },
+      spectate: (req, gid) => { if (!('choice' in req)) this.spectateDecision(req, this.hud.nameOf(gid) ?? guildShort(gid)); },
       peek: (gid, heroId, targetId, card) => this.showPeek(gid, heroId, targetId, card),
     };
   }
@@ -884,6 +900,18 @@ export class Controller {
     const hit = e.noAnim ? 0 : r.lastImpact;
     r.pauseAfterHit(Math.max(0, ms - hit) + 80 + (minePart && !e.noAnim ? 2000 / Math.max(1, r.speed) : 0));
     setTimeout(() => r.release(), hit + 20);
+  }
+
+  /** Online: outro jogador decide uma Rerrolagem — acompanha na mesma tela em que o ataque vai aparecer
+   *  (tela de combate com "Sempre" / quando a luta é sua no "Só as minhas"; senão, os dados do centro). */
+  private spectateDecision(req: Exclude<DecisionRequest, ChoiceRequest>, who: string) {
+    const bm = getSettings().battle;
+    const g = this.game;
+    const other = req.kind === 'attack' ? (req as { target?: string }).target : req.vs?.id;
+    const ids = [req.heroId, ...(other ? [other] : [])];
+    const mine = ids.some(id => { const u = g.s.units[id]; return !!u && u.kind === 'hero' && !!u.guild && this.isMine(u.guild); });
+    if (bm === 'always' || (bm === 'mine' && mine)) void this.battle.spectateDecision(req, who);
+    else this.hud.spectateDecision(req, who);
   }
 
   /** Online (jogador): o anfitrião pede a minha decisão no meio de uma jogada — Rerrolagem ou alvo adicional. */

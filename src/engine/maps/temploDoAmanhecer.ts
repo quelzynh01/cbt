@@ -103,6 +103,7 @@ export const TEMPLO_DO_AMANHECER: MapDef = {
   barrier: { coins: 6, portalColor: 'magenta' },
   rebelTitle: 'lider_rebelde',
   deadlyTokens: true,
+  deathCurse: true,
   fireProtectTitle: 'protetor_fogo',
 
   notes: [
@@ -110,5 +111,6 @@ export const TEMPLO_DO_AMANHECER: MapDef = {
     'Armadilhas matam o Herói na hora. Baús causam Ferimentos iguais ao seu valor quando revelados.',
     'Sem Entrada de Monstros: quem morre sai da partida.',
     'Única Missão: matar o Lorde Presas termina a partida.',
+    'Maldição na morte: a cada morte o Herói compra 1 Maldição Mortal; se valer mais que a dele, troca (a outra volta ao baralho).',
   ],
 };

@@ -79,7 +79,11 @@ await host.evaluate(() => {
   c.pushLocal([]);
   setTimeout(() => c.withDecisions(() => { g.monsterAttack(m, h, 'alerta'); return true; }, () => c.pushLocal(g.drain())), 1500);
 });
-const hostTxt = () => host.evaluate(() => { const cd = document.getElementById('dicecenter'); return { txt: cd && !cd.classList.contains('hidden') ? cd.innerText.replace(/\s+/g, ' ').slice(0, 140) : '', dice: document.querySelectorAll('#dicecenter .cd-die').length }; });
+// 'Nunca': dados do centro; 'Sempre': a tela de combate
+const hostTxt = () => host.evaluate(() => { const cd = document.getElementById('dicecenter'), bt = document.getElementById('battle');
+  const on = el => el && !el.classList.contains('hidden') && !el.classList.contains('linger');
+  const el = on(bt) ? bt : on(cd) ? cd : null;
+  return { txt: el ? el.innerText.replace(/\s+/g, ' ').slice(-140) : '', dice: document.querySelectorAll('#dicecenter .cd-die, #battle .bdie').length }; });
 const log = [];
 let sawWaitRoll = false, sawChoosing = false;
 for (let i = 0; i < 40; i++) {

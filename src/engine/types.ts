@@ -208,6 +208,8 @@ export interface GameState {
   /** Quem cumpriu cada Missão: o Herói e, nas de matar, o Herói morto (ids de personagem). */
   missionBy?: Record<string, Partial<Record<GuildId, { hero?: string; victim?: string }>>>;
   rewardDeck: string[];
+  /** Baralho de Maldições Mortais da partida (Confronto Final: Maldição a cada morte). */
+  curseDeck?: string[];
   missionsToWin: number;
   winner: GuildId | null;
   turn: number;
@@ -243,6 +245,8 @@ export interface GameState {
   hideoutTaken?: boolean;
   /** Grito de Guerra: a Guilda pode ativar outro Herói neste turno. */
   warCry?: GuildId | null;
+  /** O Herói ativo morreu com Grito de Guerra / Bênção ainda valendo: a próxima ativação do turno é a extra. */
+  extraOnly?: boolean;
   /** Cartas ativáveis já usadas neste turno (Manto do Deslocamento). */
   turnUsed?: string[];
   /** Heróis Inimigos mortos por cada Herói neste cenário (Contagem de Corpos). */
@@ -309,6 +313,8 @@ export type GameEvent =
   /** Título de campanha conquistado. */
   | { t: 'title'; guild: GuildId; title: string; name: string }
   /** Carta de Recompensa recebida (mostrada para todos). */
+  /** Confronto Final: o Herói que morreu comprou uma Maldição; `kept` é a que ficou com ele. */
+  | { t: 'curseDraw'; heroId: string; card: string; old?: string; kept: string }
   | { t: 'reward'; heroId: string; cardId: string; /** ficou com as cartas sem Herói (inventário cheio) */ spare?: boolean }
   /** Habilidade Natural ativada (Furtividade do Vapor, Vingança do Espetado…). */
   | { t: 'skill'; id: string; skill: string; name: string }

@@ -9,7 +9,7 @@ import { play, playOnce } from '../audio/sfx';
 import { soundWidget } from '../audio/widget';
 import { drawFace, getArtVersion } from '../render/chibi';
 import { CURSES } from '../engine/cards';
-import { ITEM_LEVEL, itemArt, richText, bonusImg, medal, heroCard, itemCard, itemColor, monsterCard, paintCardArt } from './cardview';
+import { ITEM_LEVEL, itemArt, richText, bonusImg, medal, heroCard, itemCard, itemColor, monsterCard, paintCardArt, curseCard } from './cardview';
 import { getSettings, onSettings, saveSettings } from './settings';
 import { CARD_ART } from './cardArt';
 
@@ -770,6 +770,32 @@ export class Hud {
     play('pick-item');
     paintCardArt(box);
     setTimeout(() => { box.classList.add('hidden'); done?.(); }, 3200 / Math.max(1, this.speed));
+  }
+
+  /** Confronto Final: o Herói que morreu compra uma Maldição Mortal — todos veem a carta virar e com qual ele fica. */
+  showCurseDraw(e: Extract<GameEvent, { t: 'curseDraw' }>, done?: () => void) {
+    const g = this.game;
+    const box = $('#awardbox', this.root);
+    const u = g.s.units[e.heroId];
+    const color = u?.guild ? g.guild(u.guild).color : '#c66a9a';
+    const name = u ? g.name(u) : '';
+    const swapped = e.kept === e.card && e.card !== 'sem_maldicao';
+    const cur = e.old ? `<div class="cdw-slot ${swapped ? 'out' : 'keep'}"><small>Atual</small>${curseCard(e.old, 'small')}</div>` : '';
+    box.innerHTML = `<div class="aw-box cdw-box"><div class="aw-kind">☠ Maldição Mortal · ${name} morreu</div>
+      <div class="cdw-row">${cur}<div class="cdw-slot new ${swapped ? 'keep' : 'out'}"><small>Comprou</small><div class="cdw-flip">${curseCard(e.card, 'small')}</div></div></div>
+      <div class="aw-who cdw-res" style="color:${color}"></div></div>`;
+    box.classList.remove('hidden');
+    play('pick-item');
+    paintCardArt(box);
+    const sp = Math.max(1, this.speed);
+    // a carta vira; depois o resultado (troca ou continua)
+    setTimeout(() => {
+      box.querySelector('.cdw-box')?.classList.add('done');
+      const res = box.querySelector('.cdw-res');
+      if (res) res.innerHTML = swapped ? `${name} fica com <b>${CURSES[e.card]?.name}</b>${e.old ? ` — ${CURSES[e.old]?.name} volta ao baralho` : ''}`
+        : e.card === 'sem_maldicao' && !e.old ? `${name} escapou: Sem Maldição!` : `${name} continua com <b>${e.old ? CURSES[e.old]?.name : 'nenhuma Maldição'}</b> — a comprada volta ao baralho`;
+    }, 1100 / sp);
+    setTimeout(() => { box.classList.add('hidden'); done?.(); }, 4200 / sp);
   }
 
   /** Moldura da cor da Guilda em volta da tela quando é a vez deste jogador. */

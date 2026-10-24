@@ -3,7 +3,7 @@ import {
   heroPool, ATTACK_DIE, CARDS, DEFENSE_DIE, ENTRY_PAIRS, EXPLORATION_BAG, GUILDS, HEROES, HERO_ORDER, MONSTERS, TOKEN_INFO, distributeStartingGear, levelSuffix, lowerSuffix,
 } from './data';
 import { nextRandom, randInt, shuffle } from './rng';
-import { CURSES, type CardFx } from './cards';
+import { CURSES, curseDeck, type CardFx } from './cards';
 import { TITLES } from './titles';
 import { TOMB, TOMBSTONES } from './tombstones';
 import type {
@@ -44,7 +44,7 @@ export interface ChoiceRequest {
   /** confirm: pergunta sim (0) ou não (−1). loot: qual marcador pegar de quem você matou (índice em `tokens`).
    *  reward: inventário cheio — trocar uma carta do Herói (índice em `cards`), dar a um Aliado (cards.length + índice em `units`)
    *  ou guardar sem Herói (−1). */
-  choice: 'push' | 'extra' | 'confirm' | 'loot' | 'reward';
+  choice: 'push' | 'extra' | 'confirm' | 'loot' | 'reward' | 'cover';
   /** Recompensa: a carta nova e as cartas do Herói (defIds). */
   newCard?: string;
   cards?: string[];
@@ -255,6 +255,12 @@ export class Game {
       if (cell) g.addFloor(cell, { id: `mg-${p.guild}`, type: 'missao', color: p.guild, faceUp: true });
     }
 
+    // Confronto Final: Maldição a cada morte — o baralho sem as Maldições que os Heróis já têm
+    if (map.deathCurse) {
+      const deck = curseDeck();
+      for (const u of Object.values(s.units)) if (u.kind === 'hero' && u.curse) { const i = deck.indexOf(u.curse); if (i >= 0) deck.splice(i, 1); }
+      s.curseDeck = shuffle(s, deck);
+    }
     // Lápides (Beyond the Grave): embaralha as 14 e põe uma virada em cada Espaço marcado
     if (map.tombstones?.length) {
       const deck = shuffle(s, TOMBSTONES.map(t => t.id));
@@ -878,9 +884,11 @@ export class Game {
     // Herói exausto (por carta/habilidade) continua podendo ser ativado: só não usa de novo o que exaure o Herói até Descansar
     const a = this.s.activation;
     const done = this.s.activatedThisTurn ?? [];
-    if (a && a.heroId !== heroId && !this.freeMode && !this.activationFresh()) {
+    const extra = !a && !!this.s.extraOnly && !this.freeMode;
+    if ((a && a.heroId !== heroId && !this.freeMode && !this.activationFresh()) || extra) {
       const kind = this.blessKind(heroId);
       if (!kind) return false;
+      this.s.extraOnly = false;
       if (kind === 'mind') {
         // Mente Brilhante: só para fazer o Movimento
         this.log(`Mente Brilhante: ${this.name(h)} é ativado só para se mover!`);
@@ -896,6 +904,7 @@ export class Game {
       this.log(kind === 'war' ? `Grito de Guerra: ${this.name(h)} é ativado!` : `Bênção de Hobsbawm: ${this.name(h)} é ativado!`);
       this.s.blessing = null;
       this.s.warCry = null;
+      this.s.extraOnly = false;
     } else if (a?.heroId === heroId) return true;
     else if (!this.freeMode && done.includes(heroId) && !this.activationFresh()) return false;
     // trocar de uma ativação ainda sem ações não conta como ativação
@@ -2313,6 +2322,7 @@ export class Game {
       this.s.activatedThisTurn = [];
       this.s.blessing = null;
       this.s.warCry = null;
+      this.s.extraOnly = false;
       this.s.turnUsed = [];
       this.clearTurnFx();
       this.log('Turno adicional! Ative outro Herói.');
@@ -2326,6 +2336,7 @@ export class Game {
     this.s.activatedThisTurn = [];
     this.s.blessing = null;
     this.s.warCry = null;
+    this.s.extraOnly = false;
     this.s.turnUsed = [];
     this.clearTurnFx();
     if (this.s.shroud?.length) this.s.shroud = this.s.shroud.filter(id => this.unit(id).guild !== this.currentGuild().id);
@@ -2555,6 +2566,15 @@ export class Game {
   private checkActiveDeath() {
     const a = this.s.activation;
     if (a && (!this.unit(a.heroId).alive || !this.unit(a.heroId).cell)) {
+      // Grito de Guerra / Bênção / Mente Brilhante: ainda dá para ativar outro Aliado — o turno continua
+      const h = this.unit(a.heroId);
+      if (h.guild && this.heroesOf(h.guild).some(x => x.id !== h.id && this.canBless(x.id))) {
+        this.log(`${this.name(h)} ${h.alive ? 'foi banido' : 'morreu'} — a Guilda ainda pode ativar outro Herói.`);
+        // ninguém fica ativado (o morto não age mais); a próxima ativação usa o Grito de Guerra / a Bênção
+        this.s.activation = null;
+        this.s.extraOnly = true;
+        return;
+      }
       this.log(this.unit(a.heroId).alive ? 'O Herói ativo foi banido — o turno termina.' : 'O Herói ativo morreu — o turno termina.');
       this.endTurn();
     }
@@ -2613,6 +2633,39 @@ export class Game {
       for (const t of dropped) this.addFloor(cell, t);
       this.emit({ t: 'drop', cell, tokens: dropped });
     }
+    if (this.map.deathCurse) this.deathCurse(h);
+  }
+
+  /** Confronto Final: o Herói que morreu compra 1 Maldição Mortal. Se valer mais que a dele, troca (a antiga volta ao baralho);
+   *  senão continua com a mesma e a comprada volta. Maldição que ocupa espaço com o inventário cheio: o dono escolhe a carta coberta. */
+  private deathCurse(h: Unit) {
+    const deck = this.s.curseDeck ??= shuffle(this.s, curseDeck());
+    const card = deck.shift();
+    if (!card) return;
+    const old = h.curse;
+    const better = (CURSES[card]?.value ?? 0) > (old ? CURSES[old]?.value ?? 0 : 0);
+    const back = better ? old : card;
+    // a que não ficou volta para o baralho, embaralhado de novo
+    if (back) this.s.curseDeck = shuffle(this.s, [...deck, back]);
+    if (better) {
+      h.curse = card;
+      // a antiga ocupava espaço e a nova não: a carta que estava debaixo dela volta
+      if (old && CURSES[old]?.slot && !CURSES[card].slot && h.covered) { h.cards.unshift(h.covered); h.covered = undefined; }
+      if (CURSES[card].slot && !h.covered) {
+        const sl = this.slotsUsed(h);
+        if (sl.used > sl.max && h.cards.length) {
+          const i = h.guild && this.choiceHook
+            ? this.choiceHook({ choice: 'cover', guild: h.guild, heroId: h.id, source: CURSES[card].name, cards: h.cards.map(c => c.defId),
+              text: `${this.name(h)} ficou com <b>${CURSES[card].name}</b>, que ocupa um espaço de carta: escolha qual carta fica debaixo da Maldição (indisponível até uma Poção de Cura).` })
+            : 'auto';
+          const at = i === 'auto' || i < 0 || !h.cards[i] ? 0 : i;
+          h.covered = h.cards.splice(at, 1)[0];
+        }
+      }
+    }
+    this.emit({ t: 'curseDraw', heroId: h.id, card, ...(old ? { old } : {}), kept: h.curse ?? 'sem_maldicao' });
+    this.log(better ? `${this.name(h)} comprou ${CURSES[card].name}: fica com ela${old ? ` (${CURSES[old].name} volta ao baralho)` : ''}.`
+      : `${this.name(h)} comprou ${CURSES[card].name}: continua com ${old ? CURSES[old].name : 'nenhuma Maldição'}.`);
   }
 
   private monsterDies(m: Unit, killer: Unit, exterminated: boolean) {

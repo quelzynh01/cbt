@@ -43,8 +43,9 @@ export class BattlePanel {
   /** Rerrolagem decidida nesta tela: a rolagem do ataque continua aqui, com os mesmos dados. */
   private carry: {
     attackerId: string;
-    atk?: { dice: HTMLElement[]; before: DieFace[]; idx: number[]; settled: boolean };
-    def?: { heroId: string; dice: HTMLElement[]; before: DieFace[]; idx: number[] };
+    /** `spect`: rolagem de outro jogador acompanhada aqui (a escolha dele vem no ataque: e.rr) */
+    atk?: { dice: HTMLElement[]; before: DieFace[]; idx: number[]; settled: boolean; spect?: boolean };
+    def?: { heroId: string; dice: HTMLElement[]; before: DieFace[]; idx: number[]; spect?: boolean };
   } | null = null;
   get hasCarry() { return !!this.carry; }
   private pickConfirm: (() => void) | null = null;
@@ -329,7 +330,8 @@ export class BattlePanel {
     // --- ataque (se a Rerrolagem foi decidida aqui, só os dados escolhidos giram de novo)
     const atkTray = this.el.querySelector('.bt-tray.atk') as HTMLElement;
     if (c?.atk) {
-      if (!c.atk.settled && c.atk.idx.length) await rerollDice(atkTray, c.atk.dice, { before: c.atk.before, idx: c.atk.idx, asked: true }, e.dice, e.attackType, true, sp, () => this.newDie(atkTray, true), () => this.stopPickSpin(), n => this.critAsk(atkTray, n, humanAtk, sp));
+      const idx = c.atk.spect ? spectIdx(c.atk.before, e.dice, e.rr?.idx) : c.atk.idx;
+      if (!c.atk.settled && idx.length) await rerollDice(atkTray, c.atk.dice, { before: c.atk.before, idx, asked: true }, e.dice, e.attackType, true, sp, () => this.newDie(atkTray, true), () => this.stopPickSpin(), n => this.critAsk(atkTray, n, humanAtk, sp));
     } else if (!c && e.spread) {
       // dano espalhado: os dados são os mesmos do ataque anterior (já rolados)
       await this.rollTray(atkTray, e.dice, e.attackType, ATK_FACES, sp, true);
@@ -355,7 +357,8 @@ export class BattlePanel {
       const count = wrap.querySelector('.bt-count') as HTMLElement;
       if (c?.def && c.def.heroId === t.id) {
         // Defesa já rolada nesta tela (Rerrolagem): só os escolhidos giram de novo
-        if (c.def.idx.length) await rerollDice(tray, c.def.dice, { before: c.def.before, idx: c.def.idx, asked: true }, t.defense, 'shield', false, sp, () => this.newDie(tray, false), () => this.stopPickSpin(), n => this.critAsk(tray, n, true, sp));
+        const didx = c.def.spect ? spectIdx(c.def.before, t.defense, t.rr?.idx) : c.def.idx;
+        if (didx.length) await rerollDice(tray, c.def.dice, { before: c.def.before, idx: didx, asked: true }, t.defense, 'shield', false, sp, () => this.newDie(tray, false), () => this.stopPickSpin(), n => this.critAsk(tray, n, !c.def!.spect, sp));
         count.innerHTML = `<b>${t.blocks}</b> bloqueio${t.blocks === 1 ? '' : 's'}`;
         continue;
       }
@@ -532,6 +535,70 @@ export class BattlePanel {
     const idx = await this.pick(tray, dice, req, wrap.querySelector('.bt-count') as HTMLElement);
     this.carry!.def = { heroId: me.id, dice, before: req.faces.slice(), idx };
     return idx;
+  }
+
+  /** Online (quem assiste com a tela de combate): outro jogador decide uma Rerrolagem. Os dados aparecem nesta tela junto com o
+   *  clique dele (nada antes), e a tela espera a escolha; o ataque continua aqui, girando de novo só os dados escolhidos. */
+  async spectateDecision(req: { heroId: string; target?: string; kind: 'attack' | 'defense'; faces: DieFace[]; success: DieFace; rerolls: number; base?: number; round?: number; vs?: { id: string; faces: DieFace[]; hits: number; type: string; base?: number }; card?: { name: string; type: string; dice: number } }, who: string) {
+    const g = this.deps.game();
+    const me = g.unit(req.heroId);
+    const sp = Math.max(1, this.deps.speed());
+    this.stopLinger();
+    this.mode = 'play';
+    diceSync.beginDecision(req);
+    const btns = () => this.el.querySelector('.bt-btns') as HTMLElement | null;
+    const say = (t: string) => { const b = btns(); if (b) b.innerHTML = `<span class="bt-wait">⏳ ${t}</span>`; };
+    const ok = (f: DieFace) => f === 'crit' || f === req.success;
+    const black = req.kind === 'attack';
+    const attackerId = black ? me.id : req.vs!.id;
+    const fresh = !this.carry || this.carry.attackerId !== attackerId || !this.el.querySelector('.bt-tray.atk');
+    if (fresh) {
+      const atkU = g.unit(attackerId);
+      const tgt = black ? (req.target ? g.unit(req.target) : null) : me;
+      this.buildPlay(atkU, tgt ? [tgt] : [], atkU.kind === 'monster' ? 'Reação!' : 'Ataque', atkU.kind === 'monster', this.deps.viewWounds(atkU.id), tgt ? this.deps.viewWounds(tgt.id) : 0);
+      if (req.card) (this.el.querySelector('.bt-title') as HTMLElement).innerHTML = `${req.card.name} ${medal(req.card.type === 'melee' ? 'melee' : 'ranged', req.card.dice, `${req.card.dice} dados de ataque`, 'bt-medal')}`;
+      this.show();
+      this.carry = { attackerId };
+    }
+    const c = this.carry!;
+    // na Defesa: primeiro o ataque de quem atacou (já decidido)
+    if (!black) {
+      const at = this.el.querySelector('.bt-tray.atk') as HTMLElement;
+      if (!c.atk) {
+        at.innerHTML = '';
+        await this.rollTray(at, req.vs!.faces, req.vs!.type as DieFace, ATK_FACES, sp, false, req.vs!.base, false);
+      } else if (!c.atk.settled) {
+        const idx = c.atk.spect ? spectIdx(c.atk.before, req.vs!.faces, undefined) : c.atk.idx;
+        if (idx.length) await rerollDice(at, c.atk.dice, { before: c.atk.before, idx, asked: true }, req.vs!.faces, req.vs!.type as DieFace, true, sp, () => this.newDie(at, true));
+      }
+      c.atk = { dice: [], before: req.vs!.faces.slice(), idx: [], settled: true };
+      (this.el.querySelector('.bt-count.atk') as HTMLElement).innerHTML = `<b>${req.vs!.hits}</b> acerto${req.vs!.hits === 1 ? '' : 's'}`;
+    }
+    const wrap = black ? null : this.defWrap(me.id);
+    const tray = (black ? this.el.querySelector('.bt-tray.atk') : wrap!.querySelector('.bt-tray')) as HTMLElement;
+    const count = (black ? this.el.querySelector('.bt-count.atk') : wrap!.querySelector('.bt-count')) as HTMLElement;
+    const prev = black ? c.atk : c.def;
+    let dice: HTMLElement[];
+    if ((req.round ?? 1) > 1 && prev && prev.dice.length) {
+      // outra rodada de Rerrolagem: os dados que ele escolheu giram e param no resultado novo
+      const idx = spectIdx(prev.before, req.faces, undefined);
+      if (idx.length) await rerollDice(tray, prev.dice, { before: prev.before, idx, asked: true }, req.faces, req.success, black, sp, () => this.newDie(tray, black));
+      dice = prev.dice;
+    } else {
+      tray.innerHTML = '';
+      say(`Aguardando ${who} rolar ${black ? 'o ataque' : 'a defesa'}…`);
+      await diceSync.wait('roll');
+      if (this.carry !== c) return;
+      const b = btns();
+      if (b) b.innerHTML = '';
+      dice = await this.rollTray(tray, req.faces, req.success, black ? ATK_FACES : DEF_FACES, sp, false, req.base ?? (black ? req.card?.dice : undefined), false, true, 'roll');
+    }
+    if (this.carry !== c) return;
+    if (black) c.atk = { dice, before: req.faces.slice(), idx: [], settled: false, spect: true };
+    else c.def = { heroId: me.id, dice, before: req.faces.slice(), idx: [], spect: true };
+    const hits = req.faces.filter(ok).length;
+    count.innerHTML = `<b>${hits}</b> ${black ? 'acerto' : 'bloqueio'}${hits === 1 ? '' : 's'}`;
+    say(`${who} está escolhendo quais dados rerrolar…`);
   }
 
   /** Escolha dos dados para rerrolar, na própria bandeja (Enter confirma). */
@@ -734,6 +801,13 @@ export class BattlePanel {
 }
 
 /** Anima a Rerrolagem: os dados rerrolados ficam com borda verde, giram e param no novo valor; ✷ extras entram no fim. */
+/** Rolagem acompanhada: quais dados mudaram (rerrolados) entre o que apareceu e o resultado final (+ a escolha, se vier). */
+function spectIdx(before: DieFace[], final: DieFace[], chosen?: number[]): number[] {
+  const out = new Set(chosen?.filter(i => i < before.length) ?? []);
+  before.forEach((f, i) => { if (final[i] !== undefined && final[i] !== f) out.add(i); });
+  return [...out].sort((a, b) => a - b);
+}
+
 export async function rerollDice(_tray: HTMLElement, dice: HTMLElement[], rr: RerollInfo, final: DieFace[], success: DieFace, black: boolean, sp: number, add: () => HTMLElement, onStart?: () => void, critAsk?: (next: number) => Promise<void>) {
   onStart?.();
   const pool: DieFace[] = black ? ['crit', 'melee', 'ranged', 'blank'] : ['crit', 'shield', 'blank', 'blank'];

@@ -34,6 +34,8 @@ export interface MapDef {
   barrier?: { coins: number; portalColor: string };
   /** Armadilhas matam e Baús ferem (Templo). */
   deadlyTokens?: boolean;
+  /** Confronto Final: a cada morte o Herói compra uma Maldição Mortal (fica com a de maior valor). */
+  deathCurse?: boolean;
   /** Áreas especiais com nome escrito no tabuleiro. */
   labels?: { cells: Cell[]; text: string }[];
   /** Texto de regras especiais (galeria de mapas). */

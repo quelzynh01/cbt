@@ -66,6 +66,7 @@ sh tools/tests/run-engine.sh rules         # Core
 sh tools/tests/run-engine.sh vdoor         # monstros abrindo/fechando portas na Vingança
 sh tools/tests/run-engine.sh boots         # Botas usadas aos poucos (Die Booten: 1 passo + 1 passo)
 sh tools/tests/run-engine.sh pushportal    # empurrão (Rajada de Vento, Tiro Explosivo) não atravessa portal -> "EMPURRÃO SEM PORTAL OK"
+sh tools/tests/run-engine.sh deathcurse    # Templo: Maldição a cada morte (troca se maior, carta coberta) e Grito de Guerra depois da morte
 sh tools/tests/run-engine.sh xsim 30 mix   # partidas IA x IA (mix|core|extra; MAP=id, V=1 detalha) -> 0 travadas/0 erros
 ALL=1 sh tools/tests/run-engine.sh reach2  # alcance de todos os mapas       -> "TODOS OS MAPAS OK"
 ```
@@ -84,6 +85,7 @@ node tools/tests/browser/savecamp.mjs <pasta-prints>                # campanha l
 node tools/tests/browser/dicesync.mjs <pasta-prints>                # online: dados sincronizados (o outro só vê depois do clique de quem rola)
 node tools/tests/browser/peek.mjs <pasta-prints>                    # online: quem assiste vê a tela de escolha do ataque do outro
 node tools/tests/browser/rrspec.mjs <pasta-prints>                  # online: o anfitrião acompanha a Rerrolagem do amigo
+node tools/tests/browser/rratk.mjs <pasta-prints>                   # online: Rerrolagem do ATAQUE do amigo acompanhada na tela de combate (BATTLE=always|never)
 node tools/tests/browser/mixed.mjs <pasta-prints>                   # online: 'Sempre' x 'Nunca' — o fim do ataque espera o Continuar de todos (HOST/CLI/TARGET)
 ```
 
