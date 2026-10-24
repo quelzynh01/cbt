@@ -654,6 +654,12 @@ export class Renderer {
         if (u) this.floatAt(e.heroId, tokenLabel(e.token), e.token.type === 'armadilha' ? '#ff8a5c' : '#e6c8ff', 16, -18);
         break;
       }
+      case 'tokenGone': {
+        const k = key(e.cell);
+        this.floor[k] = (this.floor[k] ?? []).filter(t => !e.ids.includes(t.id));
+        if (!this.floor[k].length) delete this.floor[k];
+        break;
+      }
       case 'drop': {
         const k = key(e.cell);
         this.floor[k] = [...(this.floor[k] ?? []), ...e.tokens.map(t => ({ ...t }))];

@@ -34,6 +34,7 @@ const step = (g: Game, color: string, faces: string[]) => {
   check(lp.alive && lp.cell?.c === em.cell.c && lp.cell?.r === em.cell.r, `a Sombra surgiu na Entrada (${em.cell.c},${em.cell.r})`);
   check(!!lp.shadow && g.name(lp).startsWith('Sombra do'), `marcada como Sombra (preto e branco): "${g.name(lp)}"`);
   check(!(g.s.floor[k] ?? []).some(t => t.type === 'missao' && t.color === 'vermelho'), 'o marcador Vermelho saiu da partida');
+  check(!Object.values(g.s.floor).flat().some(t => t.type === 'missao' && t.color === 'verde'), 'o outro marcador (Verde) também sumiu — a Sombra já surgiu');
 }
 {
   const g = mk();
@@ -44,5 +45,6 @@ const step = (g: Game, color: string, faces: string[]) => {
   const lp = Object.values(g.s.units).find(u => u.kind === 'monster' && u.defId.startsWith('lorde_presas'))!;
   check(!!ev && ev.cell === null, 'rolagem sem Entrada: avisa que não entra');
   check(!lp.alive, 'a Sombra fica fora do tabuleiro');
+  check(Object.values(g.s.floor).flat().some(t => t.type === 'missao' && t.color === 'vermelho'), 'sem a Sombra, o outro marcador (Vermelho) continua para tentar de novo');
 }
 console.log(ok ? 'SOMBRA DO LORDE PRESAS OK' : 'FALHOU');

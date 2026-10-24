@@ -2320,7 +2320,10 @@ export class Controller {
     const base = (u: { defId: string }) => u.defId.replace(/\d+$/, '');
     const viewer = this.hud.viewerGuild();
     let note = '';
-    if (m.rule === 'collect_any' || m.rule === 'collect_own' || m.rule === 'carry' || m.rule === 'step_on' || m.rule === 'escort' || m.rule === 'arena' || m.rule === 'summon') {
+    const summoned = m.rule === 'summon' ? g.monstersOnBoard().filter(u => (m.types ?? [m.summon ?? '']).includes(base(u))) : [];
+    if (summoned.length) {
+      for (const u of summoned) add(u.cell);
+    } else if (m.rule === 'collect_any' || m.rule === 'collect_own' || m.rule === 'carry' || m.rule === 'step_on' || m.rule === 'escort' || m.rule === 'arena' || m.rule === 'summon') {
       const fits = (t: { type: string; color?: string }) => t.type === 'missao' && (!m.colors?.length || !t.color || m.colors.includes(t.color)) && (m.rule !== 'collect_own' || t.color === viewer);
       for (const [k, toks] of Object.entries(g.s.floor)) if (toks.some(t => fits(t) && (t.faceUp || g.s.debug.revealTokens))) add(parseKey(k));
       for (const u of g.onBoard()) if (u.tokens.some(t => fits(t))) add(u.cell);

@@ -325,6 +325,8 @@ export type GameEvent =
   /** Lápide revelada (Beyond the Grave): o texto aparece na tela de todos. */
   | { t: 'tomb'; heroId: string; name: string; text: string; good: boolean }
   | { t: 'drop'; cell: Cell; tokens: Token[] }
+  /** Marcadores que saem da partida (ex.: o outro marcador de invocação depois que a Sombra surgiu). */
+  | { t: 'tokenGone'; cell: Cell; ids: string[] }
   | { t: 'spawn'; id: string; cell: Cell }
   | { t: 'cemetery'; id: string; count: number; full: boolean }
   | { t: 'spawnStart'; ids: string[] }

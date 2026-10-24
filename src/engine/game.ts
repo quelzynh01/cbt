@@ -2859,6 +2859,15 @@ export class Game {
       mon.alive = true; mon.wounds = 0; mon.stunned = false; mon.cell = { ...match!.cell }; mon.shadow = true;
       this.log(`${this.name(h)} invocou a Sombra: ${this.name(mon)} surge na Entrada de Monstro (${match!.cell.c},${match!.cell.r})!`);
       this.emit({ t: 'spawn', id: mon.id, cell: { ...match!.cell } });
+      // a Sombra já surgiu: os outros marcadores de invocação saem da partida
+      for (const [k, toks] of Object.entries(this.s.floor)) {
+        const gone = toks.filter(t => t.type === 'missao' && this.tokenMission(t)?.id === m.id);
+        if (!gone.length) continue;
+        this.s.floor[k] = toks.filter(t => !gone.includes(t));
+        if (!this.s.floor[k].length) delete this.s.floor[k];
+        this.emit({ t: 'tokenGone', cell: parseKey(k), ids: gone.map(t => t.id) });
+        this.log(`O marcador ${gone.map(t => t.color ?? '').join(' e ')} sai da partida (a Sombra já surgiu).`);
+      }
     } else this.log(`${this.name(h)} tentou invocar a Sombra do ${MONSTERS[mon.defId].name}: ${match ? 'a Entrada sorteada está ocupada' : 'os dados não indicam nenhuma Entrada'} — ela fica fora do tabuleiro.`);
   }
 
