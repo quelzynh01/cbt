@@ -1435,27 +1435,19 @@ export class Renderer {
       const art = CARD_ART[hid];
       if (art && !this.hideoutImg) { this.hideoutImg = new Image(); this.hideoutImg.src = `${import.meta.env.BASE_URL}cards/${art.img}.webp`; }
       for (const cell of hd.cells.slice(0, 1)) {
-        const s0 = this.missionSlot(cell.c, cell.r);
+        // só o ícone do item, deitado no centro do Espaço, como parte do cenário (com uma sombra no chão)
         list.push({
-          d: K(cell.c + cell.r, 1.5, (s0.gx + s0.gy - cell.c - cell.r) / 2),
+          d: K(cell.c + cell.r, 1, 0),
           draw: () => {
-            const p = g2s(s0.gx, s0.gy);
-            const w = 46, h = 64, bob = Math.sin(tt * 2.2) * 3;
-            void bob;
-            ctx.save(); ctx.translate(p.x, p.y - 26 + bob);
-            const glow = ctx.createRadialGradient(0, 0, 4, 0, 0, 60);
-            glow.addColorStop(0, 'rgba(255,214,90,.55)'); glow.addColorStop(1, 'rgba(255,214,90,0)');
-            ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(0, 0, 60, 0, Math.PI * 2); ctx.fill();
-            ctx.fillStyle = '#c79a22'; ctx.strokeStyle = '#1b0f08'; ctx.lineWidth = 3;
-            ctx.beginPath(); ctx.roundRect(-w / 2, -h / 2, w, h, 6); ctx.fill(); ctx.stroke();
-            ctx.fillStyle = '#2a1d13'; ctx.fillRect(-w / 2 + 4, -h / 2 + 4, w - 8, h - 8);
+            const p = g2s(cell.c + 0.5, cell.r + 0.5);
+            const S = 78;
+            ctx.save(); ctx.translate(p.x, p.y);
+            ctx.fillStyle = 'rgba(0,0,0,.28)';
+            ctx.beginPath(); ctx.ellipse(0, 4, S * 0.42, S * 0.18, 0, 0, Math.PI * 2); ctx.fill();
             const img = this.hideoutImg;
-            if (img?.complete && img.naturalWidth) ctx.drawImage(img, -w / 2 + 4, -h / 2 + 4, w - 8, h - 8);
-            else { ctx.font = '26px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('🪓', 0, 9); }
+            if (img?.complete && img.naturalWidth) { ctx.scale(1, 0.62); ctx.rotate(-0.5); ctx.drawImage(img, -S / 2, -S / 2, S, S); }
+            else { ctx.font = '40px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('🪓', 0, 12); }
             ctx.restore();
-            const label = CARDS[hid].name;
-            ctx.font = '900 13px "Baloo 2", sans-serif'; ctx.textAlign = 'center'; ctx.lineWidth = 4; ctx.strokeStyle = '#1b0f08';
-            ctx.strokeText(label, p.x, p.y - 66 + bob); ctx.fillStyle = '#ffe9a8'; ctx.fillText(label, p.x, p.y - 66 + bob);
           },
         });
       }
