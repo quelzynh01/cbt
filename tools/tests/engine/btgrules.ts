@@ -46,7 +46,7 @@ const mon = (g: Game, type: string) => g.units().find(u => u.kind === 'monster' 
 {
   const g = mk('criptas');
   const gh = mon(g, 'fantasma');
-  const a: Cell = { c: 3, r: 2 }, b: Cell = { c: 4, r: 2 }; // há parede entre (3,2) e (4,2)
+  const a: Cell = { c: 2, r: 1 }, b: Cell = { c: 2, r: 2 }; // há parede entre (2,1) e (2,2)
   check('Fantasma: Perto mesmo com parede', g.closeFor(gh, b, a) && !g.board.isClose(b, a));
 }
 // Lápide: revelar gasta 1 PM e o efeito acontece
