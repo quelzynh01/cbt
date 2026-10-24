@@ -922,7 +922,8 @@ export class Controller {
     const r = this.renderer;
     const ms = e.noAnim ? 0 : r.animateAttack(e);
     const hit = e.noAnim ? 0 : r.lastImpact;
-    r.pauseAfterHit(Math.max(0, ms - hit) + 80 + (minePart && !e.noAnim ? 2000 / Math.max(1, r.speed) : 0));
+    // pausa curta para ver o resultado antes do próximo lance (só visual: a jogada já foi calculada)
+    r.pauseAfterHit(Math.max(0, ms - hit) + 80 + (minePart && !e.noAnim ? 700 / Math.max(1, r.speed) : 0));
     setTimeout(() => r.release(), hit + 20);
   }
 

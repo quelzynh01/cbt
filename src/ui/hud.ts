@@ -1433,7 +1433,7 @@ export class Hud {
       f.innerHTML = e.targets.length > 1
         ? e.targets.map(t => `${g.name(g.unit(t.id))}: ${t.wounds ? `−${t.wounds}` : 'bloqueou'}`).join(' · ')
         : totalW ? `−${totalW} Ferimento${totalW > 1 ? 's' : ''}!` : 'Bloqueado!';
-      await wait(1500);
+      await wait(800);
       if (!alive()) return;
       // online: o resultado fica na tela até todos os envolvidos terminarem (quem usa a tela de combate aperta "Continuar")
       const players = diceSync.players(e, id => g.unit(id).kind === 'hero' ? g.unit(id).guild : null);
@@ -1442,7 +1442,7 @@ export class Hud {
       });
       if (!alive()) return;
       box.classList.add('fade');
-      await wait(400);
+      await wait(250);
       box.classList.add('hidden'); box.classList.remove('fade');
       done?.();
     })();
