@@ -1440,7 +1440,7 @@ export class Renderer {
           d: K(cell.c + cell.r, 1, 0),
           draw: () => {
             const p = g2s(cell.c + 0.5, cell.r + 0.5);
-            const S = 78;
+            const S = 117;
             ctx.save(); ctx.translate(p.x, p.y);
             ctx.fillStyle = 'rgba(0,0,0,.28)';
             ctx.beginPath(); ctx.ellipse(0, 4, S * 0.42, S * 0.18, 0, 0, Math.PI * 2); ctx.fill();
