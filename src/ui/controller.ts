@@ -522,7 +522,7 @@ export class Controller {
       html = `<div class="panel-h">✷ ${req.source}${req.text ? '' : ' — escolha quem mais é atingido'}</div>
         <div class="mc-body">
           <p>${req.text ?? `${req.source === 'Fender' ? `<b>${g.name(h)}</b> pode atingir também um Inimigo Perto dele.` : `Você rolou ✷: <b>${req.source}</b> pode atingir também um Inimigo Perto do alvo.`} Escolha qual:`}</p>
-          <div class="mc-btns">${opts}<button id="ch-none">Ninguém</button></div>
+          <div class="mc-btns">${opts}${req.source === 'Reação de Vingança' ? '' : '<button id="ch-none">Ninguém</button>'}</div>
           ${this.battle.isOpen ? '' : '<p class="mc-legend">ou clique no Inimigo marcado no mapa</p>'}
         </div>`;
       this.hud.setHint(`${req.source}: escolha quem mais é atingido`);
@@ -530,7 +530,8 @@ export class Controller {
     const el = this.hud.monsterPanel(html);
     el.classList.toggle('over', this.battle.isOpen);
     el.querySelectorAll<HTMLElement>('[data-i]').forEach(b => { b.onclick = () => resolve(Number(b.dataset.i)); });
-    (el.querySelector('#ch-none') as HTMLElement).onclick = () => resolve(-1);
+    const none = el.querySelector('#ch-none') as HTMLElement | null;
+    if (none) none.onclick = () => resolve(-1);
   }
 
   /** Escolha de vários alvos (Lorde Presas): os marcados até confirmar. */
@@ -621,9 +622,9 @@ export class Controller {
       : d.pick >= n ? `🎁 <b>${cname(nc)}</b> vai para <b>${HEROES[allies[d.pick - n]].name}</b>.`
       : `📦 <b>${cname(nc)}</b> fica sem Herói até o próximo Descanso.`;
     const el = this.hud.panel('restbox', `
-      <div class="panel-h">🃏 Recompensa: ${cname(nc)}</div>
+      <div class="panel-h">🃏 ${req.source}: ${cname(nc)}</div>
       <div class="rb-body rw-body">
-        <p><b>${HEROES[hd].name}</b> está com o inventário cheio. <b>Arraste a carta nova</b> para cima de uma carta dele (troca: a outra fica sem Herói até o Descanso)${allies.length ? `, para um espaço vazio de ${allies.map(a => `<b>${HEROES[a].name}</b>`).join(' ou ')}` : ''} ou deixe-a sem Herói.</p>
+        <p><b>${HEROES[hd].name}</b> está com o inventário cheio. <b>Arraste a carta nova</b> para cima de uma carta dele (troca: a outra fica sem Herói) ou deixe-a sem Herói. A carta é de quem pegou: outro Herói só pode usá-la depois do <b>Descanso</b>.</p>
         ${invEditorHtml(d.items, opts)}
         <div class="rw-now ${d.msg ? 'bad' : ''}">${d.msg ? `⚠ ${d.msg}` : now}</div>
         <div class="rb-btns">${d.pick !== -1 ? '<button id="rw-keep">📦 Guardar sem Herói</button>' : ''}<button class="primary" id="rw-ok">✔ Confirmar</button></div>

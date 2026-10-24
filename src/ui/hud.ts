@@ -756,7 +756,7 @@ export class Hud {
     if (e.t === 'reward') {
       const u = g.s.units[e.heroId];
       const color = u?.guild ? g.guild(u.guild).color : '#e0b43a';
-      html = `<div class="aw-box"><div class="aw-kind">🏆 Carta de Recompensa</div>
+      html = `<div class="aw-box"><div class="aw-kind">🏆 ${e.source ?? 'Carta de Recompensa'}</div>
         <div class="aw-card">${itemCard(e.cardId)}</div>
         <div class="aw-who" style="color:${color}">${e.spare ? `${CARDS[e.cardId]?.name ?? ''} ficou com as cartas sem Herói — equipe no próximo Descanso` : `${u ? g.name(u) : ''} recebeu ${CARDS[e.cardId]?.name ?? ''}!`}</div></div>`;
     } else {
@@ -1281,7 +1281,7 @@ export class Hud {
         ${titleHtml}
         <div class="cd-row atk"></div><div class="cd-btn atk"></div>
         <div class="cd-sum atk"></div>
-        ${e.targets.map(t => cdDefHtml(g.name(g.unit(t.id)), t.id)).join('')}
+        ${e.targets.map(t => { const u = g.unit(t.id); const p = g.defenseParts(u, atk); return cdDefHtml(`${g.name(u)}${p.length ? ` <small class="cd-defsrc">🛡 ${g.defenseDice(u, atk)}: ${p.join(' ')}</small>` : ''}`, t.id); }).join('')}
         <div class="cd-final"></div></div>`;
     } else {
       const cb = box.querySelector('.cd-box')!;

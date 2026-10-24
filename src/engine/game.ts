@@ -503,6 +503,24 @@ export class Game {
     return d;
   }
 
+  /** De onde vêm os dados de Defesa do Herói (para mostrar na tela de combate): "4 da carta", "+1 Adaga Aparadora"… */
+  defenseParts(u: Unit, attacker?: Unit | null, type?: AttackType): string[] {
+    if (u.kind !== 'hero' || u.stunned) return [];
+    const out = [`${HEROES[u.defId].defense} da carta`];
+    for (const c of u.cards) { const b = this.cardDef(c).defBonus ?? 0; if (b) out.push(`${b > 0 ? '+' : ''}${b} ${this.cardDef(c).name}`); }
+    const ab = this.ab(u);
+    if (ab === 'furia' && u.wounds > 0) out.push('+1 Fúria de Combate');
+    if (ab === 'aura_mistica' && this.magicCards(u)) out.push(`+${this.magicCards(u)} Aura Mística`);
+    if (ab === 'lobo_solitario' && this.alone(u)) out.push('+1 Lobo Solitário');
+    if (ab === 'resistencia_panda' && type === 'ranged') out.push('+2 Resistência do Panda');
+    if (this.hasPerm(u, 'lastStand') && u.wounds) out.push(`+${u.wounds} Último Recurso`);
+    if (this.s.shroud?.includes(u.id)) out.push('+2 Mortalha');
+    if (this.hasPerm(u, 'moonShield')) out.push('×2 Escudo da Lua');
+    if (attacker && this.presenceVs(u, attacker)) out.push('−2 Presença');
+    if (u.covered && (this.cardDef(u.covered).defBonus ?? 0)) out.push(`(${this.cardDef(u.covered).name} está debaixo da Maldição: não conta)`);
+    return out;
+  }
+
   /** Alvo Encurralado (Zazu): pelo menos 1 outro Inimigo do alvo Perto dele. */
   isCornered(target: Unit, attacker: Unit): boolean {
     if (!target.cell) return false;
@@ -1271,6 +1289,8 @@ export class Game {
 
     const dying: Unit[] = [];
     let vengeful: Unit | null = null;
+    /** Monstros atacados que podem fazer a Vingança (só um faz; quem controla escolhe, p.20). */
+    const vengeCands: Unit[] = [];
     let dealt = 0;
     const dazeList: Unit[] = [];
     for (const r of results) {
@@ -1294,7 +1314,7 @@ export class Game {
         } else {
           if (t.wounds >= md.hp) dying.push(t);
           else if (fx.daze && r.wounds > 0) dazeList.push(t);
-          if (!vengeful && !this.isObject(t)) vengeful = t;
+          if (!this.isObject(t)) { vengeCands.push(t); if (!vengeful) vengeful = t; }
         }
       }
     }
@@ -1397,6 +1417,13 @@ export class Game {
         this.emit({ t: 'reaction', monsterId: m.id, kind: 'alerta' });
         this.monsterAttack(m, h, 'alerta');
       }
+    }
+    // Vários Monstros atacados (Raio Nova, Fender…): só um faz a Vingança — o jogador que controla os Monstros escolhe qual (p.20)
+    const cands = vengeCands.filter(m => m.alive && m.cell);
+    if (cands.length > 1 && h.alive && !fx.astral && this.choiceHook) {
+      const i = this.choiceHook({ choice: 'extra', guild: this.monsterControllerGuild(), heroId: h.id, source: 'Reação de Vingança', units: cands.map(m => m.id),
+        text: `<b>${this.name(h)}</b> atacou ${cands.length} Monstros: só um faz a Reação de Vingança. Escolha qual Monstro você vai controlar.` });
+      if (i !== 'auto' && cands[i]) vengeful = cands[i];
     }
     // Reação de Vingança (mesmo se o ataque falhar; também para Monstros que vão morrer). Golpe Astral não aciona.
     if (vengeful && vengeful.alive && h.alive && !fx.astral) {
@@ -2616,7 +2643,8 @@ export class Game {
       const kg = killer.guild!;
       this.gainCoins(kg, 1, 'matou um Herói Inimigo');
       if (kg !== h.guild) { (this.s.heroKills ??= {})[killer.id] = (this.s.heroKills[killer.id] ?? 0) + 1; this.devour(killer); this.masterOfDeath(killer); }
-      const stealable = dropped.filter(t => { const m = t.type === 'missao' ? this.tokenMission(t) : null; return !(m?.ownOnly && t.color !== kg); });
+      // marcadores de Missão não vão para quem matou: caem no Espaço onde o Herói morreu (só os de Exploração são saqueados)
+      const stealable = dropped.filter(t => t.type !== 'missao');
       if (stealable.length && killer.alive) {
         stealable.sort((p, q) => (q.value ?? 1) - (p.value ?? 1));
         // mais de um: quem matou escolhe qual marcador vem (os outros caem no Espaço)
@@ -2854,11 +2882,9 @@ export class Game {
     const defId = hd.cards.find(id => CARDS[id]);
     if (!defId) return;
     this.s.hideoutTaken = true;
-    const holder = this.hasRoom(h, defId) ? h : this.heroesOf(h.guild!).find(x => this.hasRoom(x, defId)) ?? h;
-    if (!this.hasRoom(holder, defId)) holder.cards.shift();
-    holder.cards.push({ uid: `hd-${holder.id}`, defId, exhausted: false, uses: 0 });
-    this.emit({ t: 'card', heroId: holder.id, cardName: CARDS[defId].name });
     this.log(`${this.name(h)} saqueou o Esconderijo do Troll: ${CARDS[defId].name}!`);
+    // igual à Recompensa: aparece para todos; com o inventário cheio, o jogador escolhe onde a carta fica
+    this.giveCard(h, defId, `hd-${h.id}`, 'Esconderijo do Troll');
   }
 
   /** O Herói desta Guilda quer este marcador de Missão? */
@@ -3039,7 +3065,13 @@ export class Game {
   private giveReward(h: Unit) {
     const defId = this.s.rewardDeck.shift();
     if (!defId) return;
-    const card: CardInst = { uid: `r${this.s.rewardDeck.length}-${h.id}-${this.s.turn}`, defId, exhausted: false, uses: 0 };
+    this.giveCard(h, defId, `r${this.s.rewardDeck.length}-${h.id}-${this.s.turn}`, 'Recompensa');
+  }
+
+  /** O Herói ganha uma carta (Recompensa da Missão, Esconderijo do Troll…): todos veem; com o inventário cheio,
+   *  o dono escolhe — trocar por uma carta dele, dar a um Aliado com espaço ou guardar sem Herói (até o Descanso). */
+  private giveCard(h: Unit, defId: string, uid: string, source: string) {
+    const card: CardInst = { uid, defId, exhausted: false, uses: 0 };
     const spare = (inst: CardInst) => {
       const g = h.guild!;
       ((this.s.spare ??= {})[g] ??= []).push(inst);
@@ -3048,23 +3080,19 @@ export class Game {
     if (this.hasRoom(h, defId)) {
       h.cards.push(card);
     } else {
-      // inventário cheio: trocar uma carta do Herói, dar a um Aliado com espaço ou guardar sem Herói (até o Descanso)
-      const allies = this.heroesOf(h.guild!).filter(x => x.id !== h.id && this.hasRoom(x, defId));
+      // inventário cheio: a carta é de quem pegou — troca por uma carta dele (a outra fica sem Herói) ou a nova fica sem Herói;
+      // passar para outro Herói só no Descanso
       const i = this.choiceHook
-        ? this.choiceHook({ choice: 'reward', guild: h.guild!, heroId: h.id, source: 'Recompensa', newCard: defId, cards: h.cards.map(c => c.defId), units: allies.map(x => x.id),
-          text: `${this.name(h)} está com o inventário cheio. Troque uma carta pela ${CARDS[defId].name} (a outra fica sem Herói até o Descanso), dê a um Aliado ou guarde a nova.` })
+        ? this.choiceHook({ choice: 'reward', guild: h.guild!, heroId: h.id, source, newCard: defId, cards: h.cards.map(c => c.defId), units: [],
+          text: `${this.name(h)} está com o inventário cheio. Troque uma carta dele pela ${CARDS[defId].name} (a outra fica sem Herói) ou guarde a nova sem Herói — outro Herói só pode usá-la depois do Descanso.` })
         : 'auto';
-      if (i === 'auto') {
-        if (allies.length) allies[0].cards.push(card); else spare(card);
-      } else if (i >= 0 && i < h.cards.length) {
+      if (i !== 'auto' && i >= 0 && i < h.cards.length) {
         const [old] = h.cards.splice(i, 1, card);
         spare(old);
-      } else if (i >= h.cards.length && allies[i - h.cards.length]) {
-        allies[i - h.cards.length].cards.push(card);
       } else spare(card);
     }
     const holder = this.heroesOf(h.guild!).find(x => x.cards.includes(card));
-    this.emit({ t: 'reward', heroId: (holder ?? h).id, cardId: defId, ...(holder ? {} : { spare: true }) });
+    this.emit({ t: 'reward', heroId: (holder ?? h).id, cardId: defId, ...(holder ? {} : { spare: true }), ...(source !== 'Recompensa' ? { source } : {}) });
     if (holder) this.log(`${this.name(holder)} recebeu a carta ${CARDS[defId].name}!`);
   }
 

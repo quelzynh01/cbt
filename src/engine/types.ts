@@ -315,7 +315,7 @@ export type GameEvent =
   /** Carta de Recompensa recebida (mostrada para todos). */
   /** Confronto Final: o Herói que morreu comprou uma Maldição; `kept` é a que ficou com ele. */
   | { t: 'curseDraw'; heroId: string; card: string; old?: string; kept: string }
-  | { t: 'reward'; heroId: string; cardId: string; /** ficou com as cartas sem Herói (inventário cheio) */ spare?: boolean }
+  | { t: 'reward'; heroId: string; cardId: string; /** ficou com as cartas sem Herói (inventário cheio) */ spare?: boolean; /** de onde veio (padrão: Carta de Recompensa) */ source?: string }
   /** Habilidade Natural ativada (Furtividade do Vapor, Vingança do Espetado…). */
   | { t: 'skill'; id: string; skill: string; name: string }
   /** Aviso na tela de todos (ex.: a Lápide não tem Monstro para ativar). */

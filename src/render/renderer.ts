@@ -395,6 +395,7 @@ export class Renderer {
     for (const d of g.s.doors) this.doors.set(d.id, d.open);
     this.floor = {};
     for (const [k, toks] of Object.entries(g.s.floor)) this.floor[k] = toks.map(t => ({ ...t }));
+    this.hideoutGone = !!g.s.hideoutTaken;
     this.layoutUnits(true);
   }
 
@@ -639,6 +640,10 @@ export class Renderer {
         if (e.on) { this.floatAt(e.id, 'ATORDOADO!', '#ffe14d', 26, -18); play('stun', 0.8); }
         break;
       }
+      case 'reward': {
+        if (e.source === 'Esconderijo do Troll') this.hideoutGone = true;
+        break;
+      }
       case 'pickup': {
         // o marcador só entra na bolsa (e na cabeça do Herói) quando a animação de virar acabar (finishEvent)
         const u = this.units.get(e.heroId);
@@ -770,6 +775,10 @@ export class Renderer {
   private idleSent = true;
 
   /** Ressincroniza com o estado real ao fim da fila (sem quebrar animações em curso). */
+  /** O item do Esconderijo (ex.: Machado de Schmetterling) já saiu do chão na tela. */
+  private hideoutGone = false;
+  private hideoutImg: HTMLImageElement | null = null;
+
   private sync2() {
     const g = this.game;
     for (const u of g.units()) {
@@ -786,6 +795,7 @@ export class Renderer {
     for (const d of g.s.doors) this.doors.set(d.id, d.open);
     this.floor = {};
     for (const [k, toks] of Object.entries(g.s.floor)) this.floor[k] = toks.map(t => ({ ...t }));
+    this.hideoutGone = !!g.s.hideoutTaken;
   }
 
   // ---------------------------------------------------------------------
@@ -1415,6 +1425,39 @@ export class Renderer {
         const p = g2s(box.mx, box.my, 90);
         this.doorIconPos.set(d.id, p);
         list.push({ d: 1e9, draw: () => drawDoorIcon(ctx, p, open, tt) });
+      }
+    }
+
+    // item do Esconderijo (ex.: Machado de Schmetterling): a carta fica no chão até alguém entrar e pegar
+    const hd = this.game.map.hideout;
+    const hid = hd?.cards.find(id => CARDS[id]);
+    if (hd && hid && !this.hideoutGone) {
+      const art = CARD_ART[hid];
+      if (art && !this.hideoutImg) { this.hideoutImg = new Image(); this.hideoutImg.src = `${import.meta.env.BASE_URL}cards/${art.img}.webp`; }
+      for (const cell of hd.cells.slice(0, 1)) {
+        const s0 = this.missionSlot(cell.c, cell.r);
+        list.push({
+          d: K(cell.c + cell.r, 1.5, (s0.gx + s0.gy - cell.c - cell.r) / 2),
+          draw: () => {
+            const p = g2s(s0.gx, s0.gy);
+            const w = 46, h = 64, bob = Math.sin(tt * 2.2) * 3;
+            void bob;
+            ctx.save(); ctx.translate(p.x, p.y - 26 + bob);
+            const glow = ctx.createRadialGradient(0, 0, 4, 0, 0, 60);
+            glow.addColorStop(0, 'rgba(255,214,90,.55)'); glow.addColorStop(1, 'rgba(255,214,90,0)');
+            ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(0, 0, 60, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#c79a22'; ctx.strokeStyle = '#1b0f08'; ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.roundRect(-w / 2, -h / 2, w, h, 6); ctx.fill(); ctx.stroke();
+            ctx.fillStyle = '#2a1d13'; ctx.fillRect(-w / 2 + 4, -h / 2 + 4, w - 8, h - 8);
+            const img = this.hideoutImg;
+            if (img?.complete && img.naturalWidth) ctx.drawImage(img, -w / 2 + 4, -h / 2 + 4, w - 8, h - 8);
+            else { ctx.font = '26px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('🪓', 0, 9); }
+            ctx.restore();
+            const label = CARDS[hid].name;
+            ctx.font = '900 13px "Baloo 2", sans-serif'; ctx.textAlign = 'center'; ctx.lineWidth = 4; ctx.strokeStyle = '#1b0f08';
+            ctx.strokeText(label, p.x, p.y - 66 + bob); ctx.fillStyle = '#ffe9a8'; ctx.fillText(label, p.x, p.y - 66 + bob);
+          },
+        });
       }
     }
 

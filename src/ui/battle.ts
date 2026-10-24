@@ -422,7 +422,7 @@ export class BattlePanel {
       <div class="bt-arena">${this.fighterHtml(atk, 'left', atkWounds)}<div class="bt-vs">VS</div>${main ? this.fighterHtml(main, 'right', mainWounds) : ''}</div>
       <div class="bt-notes center"></div>
       <div class="bt-tray-wrap"><div class="bt-lbl">Ataque</div><div class="bt-tray atk"></div><div class="bt-count atk"></div></div>
-      ${targets.map(t => `<div class="bt-tray-wrap def" data-tid="${t.id}"><div class="bt-lbl">Defesa · ${g.name(t)}</div><div class="bt-tray def"></div><div class="bt-count def"></div></div>`).join('')}
+      ${targets.map(t => `<div class="bt-tray-wrap def" data-tid="${t.id}"><div class="bt-lbl">Defesa · ${g.name(t)}${defNote(g, t, atk)}</div><div class="bt-tray def"></div><div class="bt-count def"></div></div>`).join('')}
       <div class="bt-result"></div>
       <div class="bt-btns"></div>
     </div>`;
@@ -801,6 +801,12 @@ export class BattlePanel {
 }
 
 /** Anima a Rerrolagem: os dados rerrolados ficam com borda verde, giram e param no novo valor; ✷ extras entram no fim. */
+/** Embaixo do nome na Defesa: quantos dados e de onde vêm (ex.: 5 = 4 da carta + 1 Adaga Aparadora). */
+function defNote(g: ReturnType<BattleDeps['game']>, t: Unit, atk: Unit): string {
+  const parts = g.defenseParts(t, atk);
+  return parts.length ? ` <small class="bt-defsrc" title="${parts.join(' · ')}">🛡 ${g.defenseDice(t, atk)}: ${parts.join(' ')}</small>` : '';
+}
+
 /** Rolagem acompanhada: quais dados mudaram (rerrolados) entre o que apareceu e o resultado final (+ a escolha, se vier). */
 function spectIdx(before: DieFace[], final: DieFace[], chosen?: number[]): number[] {
   const out = new Set(chosen?.filter(i => i < before.length) ?? []);

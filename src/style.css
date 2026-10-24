@@ -1485,3 +1485,6 @@ html.touch :is(.cd-roll, .bt-act, #rr-roll, #rr-go, #cd-rr, #bt-rr)::after { con
 .rb-dead.ok { color: #c9f5cf; }
 .rb-dead button { margin-left: 6px; }
 .rb-remind { padding: 8px 12px; border-radius: 10px; background: rgba(224,160,58,.15); border: 2px solid #e0a03a; color: #ffe2b0; font-size: 13px; animation: actPulse 1.6s ease-in-out infinite; }
+/* de onde vêm os dados de Defesa (carta + itens + habilidades) */
+.bt-defsrc, .cd-defsrc { display: block; font-size: 11px; font-weight: 600; color: #cdbfa8; line-height: 1.2; margin-top: 1px; }
+.bt-lbl .bt-defsrc { white-space: normal; overflow: visible; text-overflow: clip; max-width: 170px; }

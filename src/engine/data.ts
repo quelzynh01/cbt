@@ -34,7 +34,7 @@ export const HEROES: Record<string, HeroDef> = {
   diva: {
     id: 'diva', name: 'Diva', nameEn: 'Diva', title: 'Cavaleira',
     defense: 4, hp: 4, ability: 'duro_na_queda', abilityName: 'Duro na Queda',
-    abilityText: '"Força imparável, conheça o objeto imóvel." (sem efeito especial — sua força é a Defesa 4)',
+    abilityText: '"Força imparável, conheça o objeto imóvel."',
   },
   casacaverde: {
     id: 'casacaverde', name: 'Casacaverde', nameEn: 'Greensleeves', title: 'Arqueiro Élfico',
