@@ -1374,8 +1374,12 @@ export class Hud {
         : totalW ? `−${totalW} Ferimento${totalW > 1 ? 's' : ''}!` : 'Bloqueado!';
       await wait(1500);
       if (!alive()) return;
-      // online: quem assiste na tela de combate espera o "fim" de quem atacou (aqui não há botão Continuar)
-      if (mineAtk) diceSync.mine('done');
+      // online: o resultado fica na tela até todos os envolvidos terminarem (quem usa a tela de combate aperta "Continuar")
+      const players = diceSync.players(e, id => g.unit(id).kind === 'hero' ? g.unit(id).guild : null);
+      await diceSync.finish(players, p => this.isMine(p), who => {
+        f.insertAdjacentHTML('beforeend', `<div class="cd-wait">⏳ Aguardando ${who} continuar…</div>`);
+      });
+      if (!alive()) return;
       box.classList.add('fade');
       await wait(400);
       box.classList.add('hidden'); box.classList.remove('fade');

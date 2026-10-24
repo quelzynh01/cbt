@@ -37,6 +37,21 @@ export const diceSync = {
       waiters.set(id, [...(waiters.get(id) ?? []), done]);
     });
   },
+  /** Quem joga neste ataque: a Guilda que rola o ataque (dono do Herói ou quem controla o Monstro) e as dos Heróis atacados. */
+  players(e: Attack, guildOf: (id: string) => GuildId | null | undefined): GuildId[] {
+    const out = [e.ctl ?? guildOf(e.attackerId), ...e.targets.map(t => guildOf(t.id))].filter((g): g is GuildId => !!g);
+    return [...new Set(out)];
+  },
+  /** Fim da tela do ataque: cada jogador avisa quando terminou ("Continuar" na tela de combate, ou o fim da animação no "Nunca").
+   *  Todas as telas esperam todos os envolvidos (online) antes de seguir para o golpe e a Reação — assim ninguém vê antes. */
+  async finish(players: GuildId[], mine: (g: GuildId) => boolean, show?: (who: string) => void, ms = 60000) {
+    for (const g of players) if (mine(g)) this.mine(`done:${g}`);
+    for (const g of players) {
+      if (!this.remote(g) || got.has(`${rollKey}#done:${g}`)) continue;
+      show?.(this.net?.name(g) ?? '');
+      await this.wait(`done:${g}`, ms);
+    }
+  },
   /** Chegou o aviso de um passo (de outro computador). */
   receive(id: string) {
     if (got.has(id)) return;

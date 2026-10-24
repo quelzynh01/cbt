@@ -397,10 +397,15 @@ export class BattlePanel {
       }
     }
     result.innerHTML = lines.join('');
-    // online: quem assiste segue junto com o "Continuar" de quem atacou
-    if (humanInvolved) { await button('Continuar ▶'); if (humanAtk) diceSync.mine('done'); }
-    else if (atkRemote) { await wait(600); await waitRemote(atkOwner!, 'done', 'continuar', 15000); }
-    else await wait(1300);
+    // online: todas as telas seguem juntas — cada envolvido avisa quando terminou (Continuar aqui, ou o fim dos dados no "Nunca")
+    const players = diceSync.players(e, id => g.unit(id).kind === 'hero' ? g.unit(id).guild : null);
+    if (humanInvolved) await button('Continuar ▶');
+    else if (!players.some(p => diceSync.remote(p))) await wait(1300);
+    else await wait(600);
+    await diceSync.finish(players, p => this.deps.isMineGuild(p), who => {
+      (this.el.querySelector('.bt-btns') as HTMLElement).innerHTML = `<span class="bt-wait">⏳ Aguardando ${who} continuar…</span>`;
+    });
+    (this.el.querySelector('.bt-btns') as HTMLElement).innerHTML = '';
     this.linger(sp);
     done();
   }

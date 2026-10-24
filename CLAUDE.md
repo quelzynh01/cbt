@@ -84,6 +84,7 @@ node tools/tests/browser/savecamp.mjs <pasta-prints>                # campanha l
 node tools/tests/browser/dicesync.mjs <pasta-prints>                # online: dados sincronizados (o outro só vê depois do clique de quem rola)
 node tools/tests/browser/peek.mjs <pasta-prints>                    # online: quem assiste vê a tela de escolha do ataque do outro
 node tools/tests/browser/rrspec.mjs <pasta-prints>                  # online: o anfitrião acompanha a Rerrolagem do amigo
+node tools/tests/browser/mixed.mjs <pasta-prints>                   # online: 'Sempre' x 'Nunca' — o fim do ataque espera o Continuar de todos (HOST/CLI/TARGET)
 ```
 
 O jogo expõe `window.cbt` (o controller) para os testes manipularem o estado. Modo Teste via `localStorage['cbt.test']`.
