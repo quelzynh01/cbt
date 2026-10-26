@@ -392,10 +392,6 @@ export class MenuPages {
     this.open('Configurações', `<div class="set-box">
       <div class="set-tabs">${SET_TABS.map(([id, label]) => `<button data-stab="${id}" class="${tab === id ? 'primary' : ''}">${label}</button>`).join('')}</div>
       ${pane('jogo')}
-      <h3>Tela de confronto</h3>
-      ${opt('battle', 'always', '<b>Sempre</b> — mostra a tela 2D de batalha em todos os ataques', st.battle)}
-      ${opt('battle', 'mine', '<b>Só os meus</b> — mostra só quando um Herói seu ataca ou é atacado', st.battle)}
-      ${opt('battle', 'never', '<b>Nunca</b> — combate rápido, só o resumo dos dados no topo (como na velocidade 4x)', st.battle)}
       <h3>Rerrolagem</h3>
       ${opt('reroll', 'choose', '<b>Escolher os dados</b> — quando um Herói seu tem Rerrolagem (↻), você escolhe quais dados rolar de novo', st.reroll)}
       ${opt('reroll', 'auto', '<b>Automática</b> — rerrola sozinho os dados que falharam', st.reroll)}
@@ -432,7 +428,7 @@ export class MenuPages {
       <p class="muted">As configurações ficam salvas neste navegador e valem na hora, inclusive durante uma partida.</p>
     </div>`);
     const upd = () => {
-      const battle = (this.page.querySelector('input[name=battle]:checked') as HTMLInputElement).value as 'always';
+      const battle = 'never' as const;
       const speed = Number((this.page.querySelector('input[name=speed]:checked') as HTMLInputElement).value);
       const clock = (this.page.querySelector('#set-clock') as HTMLInputElement).checked;
       const reroll = (this.page.querySelector('input[name=reroll]:checked') as HTMLInputElement).value as 'choose';

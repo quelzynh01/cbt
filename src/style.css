@@ -1502,3 +1502,80 @@ html.touch :is(.cd-roll, .bt-act, #rr-roll, #rr-go, #cd-rr, #bt-rr)::after { con
 .sm-box.in .sm-face { animation: smIn .8s ease-out; border-color: #e0e0e0; }
 @keyframes smIn { from { transform: scale(.4); opacity: 0; filter: blur(4px); } }
 .sm-box.out .sm-face { opacity: .45; }
+
+/* =====================================================================
+   Painel dos dados (o único combate): quem ataca à esquerda, quem defende à direita.
+   É o mesmo para todos na partida — cada passo espera o clique de quem rola.
+   ===================================================================== */
+.cd-box { width: min(780px, calc(100% - 24px)); justify-items: stretch; gap: 10px; padding: 12px 16px 14px;
+  background: linear-gradient(rgba(36,24,14,.95), rgba(20,12,6,.95)); box-shadow: 0 18px 50px rgba(0,0,0,.6); }
+.cd-head { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; }
+.cd-reason { padding: 3px 12px; border-radius: 999px; background: #2f5f9e; color: #fff; font-weight: 900; font-size: 13px; letter-spacing: .4px; text-transform: uppercase; }
+.cd-reason.react { background: #b8432f; }
+.cd-card { font-size: 17px; color: var(--gold); }
+.cd-head .cd-atkinfo { margin: 0; font-size: 13px; }
+.cd-head .cd-atkinfo .bimg, .cd-head .cd-atkinfo .med { width: 34px; height: 34px; }
+.cd-arena { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 10px; align-items: stretch; }
+.cd-box:not(.has-def) .cd-arena { grid-template-columns: minmax(0, 1fr); }
+.cd-box:not(.has-def) .cd-vs, .cd-defs:empty { display: none; }
+.cd-vs { align-self: center; font-size: 26px; font-weight: 900; color: var(--gold); text-shadow: 0 2px 0 #000, 0 0 12px rgba(255,210,80,.5); }
+.cd-defs { display: grid; gap: 8px; align-content: start; }
+.cd-side, .cd-box .cd-def { display: grid; justify-items: center; align-content: start; gap: 6px; padding: 10px; border-radius: 14px;
+  background: rgba(0,0,0,.28); border: 2px solid rgba(255,255,255,.08); }
+.cd-box .cd-def { opacity: .6; transition: opacity .25s, border-color .25s; }
+.cd-box .cd-def.show { opacity: 1; border-color: rgba(143,195,255,.35); }
+.cd-side { border-color: rgba(255,140,110,.3); }
+.cd-fighter { display: flex; align-items: center; gap: 8px; width: 100%; }
+.cd-fighter img { width: 50px; height: 50px; border-radius: 50%; border: 3px solid var(--fc, #888); background: #2a1a10; flex: none; }
+.cd-fname { display: grid; gap: 3px; min-width: 0; flex: 1; }
+.cd-fname b { color: #fff; font-size: 15px; line-height: 1.1; }
+.cd-hp { position: relative; height: 13px; border-radius: 7px; background: #3a1712; border: 1px solid rgba(0,0,0,.6); overflow: hidden; }
+.cd-hp i { position: absolute; inset: 0 auto 0 0; background: linear-gradient(#7be07a, #3aa34a); border-radius: 7px; }
+.cd-hp span { position: relative; display: block; text-align: center; font-size: 10px; font-weight: 900; line-height: 12px; color: #fff; text-shadow: 0 1px 1px #000; }
+.cd-box .cd-row { min-height: 50px; }
+.cd-box .cd-die { width: 46px; height: 46px; }
+.cd-box .cd-final { justify-self: center; text-align: center; }
+/* celular em pé: um embaixo do outro */
+@media (max-width: 640px) {
+  .cd-arena { grid-template-columns: minmax(0, 1fr); }
+  .cd-vs { justify-self: center; font-size: 18px; }
+  .cd-box .cd-die { width: 38px; height: 38px; }
+  .cd-box .cd-row { min-height: 40px; }
+}
+/* celular deitado (tela baixa): desfaz o posicionamento antigo em grade e deixa compacto */
+@media (max-height: 560px) {
+  .cd-box { grid-template-columns: none; padding: 6px 10px 8px; gap: 4px; max-height: calc(100% - 12px); overflow: auto; }
+  .cd-box > * { margin-top: 0; }
+  .cd-box .cd-row, .cd-box .cd-btn, .cd-box .cd-sum, .cd-box .cd-def, .cd-box .cd-final, .cd-head .cd-atkinfo { grid-column: auto; grid-row: auto; }
+  .cd-fighter img { width: 34px; height: 34px; }
+  .cd-box .cd-die { width: 32px; height: 32px; }
+  .cd-box .cd-row { min-height: 34px; }
+  .cd-side, .cd-box .cd-def { padding: 6px; gap: 3px; }
+}
+.cd-nrow { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.cd-nrow b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cd-nrow .cd-lupa { flex: none; width: auto; min-width: 0; padding: 0 6px; font-size: 11px; line-height: 18px; height: 20px; }
+/* Registro: rolagens com os dados */
+.lg-entry { display: grid; gap: 2px; padding: 4px 6px; margin: 3px 0; border-radius: 8px; background: rgba(255,255,255,.05); border-left: 3px solid var(--gold); }
+.lg-roll { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.lg-roll small { color: var(--muted); }
+.lg-dice { display: inline-flex; gap: 2px; }
+.lg-die { width: 18px; height: 18px; display: inline-block; }
+.lg-die .dface, .lg-die svg, .lg-die img { width: 18px; height: 18px; display: block; }
+.lg-roll .bad { color: #ff8a6a; }
+.lg-roll .good { color: #8fe89a; }
+/* painel dos dados: status do lutador (Vida, Defesa, Rerrolagem) no lugar da barra */
+.cd-stats { display: flex; gap: 4px; align-items: center; }
+.cd-stats .med, .cd-stats .bimg { width: 34px; height: 34px; }
+@media (max-height: 560px) { .cd-stats .med, .cd-stats .bimg { width: 26px; height: 26px; } }
+
+/* Atalhos de itens de outros Heróis (ex.: Botas) */
+#itemquick { position: fixed; top: 110px; left: 50%; transform: translateX(-50%); z-index: 40; display: flex; gap: 8px; pointer-events: auto; }
+#itemquick button { position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px 6px 3px; border-radius: 10px;
+  background: rgba(20, 14, 30, .88); border: 2px solid #ffd66e; color: #f2e6d0; cursor: pointer; box-shadow: 0 0 10px rgba(255, 214, 110, .45); animation: iqPulse 1.6s ease-in-out infinite; }
+#itemquick button:hover { background: rgba(60, 44, 20, .95); }
+#itemquick img { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; }
+#itemquick span { position: absolute; top: 26px; right: 2px; font-size: 20px; filter: drop-shadow(0 1px 2px #000); }
+#itemquick small { font-size: 10px; max-width: 74px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@keyframes iqPulse { 50% { box-shadow: 0 0 18px rgba(255, 214, 110, .85); } }
+@media (max-width: 700px) { #itemquick { top: 162px; } #itemquick img { width: 32px; height: 32px; } #itemquick span { top: 18px; font-size: 16px; } }

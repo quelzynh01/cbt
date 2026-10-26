@@ -3,7 +3,7 @@ import type { GuildId } from '../engine/types';
 import { play } from '../audio/sfx';
 import {
   useCampaignNames,
-  CIRCLES, CIRCLE_NEED, STARTER_CARDS, type CampaignState, titleHolders, aiChoice, banHeroes, draftHero, finishEquip, voteMap, availableScenarios, draftPick, finishArrange, finishBuy, guildName,
+  CIRCLES, CIRCLE_NEED, STARTER_CARDS, type CampaignState, type PickMode, allPickHeroes, titleHolders, aiChoice, banHeroes, draftHero, finishEquip, voteMap, availableScenarios, draftPick, finishArrange, finishBuy, guildName,
   guildOf, heroSlots, human, picksPerRound, draftRounds, loadCampaign, medals, newCampaign, nextScenario, progress, saveCampaign, scenarioLevel, scenarioNumber,
   validateInventory, victoryRank,
 } from '../campaign/campaign';
@@ -105,12 +105,12 @@ export class CampaignUI {
     const cfg = this.cfg;
     const sum = () => {
       (this.page.querySelector('#cp-cfgsum') as HTMLElement).textContent = [cfg.edition === 'btg' ? '💀 CBT Beyond the Grave' : '⚔️ CBT Clássico', heroSetName(cfg.heroSet),
-        `IA ${cfg.ai === 'hard' ? 'Difícil' : 'Normal'}`, `${cfg.opp} adversário${cfg.opp > 1 ? 's' : ''}`, cfg.diceCap ? 'Limite de dados' : 'Dados ilimitados', cfg.pickOne ? 'Pegar 1 carta' : 'Pegar 2 cartas'].join(' · ');
+        cfg.pickMode === 'allpick' ? 'All Pick' : 'Draft', `IA ${cfg.ai === 'hard' ? 'Difícil' : 'Normal'}`, `${cfg.opp} adversário${cfg.opp > 1 ? 's' : ''}`, cfg.diceCap ? 'Limite de dados' : 'Dados ilimitados', cfg.pickOne ? 'Pegar 1 carta' : 'Pegar 2 cartas'].join(' · ');
     };
     sum();
     (this.page.querySelector('#cp-cfg') as HTMLElement).onclick = () => this.matchSettings(sum);
     (this.page.querySelector('#cp-start') as HTMLElement).onclick = () => {
-      this.c = newCampaign(cfg.opp, (this.page.querySelector('#cp-name') as HTMLInputElement).value, cfg.ai, cfg.diceCap, cfg.pickOne, cfg.heroSet, cfg.edition);
+      this.c = newCampaign(cfg.opp, (this.page.querySelector('#cp-name') as HTMLInputElement).value, cfg.ai, cfg.diceCap, cfg.pickOne, cfg.heroSet, cfg.edition, cfg.pickMode);
       this.c.chooser = human(this.c).id;
       this.save();
       this.setupFlow();
@@ -118,8 +118,8 @@ export class CampaignUI {
   }
 
   /** Configurações da partida da nova campanha (padrão: Limite de dados, Pegar 1 carta e Apenas Core Heroes). */
-  private cfg: { edition: Edition; heroSet: HeroSet; ai: 'normal' | 'hard'; opp: number; diceCap: boolean; pickOne: boolean } =
-    { edition: 'classic', heroSet: 'core', ai: getSettings().ai === 'hard' ? 'hard' : 'normal', opp: 3, diceCap: true, pickOne: true };
+  private cfg: { edition: Edition; heroSet: HeroSet; ai: 'normal' | 'hard'; opp: number; diceCap: boolean; pickOne: boolean; pickMode: PickMode } =
+    { edition: 'classic', heroSet: 'core', ai: getSettings().ai === 'hard' ? 'hard' : 'normal', opp: 3, diceCap: true, pickOne: true, pickMode: 'draft' };
 
   /** Janela "Configurações da partida" (igual à da sala online). */
   private matchSettings(done: () => void) {
@@ -131,6 +131,7 @@ export class CampaignUI {
         <div class="gd-title">⚙️ Configurações da partida</div>
         <label class="mcf-row">Campanha <select id="mc-ed"><option value="classic">⚔️ CBT Clássico</option><option value="btg" ${cfg.edition === 'btg' ? 'selected' : ''}>💀 CBT Beyond the Grave</option></select></label>
         <label class="mcf-row">Heróis <select id="mc-heroes">${HERO_SETS.map(([v, n]) => `<option value="${v}" ${cfg.heroSet === v ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+        <label class="mcf-row">Recrutamento <select id="mc-pick"><option value="draft">🃏 Draft — mãos que passam para a esquerda</option><option value="allpick" ${cfg.pickMode === 'allpick' ? 'selected' : ''}>🌟 All Pick — escolha 3 de todos os Heróis</option></select></label>
         <label class="mcf-row">Dificuldade da IA <select id="mc-ai"><option value="normal">Normal</option><option value="hard" ${cfg.ai === 'hard' ? 'selected' : ''}>Difícil</option></select></label>
         <label class="mcf-row">Adversários (IA) <select id="mc-opp">${[1, 2, 3].map(n => `<option value="${n}" ${cfg.opp === n ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
         <label class="set-opt"><input type="checkbox" id="mc-cap" ${cfg.diceCap ? 'checked' : ''}/> <b>Limite de dados</b> — no máximo 8 dados de ataque e 6 de defesa por rolagem (contando críticos e rerrolagens), como os dados físicos da caixa. Sem marcar, ilimitado.</label>
@@ -145,6 +146,7 @@ export class CampaignUI {
       if (cfg.heroSet !== 'all') heroes.value = cfg.heroSet = cfg.edition === 'btg' ? 'btg' : 'core';
     };
     (el.querySelector('#mc-ai') as HTMLSelectElement).onchange = e => { cfg.ai = (e.target as HTMLSelectElement).value as 'normal' | 'hard'; };
+    (el.querySelector('#mc-pick') as HTMLSelectElement).onchange = e => { cfg.pickMode = (e.target as HTMLSelectElement).value as PickMode; };
     (el.querySelector('#mc-opp') as HTMLSelectElement).onchange = e => { cfg.opp = Number((e.target as HTMLSelectElement).value); };
     (el.querySelector('#mc-cap') as HTMLInputElement).onchange = e => { cfg.diceCap = (e.target as HTMLInputElement).checked; };
     (el.querySelector('#mc-one') as HTMLInputElement).onchange = e => { cfg.pickOne = (e.target as HTMLInputElement).checked; };
@@ -158,6 +160,8 @@ export class CampaignUI {
   private pickHero: string | null = null;
   /** Banimento: os Heróis marcados para banir. */
   private banSel: string[] = [];
+  /** All Pick: os Heróis marcados (até 3). */
+  private apSel: string[] = [];
   private equipItems: InvItem[] | null = null;
   setupFlow() {
     const c = this.c!;
@@ -192,6 +196,38 @@ export class CampaignUI {
           <div class="cp-picks">${c.guilds.map(g => `<div class="cp-mini" style="--gc:${GUILDS[g.id].color}"><span class="dot" style="background:${GUILDS[g.id].color}"></span><b>${guildName(g.id)}</b> ${g.controller === 'human' ? '(você)' : '(IA)'} baniu <b>${(st.bans?.[g.id] ?? []).map(h => HEROES[h].name).join(' e ')}</b></div>`).join('')}</div>
           <p>Sobraram <b>${pool.length - all.size} Heróis</b>: embaralhando para o recrutamento…</p></div>`);
         setTimeout(() => { if (this.c === c && c.setup) this.setupFlow(); }, 2600);
+      };
+      return;
+    }
+    if (st.step === 'allpick') {
+      // All Pick: escolhe 3 de todos os Heróis disponíveis (as IAs escolhem depois, entre os que sobrarem)
+      const pool = st.pool ?? [];
+      this.apSel = this.apSel.filter(h => pool.includes(h));
+      const n = this.apSel.length;
+      this.show('Campanha · All Pick', `
+        <div class="cp-step"><h3>All Pick — escolha 3 Heróis <small>(${n}/3)</small></h3>
+        <p>Todos os <b>${pool.length} Heróis</b> disponíveis. Toque para marcar ou desmarcar; as IAs escolhem depois, entre os que sobrarem.</p>
+        <div class="hgrid cards3 ap-grid">${pool.map(h => heroCard(h, this.apSel.includes(h) ? 'picked' : '', `data-ap="${h}"`)).join('')}</div>
+        <div class="ap-bar"><button class="primary cp-big" id="cp-ok" ${n === 3 ? '' : 'disabled'}>${n === 3 ? `✔ Recrutar ${this.apSel.map(h => HEROES[h].name).join(', ')}` : `Escolha mais ${3 - n}`}</button></div>
+        <h4>Guildas</h4>${guildsHtml}</div>`);
+      paintCardArt(this.page);
+      this.page.querySelectorAll<HTMLElement>('[data-ap]').forEach(el => {
+        el.onclick = () => {
+          const h = el.dataset.ap!;
+          this.apSel = this.apSel.includes(h) ? this.apSel.filter(x => x !== h) : this.apSel.length < 3 ? [...this.apSel, h] : this.apSel;
+          const y = this.page.scrollTop; this.setupFlow(); this.page.scrollTop = y;
+        };
+      });
+      (this.page.querySelector('#cp-ok') as HTMLElement).onclick = () => {
+        if (!allPickHeroes(c, this.apSel)) return;
+        this.apSel = [];
+        this.save();
+        // mostra quem cada Guilda recrutou antes da votação
+        this.show('Campanha · All Pick', `
+          <div class="cp-step cp-wait"><h3>Heróis recrutados</h3>
+          <div class="cp-picks">${c.guilds.map(g => `<div class="cp-mini" style="--gc:${GUILDS[g.id].color}"><span class="dot" style="background:${GUILDS[g.id].color}"></span><b>${guildName(g.id)}</b> ${g.controller === 'human' ? '(você)' : '(IA)'}: <b>${g.heroes.map(h => HEROES[h].name).join(', ')}</b></div>`).join('')}</div>
+          <p>Agora a votação do primeiro cenário…</p></div>`);
+        setTimeout(() => { if (this.c === c && c.setup) this.setupFlow(); }, 2400);
       };
       return;
     }

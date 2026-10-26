@@ -9,6 +9,7 @@ Jogo de tabuleiro tático, clone de Arcadia Quest (Core + Beyond the Grave + her
 - Commit/push só quando o usuário pedir (`git push origin main`). Mensagem de commit em português.
 - Antes de entregar: `npm run build` (tsc + vite build) sem erro. Se mexeu em regras, rode os testes de regras (abaixo).
 - No final, diga o que mudou e o que não foi testado de verdade.
+- Foco no jogo padrão (Clássico): não testar Beyond the Grave (`btgrules`, mapas do Beyond) até o usuário pedir.
 
 ## Arquitetura
 
@@ -20,7 +21,7 @@ Jogo de tabuleiro tático, clone de Arcadia Quest (Core + Beyond the Grave + her
   - `board.ts` + `maps/`: um arquivo por mapa (paredes, portas, áreas iniciais, missões, títulos).
 - `src/ai/` — IA (`SimpleAI`). Mudou regra? Veja se a IA e o modo `'auto'` dos hooks continuam certos.
 - `src/ui/controller.ts` — liga engine, renderer, HUD e rede. Cuida dos modos local/host/client, de desfazer, descanso, vingança, deploy e votação.
-- `src/ui/hud.ts` — HUD estilo Dota (barra de baixo, placar em cima, dados no centro, avisos à esquerda). `src/ui/battle.ts` é a tela de combate.
+- `src/ui/hud.ts` — HUD estilo Dota (barra de baixo, placar em cima, dados no centro, avisos à esquerda). O combate é só o painel de dados do centro (`hud.centerDice` / `askDecision` / `spectateDecision`), o mesmo para todos na partida; a tela 2D de batalha ("Sempre") foi removida — `src/ui/battle.ts` hoje só serve para a escolha da arma (modo `prepare`).
 - `src/ui/campaignUI.ts` — campanha local. `src/ui/lobby.ts` — lobby online e campanha online.
 - `src/ui/upgradeViews.ts` — telas **compartilhadas** da Fase de Melhorias (maldições, compras, ranking). O que deve aparecer igual nas duas campanhas vai aqui.
 - `src/campaign/campaign.ts` — estado da campanha (inventário, títulos, medalhas, cenários).
@@ -70,7 +71,11 @@ sh tools/tests/run-engine.sh deathcurse    # Templo: Maldição a cada morte (tr
 sh tools/tests/run-engine.sh presas        # Descanso sem ressuscitar; Lorde Presas se cura na Vingança e sobrevive; escolha de quem mais é atingido
 sh tools/tests/run-engine.sh reacoes       # vários Monstros atacados: quem controla escolhe qual faz a Vingança; Esconderijo do Troll com inventário cheio
 sh tools/tests/run-engine.sh sombra        # Praça da Aurora: marcador Vermelho/Verde invoca a Sombra do Lorde Presas (entra ou fica fora)
-sh tools/tests/run-engine.sh xsim 30 mix   # partidas IA x IA (mix|core|extra; MAP=id, V=1 detalha) -> 0 travadas/0 erros
+sh tools/tests/run-engine.sh escudo        # Escudo das Almas a qualquer hora (Espaço como no Descanso); Botas não pegam o que está no chão
+sh tools/tests/run-engine.sh turno         # Poção de Turno Adicional na hora (sem Entrada de Monstros); Grito de Guerra ativa quem andou com as Botas
+sh tools/tests/run-engine.sh allpick       # Recrutamento All Pick (campanha local e online)
+sh tools/tests/run-engine.sh defesa        # Defesa: sem acertos não rola; já bloqueou tudo = sem ✷ extra nem Rerrolagem
+sh tools/tests/run-engine.sh xsim 30 mix   # partidas IA x IA nos mapas Clássicos (mix|core|extra; MAP=id, SEED=n repete uma, BTG=1 inclui Beyond, V=1 detalha) -> 0 travadas/0 erros
 ALL=1 sh tools/tests/run-engine.sh reach2  # alcance de todos os mapas       -> "TODOS OS MAPAS OK"
 ```
 
@@ -86,10 +91,9 @@ node tools/tests/browser/curse.mjs <pasta-prints>                   # Maldiçõe
 node tools/tests/browser/saveon.mjs <pasta-prints>                  # partida online salva: sair e voltar (partida e Fase de Melhorias)
 node tools/tests/browser/savecamp.mjs <pasta-prints>                # campanha local: sair no meio do cenário e continuar
 node tools/tests/browser/dicesync.mjs <pasta-prints>                # online: dados sincronizados (o outro só vê depois do clique de quem rola)
-node tools/tests/browser/peek.mjs <pasta-prints>                    # online: quem assiste vê a tela de escolha do ataque do outro
 node tools/tests/browser/rrspec.mjs <pasta-prints>                  # online: o anfitrião acompanha a Rerrolagem do amigo
-node tools/tests/browser/rratk.mjs <pasta-prints>                   # online: Rerrolagem do ATAQUE do amigo acompanhada na tela de combate (BATTLE=always|never)
-node tools/tests/browser/mixed.mjs <pasta-prints>                   # online: 'Sempre' x 'Nunca' — o fim do ataque espera o Continuar de todos (HOST/CLI/TARGET)
+node tools/tests/browser/quickbar.mjs <pasta-prints>                # atalho lá em cima para o item (Botas) de outro Herói; MOB=1 = celular
+node tools/tests/browser/rratk.mjs <pasta-prints>                   # online: Rerrolagem do ATAQUE do amigo acompanhada no painel de dados
 ```
 
 O jogo expõe `window.cbt` (o controller) para os testes manipularem o estado. Modo Teste via `localStorage['cbt.test']`.

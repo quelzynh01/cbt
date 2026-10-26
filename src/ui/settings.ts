@@ -34,10 +34,11 @@ export interface Settings {
 }
 
 const KEY = 'cbt.settings';
-const DEFAULT: Settings = { battle: 'always', speed: 1, clock: true, reroll: 'choose', view: 'free', ai: 'normal', sound: true, volume: 0.7, master: 1, hints: true, music: true, musicVolume: 0.12, muted: false, alertConfirm: true, endConfirm: true, gfx: 'high' };
+const DEFAULT: Settings = { battle: 'never', speed: 1, clock: true, reroll: 'choose', view: 'free', ai: 'normal', sound: true, volume: 0.7, master: 1, hints: true, music: true, musicVolume: 0.12, muted: false, alertConfirm: true, endConfirm: true, gfx: 'high' };
 
 export function getSettings(): Settings {
-  try { return { ...DEFAULT, ...JSON.parse(localStorage.getItem(KEY) ?? '{}') }; } catch { return { ...DEFAULT }; }
+  // a tela 2D de batalha saiu: o combate é sempre o painel de dados do centro (o mesmo para todos na partida)
+  try { return { ...DEFAULT, ...JSON.parse(localStorage.getItem(KEY) ?? '{}'), battle: 'never' }; } catch { return { ...DEFAULT, battle: 'never' }; }
 }
 
 export function saveSettings(s: Settings) {

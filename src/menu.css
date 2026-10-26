@@ -693,3 +693,33 @@
 .cf-table tr.me td:first-child { box-shadow: inset 4px 0 0 var(--gold); }
 .cf-maps { margin: 0; padding-left: 22px; display: grid; gap: 2px; }
 .cf-btns { display: flex; justify-content: center; padding: 6px 0 4px; }
+
+/* Melhoria: status dos Heróis (Vida, Defesa, Rerrolagem) */
+.up-hstats { display: inline-flex; gap: 2px; align-items: center; }
+.up-hstats .med, .up-hstats .bimg { width: 24px; height: 24px; }
+/* Compras de todas as Guildas: uma Guilda por linha, colunas Comprou | Não comprou | Tirou do inventário */
+.by-list { display: grid; gap: 10px; }
+.by-list .by-guild { margin: 0; padding: 8px 12px 10px; border-radius: 14px; background: rgba(0,0,0,.25); border: 2px solid color-mix(in srgb, var(--gc) 45%, transparent); border-left-width: 6px; }
+.by-list .by-guild.me { box-shadow: 0 0 0 2px var(--gold); }
+.by-head { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 16px; margin-bottom: 6px; }
+.by-head .by-coins { margin-left: auto; }
+.by-cols { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: flex-start; }
+.by-col { display: grid; gap: 4px; align-content: start; padding-left: 12px; border-left: 2px solid rgba(255,255,255,.12); }
+.by-col:first-child { padding-left: 0; border-left: none; }
+.by-col h5 { margin: 0; font-size: 13px; color: var(--gold); display: flex; gap: 6px; align-items: baseline; }
+.by-col h5 small { color: var(--muted); font-weight: 600; font-size: 11px; }
+.by-col.disc h5 { color: #cdbfa8; }
+.by-col.drop h5 { color: #ffb36b; }
+/* cartas dos resumos e de "você comprou / escolheu" maiores */
+.by-list .up-mini, .up-step .up-minis .up-mini { width: 84px; height: 142px; }
+.by-list .up-mini .acard, .up-step .up-minis .up-mini .acard { zoom: .392; }
+.by-list .up-mini .ac-zoom, .up-step .up-minis .up-mini .ac-zoom { zoom: 2; }
+.by-list .by-cols { display: flex; grid-template-columns: none; }
+.by-list .by-col { flex: 0 0 auto; max-width: 100%; }
+
+/* All Pick: todos os Heróis; os de outra Guilda ficam marcados */
+.ap-grid { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)) !important; }
+.ap-cell { position: relative; }
+.ap-cell.taken .acard { filter: grayscale(.85) brightness(.6); cursor: not-allowed; }
+.ap-tag { position: absolute; top: 8px; right: 8px; padding: 2px 10px; border-radius: 999px; background: var(--gc); color: #fff; font-weight: 900; font-size: 12px; box-shadow: 0 2px 6px rgba(0,0,0,.5); }
+.ap-bar { position: sticky; bottom: -18px; padding: 8px 0 10px; background: linear-gradient(transparent, #2a1d13 35%); z-index: 5; }

@@ -204,7 +204,7 @@ export class SimpleAI {
     for (const t of h.tokens) {
       if (t.type === 'cura' && h.wounds > 0 && (this.hard ? h.wounds >= 2 || hp <= 2 : hp <= 1)) return t;
       if (t.type === 'revigorante' && attackCards.length && (this.hard ? exhausted >= Math.min(2, attackCards.length) : exhausted === attackCards.length)) return t;
-      if (t.type === 'turno' && !g.s.extraTurn && (this.hard ? hp >= 2 : true)) return t;
+      if (t.type === 'turno' && !g.s.extraTurn && !g.s.extraTurnOn && (this.hard ? hp >= 2 : true)) return t;
     }
     return null;
   }

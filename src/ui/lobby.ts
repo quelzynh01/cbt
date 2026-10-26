@@ -10,7 +10,7 @@ import type { GameState, GuildId } from '../engine/types';
 import { drawFace } from '../render/chibi';
 import { ClientSession, HostSession, type Lobby, type Session, type SessionEvents, type SetupMsg, savedName, saveName } from '../net/net';
 import {
-  HIDDEN, STARTER, type OnlineSetup, advance, banHeroes, chooseHero, equipErrors, newSetup, pickNextMap, scenarioOver, setEquip, startCampaign,
+  HIDDEN, STARTER, type OnlineSetup, advance, allPick, banHeroes, chooseHero, equipErrors, newSetup, pickNextMap, scenarioOver, setEquip, startCampaign,
   upgradeArrange, upgradeBuy, upgradePick, votableMaps, voteMap, curseFlip, curseAuto, upgradeOk,
 } from '../net/onlineSetup';
 import { CARDS, CURSES } from '../engine/cards';
@@ -47,6 +47,10 @@ export class OnlineLobby {
   /** Configurações da partida (padrão: Limite de dados, Pegar 1 carta e Apenas Core Heroes). */
   private diceCap = true;
   private pickOne = true;
+  /** Recrutamento: Draft ou All Pick. */
+  private pickMode: 'draft' | 'allpick' = 'draft';
+  /** All Pick: Heróis marcados (até 3). */
+  private apSel: string[] = [];
   private heroSet: HeroSet = 'core';
   /** Campanha online: CBT Clássico ou Beyond the Grave. */
   private edition: Edition = 'classic';
@@ -298,7 +302,7 @@ export class OnlineLobby {
           <button id="lb-copy">📋 Copiar link</button><small>${esc(link)}</small></div>
         <div class="lb-seats">${slots}</div>
         <div class="lb-actions">
-          ${host ? `<span class="lb-sum">${this.mode === 'campaign' ? `🏰 Campanha ${this.edition === 'btg' ? 'Beyond the Grave' : 'CBT Clássico'} (6 cenários)` : '⚔ Partida única'} · IA ${getSettings().ai === 'hard' ? 'Difícil' : 'Normal'}${this.diceCap ? ' · Limite de dados' : ''}${this.mode === 'campaign' && this.pickOne ? ' · Pegar 1 carta' : ''} · ${heroSetName(this.heroSet)}</span>
+          ${host ? `<span class="lb-sum">${this.mode === 'campaign' ? `🏰 Campanha ${this.edition === 'btg' ? 'Beyond the Grave' : 'CBT Clássico'} (6 cenários)` : '⚔ Partida única'} · IA ${getSettings().ai === 'hard' ? 'Difícil' : 'Normal'}${this.diceCap ? ' · Limite de dados' : ''}${this.mode === 'campaign' && this.pickOne ? ' · Pegar 1 carta' : ''} · ${heroSetName(this.heroSet)} · ${this.pickMode === 'allpick' ? 'All Pick' : 'Draft'}</span>
             <button id="lb-cfg">⚙️ Configurações da partida</button>
             <button class="primary" id="lb-start" ${canStart ? '' : 'disabled'}>▶ Ir para a mesa</button>` : '<span class="lb-wait">Aguardando o anfitrião levar todos para a mesa…</span>'}
         </div>
@@ -330,6 +334,7 @@ export class OnlineLobby {
         <label class="mcf-row">Modo <select id="mc-mode"><option value="campaign" ${this.mode === 'campaign' ? 'selected' : ''}>🏰 Campanha (6 cenários)</option><option value="single" ${this.mode === 'single' ? 'selected' : ''}>⚔ Partida única</option></select></label>
         ${this.mode === 'campaign' ? `<label class="mcf-row">Campanha <select id="mc-ed">${EDITIONS.map(e => `<option value="${e.id}" ${this.edition === e.id ? 'selected' : ''}>${e.id === 'btg' ? '💀 CBT Beyond the Grave' : '⚔️ CBT Clássico'}</option>`).join('')}</select></label>` : ''}
         <label class="mcf-row">Heróis <select id="mc-heroes">${HERO_SETS.map(([v, n]) => `<option value="${v}" ${this.heroSet === v ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+        <label class="mcf-row">Recrutamento <select id="mc-pick"><option value="draft">🃏 Draft — mãos que passam para a esquerda</option><option value="allpick" ${this.pickMode === 'allpick' ? 'selected' : ''}>🌟 All Pick — cada um escolhe 3 de todos os Heróis</option></select></label>
         <label class="mcf-row">Dificuldade da IA <select id="mc-ai"><option value="normal">Normal</option><option value="hard" ${getSettings().ai === 'hard' ? 'selected' : ''}>Difícil</option></select></label>
         <label class="set-opt"><input type="checkbox" id="mc-cap" ${this.diceCap ? 'checked' : ''}/> <b>Limite de dados</b> — no máximo 8 dados de ataque e 6 de defesa por rolagem. Sem marcar, ilimitado.</label>
         ${this.mode === 'campaign' ? `<label class="set-opt"><input type="checkbox" id="mc-one" ${this.pickOne ? 'checked' : ''}/> <b>Pegar 1 carta</b> — na Fase de Melhorias cada um pega 1 carta por rodada e passa o resto (em vez de 2).</label>` : ''}
@@ -338,6 +343,7 @@ export class OnlineLobby {
       (el.querySelector('#mc-mode') as HTMLSelectElement).onchange = e => { this.mode = (e.target as HTMLSelectElement).value as 'single' | 'campaign'; draw(); };
       (el.querySelector('#mc-ai') as HTMLSelectElement).onchange = e => saveSettings({ ...getSettings(), ai: (e.target as HTMLSelectElement).value as 'normal' | 'hard' });
       (el.querySelector('#mc-cap') as HTMLInputElement).onchange = e => { this.diceCap = (e.target as HTMLInputElement).checked; };
+      (el.querySelector('#mc-pick') as HTMLSelectElement).onchange = e => { this.pickMode = (e.target as HTMLSelectElement).value as 'draft' | 'allpick'; };
       (el.querySelector('#mc-heroes') as HTMLSelectElement).onchange = e => { this.heroSet = (e.target as HTMLSelectElement).value as HeroSet; };
       const ed = el.querySelector('#mc-ed') as HTMLSelectElement | null;
       // Beyond the Grave: Chaz e Darryn entram junto (dá para mudar em Heróis)
@@ -355,7 +361,7 @@ export class OnlineLobby {
   private startSetup() {
     const host = this.session as HostSession;
     const l = host.lobby;
-    l.setup = newSetup(l.seats.map(s => ({ guild: s.guild, ai: s.ai })), getSettings().ai, Math.random, this.mode, this.diceCap, this.mode === 'campaign' && this.pickOne, this.heroSet, this.edition);
+    l.setup = newSetup(l.seats.map(s => ({ guild: s.guild, ai: s.ai })), getSettings().ai, Math.random, this.mode, this.diceCap, this.mode === 'campaign' && this.pickOne, this.heroSet, this.edition, this.pickMode);
     this.hostAdvance();
   }
 
@@ -364,6 +370,7 @@ export class OnlineLobby {
     const st = (this.session as HostSession).lobby.setup;
     if (!st || (this.session as HostSession).lobby.restored) return;
     if (m.t === 'ban') banHeroes(st, g, m.ids);
+    else if (m.t === 'allpick') allPick(st, g, m.ids);
     else if (m.t === 'draft') chooseHero(st, g, m.hero);
     else if (m.t === 'vote') voteMap(st, g, m.map);
     else if (m.t === 'equip') setEquip(st, g, m.inv);
@@ -494,11 +501,11 @@ export class OnlineLobby {
     const name = (g: GuildId) => { const s = l.seats.find(x => x.guild === g); return s ? (s.ai ? 'IA' : s.name) : g; };
     const camp = st.camp;
     const isHumanG = (g: GuildId) => camp ? camp.guilds.find(x => x.id === g)?.controller === 'human' : !l.seats.find(s => s.guild === g)?.ai;
-    const done = (g: GuildId) => st.step === 'ban' ? !!st.bans?.[g] : st.step === 'draft' ? !!st.choice[g] : st.step === 'vote' ? !!st.votes[g] : st.step === 'equip' ? !!st.equip[g]
+    const done = (g: GuildId) => st.step === 'ban' ? !!st.bans?.[g] : st.step === 'allpick' ? (st.picks[g] ?? []).length === 3 : st.step === 'draft' ? !!st.choice[g] : st.step === 'vote' ? !!st.votes[g] : st.step === 'equip' ? !!st.equip[g]
       : st.step === 'upgrade-draft' ? !isHumanG(g) || !!st.upPick[g] : st.step === 'upgrade-buy' ? !isHumanG(g) || !!st.upBuy[g]
       : st.step === 'upgrade-arrange' ? !isHumanG(g) || !!st.upArr[g] : st.step === 'choose' ? camp?.chooser !== g || !!st.nextMap
       : st.step === 'upgrade-summary' || st.step === 'upgrade-curses' ? !isHumanG(g) || !!st.upOk?.[g] : true;
-    const verb = st.step === 'ban' ? ['baniu', 'banindo…'] : st.step === 'draft' || st.step === 'upgrade-draft' ? ['escolheu', 'escolhendo…'] : st.step === 'vote' ? ['votou', 'votando…']
+    const verb = st.step === 'ban' ? ['baniu', 'banindo…'] : st.step === 'draft' || st.step === 'allpick' || st.step === 'upgrade-draft' ? ['escolheu', 'escolhendo…'] : st.step === 'vote' ? ['votou', 'votando…']
       : st.step === 'upgrade-buy' ? ['comprou', 'comprando…'] : st.step === 'choose' ? ['pronto', 'escolhendo o cenário…']
       : st.step === 'upgrade-summary' || st.step === 'upgrade-curses' ? ['pronto', 'vendo…'] : ['pronto', 'distribuindo cartas…'];
     if (st.tick !== this.lastTick) {
@@ -538,6 +545,19 @@ export class OnlineLobby {
         <div class="tb-actions">${mine && !this.banSel.length
           ? `<span class="tb-wait">✓ Você baniu <b>${mine.map(h => HEROES[h].name).join(' e ')}</b> (clique em outros para trocar). Aguardando: ${st.order.filter(g => !st.bans?.[g]).map(g => esc(name(g))).join(', ') || '…'}</span>`
           : `<button class="primary" id="tb-ban" ${ready ? '' : 'disabled'}>${ready ? `🚫 Banir ${this.banSel.map(h => HEROES[h].name).join(' e ')}` : `Escolha ${BANS_EACH - this.banSel.length} Herói(s)`}</button>`}</div>`;
+    } else if (st.step === 'allpick' && me) {
+      // All Pick: todos os Heróis; os já escolhidos por outra Guilda aparecem marcados (quem confirma primeiro fica com o Herói)
+      const pool = st.pool ?? [];
+      const mine = st.picks[me] ?? [];
+      const owner = (h: string) => st.order.find(g => g !== me && (st.picks[g] ?? []).includes(h));
+      this.apSel = this.apSel.filter(h => pool.includes(h) && !owner(h));
+      const n = this.apSel.length;
+      center = `<h3>All Pick — escolha 3 Heróis</h3>
+        <p>Todos os <b>${pool.length} Heróis</b> disponíveis. Quem confirma primeiro fica com o Herói; os já escolhidos por outra Guilda ficam marcados. As IAs escolhem depois, entre os que sobrarem.</p>
+        <div class="hgrid cards3 ap-grid">${pool.map(h => { const o = owner(h); return `<div class="ap-cell ${o ? 'taken' : ''}" ${o ? `style="--gc:${GUILDS[o].color}"` : ''}>${heroCard(h, (mine.includes(h) || this.apSel.includes(h)) ? 'picked' : '', mine.length === 3 || o ? '' : `data-ap="${h}"`)}${o ? `<span class="ap-tag">${esc(name(o))}</span>` : ''}</div>`; }).join('')}</div>
+        <div class="tb-actions">${mine.length === 3
+          ? `<span class="tb-wait">✓ Você recrutou <b>${mine.map(h => HEROES[h].name).join(', ')}</b>. Aguardando: ${st.order.filter(g => (st.picks[g] ?? []).length !== 3 && !l.seats.find(s => s.guild === g)?.ai).map(g => esc(name(g))).join(', ') || '…'}</span>`
+          : `<button class="primary" id="tb-ap" ${n === 3 ? '' : 'disabled'}>${n === 3 ? `✔ Recrutar ${this.apSel.map(h => HEROES[h].name).join(', ')}` : `Escolha mais ${3 - n}`}</button>`}</div>`;
     } else if (st.step === 'draft' && me) {
       const hand = st.hands[me] ?? [];
       const chosen = st.choice[me];
@@ -615,6 +635,15 @@ export class OnlineLobby {
     });
     const ban = this.page.querySelector('#tb-ban') as HTMLElement | null;
     if (ban) ban.onclick = () => { if (this.banSel.length === BANS_EACH) { this.send({ t: 'ban', ids: this.banSel }); this.banSel = []; } };
+    this.page.querySelectorAll<HTMLElement>('[data-ap]').forEach(el => {
+      el.onclick = () => {
+        const h = el.dataset.ap!;
+        this.apSel = this.apSel.includes(h) ? this.apSel.filter(x => x !== h) : this.apSel.length < 3 ? [...this.apSel, h] : this.apSel;
+        const y = this.page.scrollTop; this.renderTable(); this.page.scrollTop = y;
+      };
+    });
+    const ap = this.page.querySelector('#tb-ap') as HTMLElement | null;
+    if (ap) ap.onclick = () => { if (this.apSel.length === 3) { this.send({ t: 'allpick', ids: this.apSel }); this.apSel = []; } };
     const pick = this.page.querySelector('#tb-pick') as HTMLElement | null;
     if (pick) pick.onclick = () => { if (this.pickHero) this.send({ t: 'draft', hero: this.pickHero }); };
     this.bindUpgrade(st, me);

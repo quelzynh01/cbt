@@ -27,13 +27,17 @@ export interface OnlineSetup {
   mode: 'single' | 'campaign';
   /** Limite de dados (Configurações da partida): no máximo 8 dados de ataque e 6 de defesa por rolagem. Sem isso, ilimitado. */
   diceCap: boolean;
-  step: 'ban' | 'draft' | 'vote' | 'equip' | 'done' | 'upgrade-curses' | 'upgrade-draft' | 'upgrade-buy' | 'upgrade-summary' | 'upgrade-arrange' | 'choose' | 'final';
+  step: 'ban' | 'draft' | 'allpick' | 'vote' | 'equip' | 'done' | 'upgrade-curses' | 'upgrade-draft' | 'upgrade-buy' | 'upgrade-summary' | 'upgrade-arrange' | 'choose' | 'final';
   /** Configurações da partida: na Fase de Melhorias pega 1 carta por rodada (em vez de 2). */
   pickOne?: boolean;
   /** Configurações da partida: Heróis do recrutamento (Apenas Core, Core + Beyond the Grave ou Todos). */
   heroSet?: HeroSet;
   /** Campanha: CBT Clássico ou Beyond the Grave. */
   edition?: Edition;
+  /** Recrutamento: Draft (mãos que passam) ou All Pick (cada um escolhe 3 de todos os disponíveis). */
+  pickMode?: 'draft' | 'allpick';
+  /** All Pick: todos os Heróis disponíveis (os escolhidos por outra Guilda ficam marcados). */
+  pool?: string[];
   /** Telas de "todos veem" (resumo das Maldições, resumo das compras): quem já clicou em Continuar. */
   upOk?: Partial<Record<GuildId, boolean>>;
   /** Campanha online (estado completo, como no modo campanha). */
@@ -71,13 +75,21 @@ function shuffle<T>(a: T[], rnd: () => number): T[] {
   return r;
 }
 
-export function newSetup(seats: SeatInfo[], aiLevel: AILevel, rnd: () => number = Math.random, mode: 'single' | 'campaign' = 'single', diceCap = true, pickOne = true, heroSet: HeroSet = 'core', edition: Edition = 'classic'): OnlineSetup {
+export function newSetup(seats: SeatInfo[], aiLevel: AILevel, rnd: () => number = Math.random, mode: 'single' | 'campaign' = 'single', diceCap = true, pickOne = true, heroSet: HeroSet = 'core', edition: Edition = 'classic', pickMode: 'draft' | 'allpick' = 'draft'): OnlineSetup {
   const order = seats.map(s => s.guild);
   const st: OnlineSetup = {
     step: 'draft', round: 0, order, hands: {}, choice: {}, picks: {}, votes: {}, equip: {}, tick: 0, aiLevel,
     mode, diceCap, upPick: {}, upBuy: {}, upArr: {}, ...(pickOne ? { pickOne } : {}), ...(heroSet !== 'core' ? { heroSet } : {}), ...(mode === 'campaign' && edition !== 'classic' ? { edition } : {}),
   };
   for (const g of order) { st.choice[g] = null; st.picks[g] = []; }
+  if (pickMode === 'allpick') {
+    // All Pick: cada jogador escolhe 3 de todos os disponíveis; quem confirma primeiro fica com o Herói
+    st.pickMode = 'allpick';
+    st.step = 'allpick';
+    st.pool = heroPool(heroSet);
+    st.news = `All Pick: escolham 3 Heróis entre os ${st.pool.length} disponíveis.`;
+    return st;
+  }
   // "Permitir Todos os Heróis": primeiro o banimento (20 sorteados, cada um bane 2)
   if (heroSet === 'all') {
     st.step = 'ban';
@@ -100,6 +112,17 @@ function dealHeroes(st: OnlineSetup, pool: string[]) {
 export function banHeroes(st: OnlineSetup, g: GuildId, ids: string[]): boolean {
   if (st.step !== 'ban' || !st.banPool || !validBans(st.banPool, ids)) return false;
   st.bans![g] = ids.slice();
+  return true;
+}
+
+/** All Pick: um jogador confirma os 3 Heróis (nenhum pode já ser de outra Guilda). */
+export function allPick(st: OnlineSetup, g: GuildId, ids: string[]): boolean {
+  if (st.step !== 'allpick' || (st.picks[g] ?? []).length === 3) return false;
+  if (ids.length !== 3 || new Set(ids).size !== 3 || ids.some(h => !(st.pool ?? []).includes(h))) return false;
+  const taken = new Set(st.order.filter(x => x !== g).flatMap(x => st.picks[x] ?? []));
+  if (ids.some(h => taken.has(h))) { st.news = 'Um desses Heróis acabou de ser escolhido por outra Guilda — escolha outro.'; st.tick++; return false; }
+  st.picks[g] = ids.slice();
+  st.news = 'Uma Guilda confirmou os seus Heróis.';
   return true;
 }
 
@@ -151,6 +174,28 @@ export function advance(st: OnlineSetup, seats: SeatInfo[], rnd: () => number = 
       st.news = `Banimento concluído: sobraram ${left.length} Heróis. Começa o recrutamento!`;
       dealHeroes(st, left);
       st.tick++;
+      changed = true;
+    }
+  }
+  if (st.step === 'allpick') {
+    // as IAs escolhem depois de todos os jogadores confirmarem, entre os que sobraram
+    if (all.every(g => isAI(g) || (st.picks[g] ?? []).length === 3)) {
+      const taken = new Set(all.flatMap(g => st.picks[g] ?? []));
+      for (const g of all) {
+        if (!isAI(g) || (st.picks[g] ?? []).length === 3) continue;
+        st.picks[g] = [];
+        for (let k = 0; k < 3; k++) {
+          const left = shuffle((st.pool ?? []).filter(h => !taken.has(h)), rnd);
+          const h = pickHero(left, st.picks[g]!, st.aiLevel, rnd);
+          if (!h) break;
+          st.picks[g]!.push(h);
+          taken.add(h);
+        }
+      }
+      st.step = 'vote';
+      st.tick++;
+      st.news = 'All Pick concluído! Agora votem no mapa.';
+      for (const g of all) st.votes[g] = null;
       changed = true;
     }
   }

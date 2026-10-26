@@ -87,7 +87,8 @@ export class Controller {
         const minePart = e.t === 'attack' && ((!!e.ctl && this.isMine(e.ctl)) || [e.attackerId, ...e.targets.map(t => t.id)].some(id => { const u = this.game.unit(id); return u.kind === 'hero' && this.isMine(u.guild!); }));
         const showBattle = e.t === 'attack' && (bm === 'never' ? false : bm === 'mine' ? minePart : (humanInvolved || this.renderer.speed < 4));
         // online: o que estava só sendo acompanhado (escolha da arma / Rerrolagem do outro) dá lugar ao ataque de verdade
-        if (e.t === 'attack') { this.hud.endSpectate(); if (!showBattle) this.battle.closeSpectate(); }
+        // a janela da Missão (carta/Título) fecha: a rolagem precisa da tela
+        if (e.t === 'attack') { this.hud.closePrize(); this.hud.endSpectate(); if (!showBattle) this.battle.closeSpectate(); }
         this.hud.onEvent(e, showBattle);
         // se a rolagem já começou na tela de combate do centro (Rerrolagem), continua nela — sem abrir outra tela
         if (showBattle && e.t === 'attack' && (this.battle.hasCarry || !this.hud.hasCarry)) {
@@ -437,6 +438,7 @@ export class Controller {
   }
 
   private paintChoice() {
+    this.hud.closePrize();
     const { req, resolve } = this.choicePick!;
     const g = this.game;
     const hl = this.renderer.hl;
@@ -448,9 +450,9 @@ export class Controller {
         <div class="mc-body">
           <p>${req.text ?? ''}</p>
           ${req.faces ? `<p class="mc-legend">Dados: ${req.faces.map(f => ({ crit: '✷', melee: '⚔', ranged: '➶', shield: '⛨', blank: '–' } as Record<string, string>)[f]).join(' ')}</p>` : ''}
-          <div class="mc-btns"><button class="primary" data-i="0">Sim</button><button id="ch-none">Não</button></div>
+          <div class="mc-btns">${req.keep ? `<button class="primary" id="ch-none">${req.no ?? 'Não'}</button><button data-i="0">${req.yes ?? 'Sim'}</button>` : `<button class="primary" data-i="0">${req.yes ?? 'Sim'}</button><button id="ch-none">${req.no ?? 'Não'}</button>`}</div>
         </div>`;
-      this.hud.setHint(`${req.source}: escolha Sim ou Não`);
+      this.hud.setHint(`${req.source}: ${req.yes ? `${req.yes} ou ${req.no}` : 'escolha Sim ou Não'}`);
     } else if (req.choice === 'reward') {
       hl.activeUnit = h.id;
       this.hud.monsterPanel(null);
@@ -676,6 +678,7 @@ export class Controller {
           if ('choice' in req) { this.askChoice(req).then(i => { decided.push([i]); attempt(); }); return; }
           this.hud.setHint('Escolha os dados para rerrolar');
           // Rerrolagem na própria tela de batalha (a mesma tela continua com a rolagem); sem tela de batalha, no centro
+          this.hud.closePrize();
           (getSettings().battle !== 'never' ? this.battle.decide(req) : this.hud.askDecision(req)).then(idx => { decided.push(idx); attempt(); });
         };
         // o que aconteceu antes desta decisão é mostrado primeiro (na ordem do jogo)
@@ -951,6 +954,7 @@ export class Controller {
       const done = (pick: number[] | null) => { this.deciding = false; send(pick); };
       if ('choice' in req) { void this.askChoice(req).then(i => done([i])); return; }
       this.hud.setHint('Escolha os dados para rerrolar');
+      this.hud.closePrize();
       void (getSettings().battle !== 'never' ? this.battle.decide(req) : this.hud.askDecision(req)).then(idx => done(idx));
     };
     go();
@@ -1208,6 +1212,7 @@ export class Controller {
   refresh() {
     if (!this.game) return;
     this.hud.refresh();
+    this.paintQuickItems();
     this.clearHighlights();
     const hl = this.renderer.hl;
     const a = this.game.s.activation;
@@ -1244,6 +1249,21 @@ export class Controller {
     if (pend && !this.renderer.busy) {
       this.hud.setHint(`Aguardando ${this.hud.nameOf(pend.controller) ?? guildShort(pend.controller)} decidir a Reação de Vingança…`);
       return;
+    }
+    if (this.soulMode) {
+      const sh = this.game.unit(this.soulMode.heroId);
+      const sc = sh.cards.find(x => x.uid === this.soulMode!.cardUid);
+      const dead = this.game.unit(this.soulMode.target);
+      if (this.isHumanTurn() && !this.renderer.busy && sc && !dead.alive && this.game.activatable(sh, sc)?.ok) {
+        const hl = this.renderer.hl;
+        hl.moveColor = 'green';
+        for (const cell of this.game.resurrectCells(dead)) hl.move.set(key(cell), 1);
+        this.renderer.ghostPick = dead.defId;
+        this.hud.setHint(`✨ <b>Escudo das Almas</b>: clique num Espaço verde para ${HEROES[dead.defId].name} ressuscitar (Área Inicial ou Perto de um Aliado) · <b>Esc</b> cancela`);
+        return;
+      }
+      this.soulMode = null;
+      this.renderer.ghostPick = null;
     }
     if (!this.isHumanTurn() || this.renderer.busy || !a) {
       this.bootMode = null;
@@ -1525,7 +1545,8 @@ export class Controller {
       else if (e.code === 'KeyF') this.focusActive();
       else if (e.code === 'KeyZ' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (this.mode === 'local' && !this.campaignEnd) this.undo(); }
       else if ((e.code === 'F2' || e.code === 'KeyT') && this.mode === 'local' && !this.campaignEnd) { e.preventDefault(); this.toggleTestPanel(); }
-      else if (e.code === 'Escape' && this.bootMode) { this.bootMode = null; this.refresh(); }
+      else if (e.code === 'Escape' && this.bootMode) { this.bootMode = null; this.refresh(); this.backToActive(); }
+      else if (e.code === 'Escape' && this.soulMode) { this.soulMode = null; this.renderer.ghostPick = null; this.refresh(); }
       else if (e.code === 'Escape' && this.powerMode) { this.powerMode = null; this.refresh(); }
       else if (e.code === 'Escape' && this.hud.pendingActivate) { this.hud.pendingActivate = null; this.hud.inspected = null; this.refresh(); }
       else if (e.code === 'Escape') {
@@ -1558,6 +1579,7 @@ export class Controller {
 
   /** Reação de Vingança controlada por você (jogador à direita do ativo). */
   private showMonsterControl() {
+    this.hud.closePrize();
     const g = this.game;
     const p = g.s.pending!;
     const near = g.vengeanceDoors();
@@ -1683,11 +1705,12 @@ export class Controller {
   private warnTarget(e: GameEvent) {
     const g = this.game;
     if (!g) return;
-    const attacker = e.t === 'attack' ? e.attackerId : e.t === 'move' ? e.id : e.t === 'reaction' ? e.monsterId : null;
-    if (!attacker) return;
+    // só quando o ataque começa (sem olhar a fila à frente: isso adiantava quem ia atacar antes da rolagem acabar)
+    if (e.t !== 'attack') return;
+    const attacker = e.attackerId;
     const au = g.unit(attacker);
     if (au.kind === 'hero' && au.guild && this.isMine(au.guild)) return;
-    const ids = e.t === 'attack' ? e.targets.map(t => t.id) : this.renderer.upcomingTargets(attacker);
+    const ids = e.targets.map(t => t.id);
     for (const id of ids) {
       const t = g.unit(id);
       if (t.kind !== 'hero' || !t.guild || !this.isMine(t.guild) || !t.alive) continue;
@@ -1697,6 +1720,8 @@ export class Controller {
 
   /** Botas (Das Boot / Die Booten): escolhendo para onde mover o outro Herói. */
   private bootMode: { heroId: string; cardUid: string } | null = null;
+  /** Escudo das Almas: escolhendo no mapa onde o Aliado ressuscita. */
+  private soulMode: { heroId: string; cardUid: string; target: string } | null = null;
   /** Habilidade do Herói (Teleporte, Chamado): escolhendo o Espaço. */
   private powerMode: { heroId: string; target?: string } | null = null;
 
@@ -1721,6 +1746,64 @@ export class Controller {
     this.act({ type: 'power', heroId });
   }
 
+  /** Herói ativo para onde a câmera e a seleção voltam depois de usar o item de outro Herói pelo atalho. */
+  private quickReturn: string | null = null;
+
+  /** Atalhos lá em cima: itens prontos de outros Heróis da sua Guilda (ex.: Botas) enquanto um Herói está ativado. */
+  private paintQuickItems() {
+    let bar = document.getElementById('itemquick');
+    if (!bar) { bar = document.createElement('div'); bar.id = 'itemquick'; (document.getElementById('topbar')?.parentElement ?? document.body).appendChild(bar); }
+    const g = this.game!;
+    const a = g.s.activation;
+    const items: string[] = [];
+    if (a && this.isHumanTurn() && !this.renderer.busy && !this.choicePick && !g.s.pending && !g.s.puppet && !this.bootMode && !this.soulMode) {
+      for (const h of g.heroesOf(g.currentGuild().id)) {
+        if (h.id === a.heroId || !h.alive || !h.cell) continue;
+        for (const c of h.cards) {
+          const info = g.activatable(h, c);
+          if (!info?.ok || info.pick === 'dead') continue;
+          const cd = g.cardDef(c);
+          if (cd.fx.bootMove && !g.bootCells(h, c).length) continue; // sem Espaço livre para ir
+          const icon = cd.fx.bootMove ? '👢' : '⚡';
+          items.push(`<button data-qh="${h.id}" data-qc="${c.uid}" title="${cd.name} (${g.name(h)}): ${info.label}"><img src="${this.hud.portraitOf(h)}" alt=""/><span>${icon}</span><small>${cd.name}</small></button>`);
+        }
+      }
+    }
+    const html = items.join('');
+    if (bar.innerHTML !== html) {
+      bar.innerHTML = html;
+      bar.querySelectorAll<HTMLElement>('[data-qh]').forEach(b => { b.onclick = e => { e.stopPropagation(); void this.quickItem(b.dataset.qh!, b.dataset.qc!); }; });
+    }
+    bar.classList.toggle('hidden', !items.length);
+  }
+
+  /** Atalho: câmera e seleção vão para o dono do item e o item já começa a ser usado. */
+  private async quickItem(heroId: string, cardUid: string) {
+    const g = this.game;
+    const a = g?.s.activation;
+    if (!g || !a) return;
+    const h = g.unit(heroId);
+    this.quickReturn = a.heroId;
+    this.hud.inspected = heroId;
+    if (h.cell) this.renderer.glideCells([h.cell]);
+    await this.useCard(heroId, cardUid);
+    if (!this.bootMode && !this.soulMode) this.backToActive();
+  }
+
+  /** Depois do atalho: câmera e seleção voltam para o Herói ativo (quando as animações terminarem). */
+  private backToActive(tries = 0) {
+    const g = this.game;
+    if (!this.quickReturn || !g) { this.quickReturn = null; return; }
+    if (this.renderer.busy && tries < 100) { setTimeout(() => this.backToActive(tries + 1), 100); return; }
+    const id = g.s.activation?.heroId ?? this.quickReturn;
+    this.quickReturn = null;
+    const u = g.unit(id);
+    if (!u) return;
+    this.hud.inspected = u.id;
+    if (u.cell) this.renderer.glideCells([u.cell]);
+    this.refresh();
+  }
+
   /** Carta ativável (⚡): escolhe o alvo quando precisa e manda a jogada. */
   private async useCard(heroId: string, cardUid: string) {
     const g = this.game;
@@ -1728,8 +1811,9 @@ export class Controller {
     const h = g.unit(heroId);
     const c = h.cards.find(x => x.uid === cardUid);
     if (!c) return;
-    if (!g.s.activation && !g.freeMode) { this.hud.toast('Ative um Herói primeiro (clique nele e em ▶ Ativar).', '#c0392b'); return; }
     const info = g.activatable(h, c);
+    // o Escudo das Almas vale a qualquer hora do seu turno (mesmo antes de ativar alguém)
+    if (!g.s.activation && !g.freeMode && info?.pick !== 'dead') { this.hud.toast('Ative um Herói primeiro (clique nele e em ▶ Ativar).', '#c0392b'); return; }
     if (!info?.ok) { if (info?.why) this.hud.toast(info.why, '#c0392b'); return; }
     const opt = (u: { id: string }) => { const x = g.unit(u.id); return { id: x.id, html: `<img class="cf-face" src="${this.hud.portraitOf(x)}"/> ${g.name(x)}` }; };
     if (info.pick === 'ally') {
@@ -1741,7 +1825,8 @@ export class Controller {
     if (info.pick === 'dead') {
       const dead = g.heroesOf(h.guild!).filter(x => !x.alive);
       const pick = dead.length === 1 ? dead[0].id : await this.hud.choose('✨ Escudo das Almas', `Qual Aliado volta à vida? <b>${g.name(h)}</b> fica exausto até Descansar.`, dead.map(opt));
-      if (pick) this.act({ type: 'card', heroId, cardUid, target: pick });
+      // depois, o Espaço no mapa (como no Descanso: Área Inicial ou Perto de um Aliado)
+      if (pick && this.game === g) { this.soulMode = { heroId, cardUid, target: pick }; this.refresh(); }
       return;
     }
     if (info.pick === 'cell') {
@@ -1939,12 +2024,22 @@ export class Controller {
       else this.refresh();
       return;
     }
+    if (this.soulMode) {
+      const cell = this.renderer.pickCell(x, y);
+      const sm = this.soulMode;
+      this.soulMode = null;
+      this.renderer.ghostPick = null;
+      if (cell && this.renderer.hl.move.has(key(cell))) this.act({ type: 'card', heroId: sm.heroId, cardUid: sm.cardUid, target: sm.target, cell });
+      else this.refresh();
+      return;
+    }
     if (this.bootMode) {
       const cell = this.renderer.pickCell(x, y);
       const bm = this.bootMode;
       this.bootMode = null;
       if (cell && this.renderer.hl.move.has(key(cell))) this.act({ type: 'card', heroId: bm.heroId, cardUid: bm.cardUid, cell });
       else this.refresh();
+      if (this.quickReturn) setTimeout(() => this.backToActive(), 150);
       return;
     }
     const door = this.renderer.pickDoorIcon(x, y);
@@ -1952,6 +2047,8 @@ export class Controller {
     let unitId = this.renderer.pickUnit(x, y);
     const cell = this.renderer.pickCell(x, y);
     const hl = this.renderer.hl;
+    // clicar num personagem (aliado ou inimigo) sempre mostra ele na ficha lá embaixo
+    if (unitId && this.hud.inspected !== unitId) { this.hud.inspected = unitId; this.hud.refresh(); }
     const a = this.game.s.activation;
     // Espaço que dá para andar E inimigo atacável ali (ou o boneco dele embaixo do dedo): pergunta o que fazer
     if (a && this.isHumanTurn() && !this.renderer.busy) {

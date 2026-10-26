@@ -90,7 +90,7 @@ for (let i = 0; i < 40; i++) {
   await wait(600);
   const h = await hostTxt();
   if (/Aguardando .* rolar/.test(h.txt)) sawWaitRoll = true;
-  if (/escolhendo quais dados/.test(h.txt)) sawChoosing = true;
+  if (/escolhendo (quais dados|se mantém)/.test(h.txt)) sawChoosing = true;
   log.push(`[${h.dice}] ${h.txt.slice(0, 70)}`);
   // o amigo: rola (ataque do Monstro que ele controla, Defender, ✷) e, quando aparecer a escolha, espera 3 s e mantém
   const c = await cli.evaluate(() => { const keep = document.querySelector('#bt-keep, #cd-keep, #rr-keep'); if (keep) return 'keep'; const b = document.querySelector('.bt-act, .cd-roll, #rr-roll'); if (b) { b.click(); return b.textContent; } return ''; });

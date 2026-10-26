@@ -63,7 +63,9 @@ export interface Upgrade {
 
 /** Preparação da campanha: escolha de Heróis em rodadas, votação do mapa e equipamento inicial. */
 export interface Setup {
-  step: 'ban' | 'draft' | 'vote' | 'equip';
+  step: 'ban' | 'draft' | 'allpick' | 'vote' | 'equip';
+  /** All Pick: todos os Heróis disponíveis (cada Guilda escolhe 3 de uma vez). */
+  pool?: string[];
   /** "Permitir Todos os Heróis": os 20 Heróis sorteados para o banimento e quem cada Guilda baniu. */
   banPool?: string[];
   bans?: Partial<Record<GuildId, string[]>>;
@@ -129,13 +131,15 @@ function shuffled<T>(c: CampaignState, a: T[]): T[] {
 }
 
 // ------------------------------------------------------------------ criação
-export function newCampaign(opponents: number, name?: string, aiLevel: AILevel = 'normal', diceCap = true, pickOne = true, heroSet: HeroSet | boolean = 'core', edition: Edition = 'classic'): CampaignState {
+export function newCampaign(opponents: number, name?: string, aiLevel: AILevel = 'normal', diceCap = true, pickOne = true, heroSet: HeroSet | boolean = 'core', edition: Edition = 'classic', pickMode: PickMode = 'draft'): CampaignState {
   const hs: HeroSet = heroSet === true ? 'all' : heroSet === false ? 'core' : heroSet;
   const ids: GuildId[] = ['azul', 'vermelho', 'verde', 'laranja'];
   const c: CampaignState = { version: 1, guilds: [], played: [], chooser: 'azul', phase: 'setup', seed: (Date.now() ^ (Math.random() * 1e9)) | 0, elapsed: 0, aiLevel, diceCap, ...(pickOne ? { pickOne } : {}), ...(hs !== 'core' ? { heroSet: hs } : {}), ...(edition !== 'classic' ? { edition } : {}) };
   for (let i = 0; i <= opponents; i++) c.guilds.push({ id: ids[i], controller: i === 0 ? 'human' : 'ai', heroes: [], inventory: {}, saved: 0, titles: [], curses: {}, ...(i === 0 && name?.trim() ? { name: name.trim().slice(0, 20) } : {}) });
   useCampaignNames(c);
   // Recrutamento de Heróis (p.7): cada jogador recebe uma mão, escolhe 1 e passa o resto para a esquerda.
+  // All Pick: cada Guilda escolhe 3 Heróis de todos os disponíveis (sem banimento nem rodadas)
+  if (pickMode === 'allpick') { c.setup = { step: 'allpick', round: 0, hands: {}, pool: heroPool(hs) }; return c; }
   // "Permitir Todos os Heróis": antes, o banimento (20 sorteados, cada um bane 2)
   if (hs === 'all') { c.setup = { step: 'ban', round: 0, hands: {}, banPool: drawBanPool(() => rnd(c)), bans: {} }; return c; }
   dealHeroes(c, shuffled(c, heroPool(hs)));
@@ -158,6 +162,32 @@ export function banHeroes(c: CampaignState, ids: string[]): boolean {
   return true;
 }
 
+
+/** Recrutamento: Draft (mãos que passam para a esquerda) ou All Pick (cada um escolhe 3 de todos os disponíveis). */
+export type PickMode = 'draft' | 'allpick';
+
+/** All Pick: o jogador escolhe 3 Heróis da lista; as IAs escolhem depois, entre os que sobraram. Depois: votação. */
+export function allPickHeroes(c: CampaignState, ids: string[]): boolean {
+  const st = c.setup!;
+  const pool = st.pool ?? [];
+  if (st.step !== 'allpick' || ids.length !== 3 || new Set(ids).size !== 3 || ids.some(h => !pool.includes(h))) return false;
+  const taken = new Set<string>();
+  for (const g of c.guilds) if (g.controller === 'human') { g.heroes = ids.slice(); ids.forEach(h => taken.add(h)); }
+  for (const g of c.guilds) {
+    if (g.controller === 'human') continue;
+    g.heroes = [];
+    for (let k = 0; k < 3; k++) {
+      const left = shuffled(c, pool.filter(h => !taken.has(h)));
+      const h = pickHero(left, g.heroes, c.aiLevel ?? 'normal', () => rnd(c));
+      if (!h) break;
+      g.heroes.push(h);
+      taken.add(h);
+    }
+  }
+  st.step = 'vote';
+  st.hands = {};
+  return true;
+}
 
 /** O jogador escolhe 1 Herói da mão; as IAs também; as mãos passam para a esquerda. Após 3 rodadas: votação. */
 export function draftHero(c: CampaignState, heroId: string) {

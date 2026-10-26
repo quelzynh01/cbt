@@ -5,7 +5,7 @@ import { heroSlots, medals, victoryRank, type CampaignState } from '../campaign/
 import { MAPS, campaignList } from '../engine/maps';
 import { TITLES } from '../engine/titles';
 import { drawFace } from '../render/chibi';
-import { curseCard, itemCard } from './cardview';
+import { curseCard, itemCard, medal } from './cardview';
 
 // Telas da Fase de Melhorias usadas igual na campanha (neste computador) e na campanha online:
 // as Maldições Mortais viradas na mesa e o resumo das compras de todas as Guildas.
@@ -70,8 +70,14 @@ export function myHeroesHtml(c: CampaignState, me: GuildId): string {
       const cards = g.inventory[h] ?? [];
       const sl = heroSlots(c, g, h);
       const cu = g.curses[h] && g.curses[h] !== 'sem_maldicao' ? CURSES[g.curses[h]] : null;
+      // a carta debaixo da Maldição que ocupa espaço (a 1ª, com 4 cartas) não conta
+      const active = cu?.slot && cards.length >= 4 ? cards.slice(1) : cards;
+      const sum = (f: (d: (typeof CARDS)[string]) => number | undefined) => active.reduce((n, id) => n + (CARDS[id] ? f(CARDS[id]) ?? 0 : 0), 0);
+      const hp = HEROES[h].hp + sum(d => d.hpBonus) + (cu?.hp ?? 0), def = HEROES[h].defense + sum(d => d.defBonus), rr = sum(d => d.rerolls);
       return `<div class="up-hero">
-        <div class="up-hh"><canvas width="56" height="56" data-uface="${h}" data-color="${GUILDS[me].color}"></canvas><b>${HEROES[h].name}</b><small>${sl.used}/${sl.max}</small></div>
+        <div class="up-hh"><canvas width="56" height="56" data-uface="${h}" data-color="${GUILDS[me].color}"></canvas><b>${HEROES[h].name}</b>
+          <span class="up-hstats">${medal('hp', hp, `Vida ${hp} (carta: ${HEROES[h].hp})`, 'ism')}${medal('def', def, `${def} dados de Defesa (carta: ${HEROES[h].defense})`, 'ism')}${rr ? medal('rr', rr, `Rerrolagem ${rr}`, 'ism') : ''}</span>
+          <small>${sl.used}/${sl.max}</small></div>
         ${cu ? `<div class="up-hcurse" title="${esc(cu.text)}">☠ <b>${esc(cu.name)}</b> — ${esc(cu.text)}</div>` : ''}
         <div class="up-minis">${cards.map(mini).join('')}${'<div class="up-mini empty"></div>'.repeat(Math.max(0, sl.max - sl.used))}</div>
       </div>`;
@@ -223,14 +229,16 @@ export function buySummaryHtml(c: CampaignState, name: (g: GuildId) => string, m
     for (const id of bought) { const i = left.indexOf(id); if (i >= 0) left.splice(i, 1); }
     const dropped = up.dropped?.[g.id] ?? [];
     return `<div class="by-guild ${g.id === me ? 'me' : ''}" style="--gc:${GUILDS[g.id].color}">
-      <h4>${who(g.id, name)} ${g.id === me ? '<small>(você)</small>' : g.controller === 'ai' ? '<small>(IA)</small>' : ''}
-        <span class="by-coins">🪙 sobrou ${up.coins[g.id] ?? 0} · guarda ${g.saved}</span></h4>
-      <h5>🛒 Comprou</h5>${miniCards(bought)}
-      <h5>🗑 Descartou</h5>${miniCards(left, 'by-disc')}
-      ${dropped.length ? `<h5 class="by-droph">↩ Tirou do inventário para dar lugar</h5>${miniCards(dropped, 'by-disc')}` : ''}</div>`;
+      <div class="by-head">${who(g.id, name)} ${g.id === me ? '<small>(você)</small>' : g.controller === 'ai' ? '<small>(IA)</small>' : ''}
+        <span class="by-coins">🪙 sobrou ${up.coins[g.id] ?? 0} · guarda ${g.saved}</span></div>
+      <div class="by-cols">
+        <div class="by-col buy"><h5>🛒 Comprou <small>${bought.length}</small></h5>${miniCards(bought)}</div>
+        <div class="by-col disc"><h5>🗑 Não comprou <small>volta à caixa · ${left.length}</small></h5>${miniCards(left, 'by-disc')}</div>
+        ${dropped.length ? `<div class="by-col drop"><h5>↩ Tirou do inventário <small>para dar lugar · ${dropped.length}</small></h5>${miniCards(dropped, 'by-disc')}</div>` : ''}
+      </div></div>`;
   }).join('');
-  return `<div class="cp-step up-sum"><h3>🛒 Compras de todas as Guildas <small>— as escolhidas e não compradas voltam para a caixa</small></h3>
-    <div class="up-sumgrid">${rows}</div></div>`;
+  return `<div class="cp-step up-sum"><h3>🛒 Compras de todas as Guildas</h3>
+    <div class="by-list">${rows}</div></div>`;
 }
 
 /** Compra: o que ainda dá para comprar com as moedas que sobram (até 3 cartas). */

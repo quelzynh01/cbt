@@ -1,5 +1,6 @@
 import { Game } from '../../../src/engine/game';
 import { MAPS } from '../../../src/engine/maps';
+import { BTG_MAPS } from '../../../src/engine/maps/beyondTheGrave';
 import { SimpleAI } from '../../../src/ai/ai';
 import { applyAction } from '../../../src/engine/actions';
 import { EXTRA_HERO_IDS, ALL_HEROES, HEROES, distributeStartingGear } from '../../../src/engine/data';
@@ -16,8 +17,10 @@ const perMap: Record<string, { n: number; turns: number; stuck: number }> = {};
 let aiMs = 0, aiCalls = 0, aiMax = 0;
 let games = 0, stuck = 0, errors = 0, turnsSum = 0, powers = 0;
 const allCards = Object.keys(CARDS).filter(id => CARDS[id].kind === 'attack' && id !== 'foice');
-const maps = Object.values(MAPS).filter(m => !process.env.MAP || m.id === process.env.MAP);
-let seedBase = 1000;
+// só os mapas do jogo padrão (Clássico); BTG=1 inclui os de Beyond the Grave (ou MAP=id escolhe um)
+const btgIds = new Set(BTG_MAPS.map(m => m.id));
+const maps = Object.values(MAPS).filter(m => process.env.MAP ? m.id === process.env.MAP : process.env.BTG || !btgIds.has(m.id));
+let seedBase = Number(process.env.SEED ?? 1000); // SEED=n repete uma partida (com MAP=id)
 for (let r = 0; r < N; r++) for (const map of maps) {
   const seed = seedBase++;
   let x = seed;

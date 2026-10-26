@@ -2,6 +2,7 @@ import { TITLES, TITLE_TEXT } from '../engine/titles';
 import { diceSync } from './diceSync';
 import { CARDS, GUILDS, GUILD_NAMES, HEROES, MONSTERS, TOKEN_INFO, setGuildNames, teamName } from '../engine/data';
 import type { Game } from '../engine/game';
+import { HELD_PICK } from '../engine/game';
 import type { CardInst, Cell, DieFace, GameEvent, GuildId, RerollInfo, Token, Unit } from '../engine/types';
 import { tokenImageId, tokenUrl } from '../render/tokens';
 import { dieImg } from '../render/dice';
@@ -56,8 +57,7 @@ export function daTime(g: GuildId) { return `${GUILD_NAMES[g] ? 'de' : 'da'} ${t
 const DOCK: [string, string, string][] = [['hero', '🛡️', 'Status'], ['bag', '🎒', 'Bolsa'], ['score', '🏆', 'Placar'], ['missions', '📜', 'Missões'], ['cem', '⚰️', 'Cemitério'], ['log', '📖', 'Registro'], ['online', '🌐', 'Online']];
 
 /** Bloco de Defesa (painel de dados do centro). */
-const cdDefHtml = (name: string, id: string) => `<div class="cd-def" data-tid="${id}"><div class="cd-who">${name} ${lupa(id)}</div>
-  <div class="cd-row def"></div><div class="cd-btn def"></div><div class="cd-sum def"></div></div>`;
+
 
 /** Lupa ao lado do nome na tela de combate: abre os status atuais do personagem. */
 const lupa = (id: string) => `<button class="cd-lupa" data-lupa="${id}" title="Ver status">🔍</button>`;
@@ -450,8 +450,7 @@ export class Hud {
 
   /** Um Herói seu vai ser atacado: o retrato no topo pisca em vermelho e aparece o aviso. */
   alertTarget(heroId: string, attackerId: string) {
-    const g = this.game;
-    this.toast(`⚠ ${g.name(g.unit(attackerId))} vai atacar ${g.name(g.unit(heroId))}!`, '#ff5a3c');
+    void attackerId; // o painel dos dados já mostra quem ataca quem (sem aviso de texto no canto)
     const b = this.root.querySelector(`#heropick [data-hp="${heroId}"]`) as HTMLElement | null;
     if (b) { b.classList.remove('hit'); void b.offsetWidth; b.classList.add('hit'); setTimeout(() => b.classList.remove('hit'), 3000); }
   }
@@ -694,7 +693,7 @@ export class Hud {
     const items = sortTokens(u.tokens);
     const row = (t: Token) => {
       const cons = CONSUMABLE.includes(t.type);
-      const why = !cons ? '' : !canUse ? 'Ative este Herói no seu turno para usar' : u.curse === 'aquafobia' ? 'Aquafobia: não pode usar Poções' : t.type === 'turno' && g.s.extraTurn ? 'Já há um turno adicional' : '';
+      const why = !cons ? '' : !canUse ? 'Ative este Herói no seu turno para usar' : u.curse === 'aquafobia' ? 'Aquafobia: não pode usar Poções' : t.type === 'turno' && (g.s.extraTurn || g.s.extraTurnOn) ? 'Já está num turno adicional' : '';
       return `<div class="bag-it ${cons ? 'cons' : ''}"><img src="${tokenUrl(tokenImageId(t) ?? 'fundo')}"/>
         <div><b>${tokenName(t)}</b><small>${t.type === 'missao' ? 'Marcador de Missão' : TOKEN_INFO[t.type].text}</small></div>
         ${cons ? `<button class="primary" data-use="${t.id}" ${why ? `disabled title="${why}"` : ''}>Usar</button>` : ''}</div>`;
@@ -1256,6 +1255,21 @@ export class Hud {
     }
   }
 
+  /** Registro: a rolagem com os ícones dos dados (escrita quando o painel mostra o resultado — sem adiantar nada). */
+  private logRoll(e: Extract<GameEvent, { t: 'attack' }>) {
+    const g = this.game;
+    const atk = g.unit(e.attackerId);
+    const dice = (faces: DieFace[], black: boolean) => faces.map(f => `<span class="lg-die">${dieImg(f, black)}</span>`).join('');
+    const pl = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
+    const el = document.createElement('div');
+    el.className = 'lg-entry';
+    el.innerHTML = `<div class="lg-roll atk">🎲 <b>${g.name(atk)}</b> <small>${e.cardName}</small><span class="lg-dice">${dice(e.dice, true)}</span><b>${pl(e.hits, 'acerto')}</b>${e.rr?.idx.length ? ' <small>↻ rerrolado</small>' : ''}</div>`
+      + e.targets.map(t => `<div class="lg-roll def">🛡 <b>${g.name(g.unit(t.id))}</b><span class="lg-dice">${t.noHits ? '<small>sem acertos: não rolou</small>' : t.stunnedNoDefense ? '<small>Atordoado: sem Defesa</small>' : t.defense.length ? dice(t.defense, false) : '<small>sem dados</small>'}</span><b>${pl(t.blocks, 'bloqueio')}</b> → <b class="${t.wounds ? 'bad' : 'good'}">${t.wounds ? `−${t.wounds} Ferimento${t.wounds > 1 ? 's' : ''}` : 'sem Ferimentos'}</b></div>`).join('');
+    const log = $('#log', this.root);
+    log.prepend(el);
+    while (log.children.length > 120) log.lastChild!.remove();
+  }
+
   log(text: string, color?: string) {
     const el = document.createElement('div');
     el.textContent = text;
@@ -1291,7 +1305,11 @@ export class Hud {
   private centerTimers: number[] = [];
   /** Rolagem no centro da tela. Os seus dados só rolam quando você clica em "Rolar";
    *  com Rerrolagem, aparece o resultado original e depois os dados escolhidos giram de novo. */
+  /** Fecha a janela da Missão (carta / Título) — uma rolagem ou escolha precisa da tela. */
+  closePrize() { $('#prizebox', this.root).classList.add('hidden'); }
+
   centerDice(e: Extract<GameEvent, { t: 'attack' }>, done?: () => void) {
+    this.closePrize();
     const g = this.game;
     const box = $('#dicecenter', this.root);
     for (const t of this.centerTimers) clearTimeout(t);
@@ -1310,19 +1328,13 @@ export class Hud {
     // continuação de uma Rerrolagem decidida neste mesmo painel: NÃO reconstrói (não pisca); os dados escolhidos giram aqui
     const carry = this.carry && this.carry.attackerId === e.attackerId && !box.classList.contains('hidden') && box.querySelector('.cd-box') ? this.carry : null;
     this.carry = null;
-    const titleHtml = `<div class="cd-title">${reason} · <b>${g.name(atk)}</b> ${lupa(atk.id)} <small>${e.cardName}</small></div>${atkInfo(e.attackType, e.baseDice ?? e.dice.length)}`;
+    const head = this.cdHead(reason, e.reason !== 'heroi', e.cardName, e.attackType, e.baseDice ?? e.dice.length);
     if (!carry) {
-      box.innerHTML = `<div class="cd-box">
-        ${titleHtml}
-        <div class="cd-row atk"></div><div class="cd-btn atk"></div>
-        <div class="cd-sum atk"></div>
-        ${e.targets.map(t => { const u = g.unit(t.id); const p = g.defenseParts(u, atk); return cdDefHtml(`${g.name(u)}${p.length ? ` <small class="cd-defsrc">🛡 ${g.defenseDice(u, atk)}: ${p.join(' ')}</small>` : ''}`, t.id); }).join('')}
-        <div class="cd-final"></div></div>`;
+      box.innerHTML = this.cdBoxHtml(atk, e.targets.map(t => g.unit(t.id)), head);
     } else {
-      const cb = box.querySelector('.cd-box')!;
-      cb.querySelectorAll('.cd-title, .cd-atkinfo').forEach(x => x.remove());
-      cb.insertAdjacentHTML('afterbegin', titleHtml);
-      for (const t of e.targets) this.cdDef(t.id);
+      // continua no mesmo painel (Rerrolagem decidida aqui): só o cabeçalho é atualizado
+      box.querySelector('.cd-head')?.replaceWith(Object.assign(document.createElement('div'), { innerHTML: head }).firstElementChild!);
+      for (const t of e.targets) this.cdDef(t.id, atk);
     }
     box.classList.remove('hidden', 'fade');
     const alive = () => token === this.centerRun;
@@ -1360,7 +1372,7 @@ export class Hud {
       else dice = await this.rollWaves(row, first, base, black, success, mine, holder ?? null, wait, remote, tag);
       const spin = window.setInterval(() => row.querySelectorAll<HTMLElement>('.cd-die.rolling').forEach(d => { d.innerHTML = dieImg(pool[Math.floor(Math.random() * pool.length)], black); }), 70);
       this.centerTimers.push(spin);
-      if (rr && rr.idx.length && !already) {
+      if (rr && (rr.idx.length || final.length > rr.before.length) && !already) {
         await wait(500);
         row.parentElement?.querySelector('.cd-sum')?.classList.add('rr');
         for (const i of rr.idx) { const d = dice[i]; if (d) { d.classList.remove('hit', 'crit'); d.classList.add('rolling', 'rerolling'); } }
@@ -1406,13 +1418,14 @@ export class Hud {
         wrap.classList.add('show');
         const row = wrap.querySelector('.cd-row')!;
         if (carry?.kind === 'defense' && carry.heroId === t.id) {
-          if (carry.idx.length) await this.rerollIn(row, carry.dice, carry.before, carry.idx, t.defense, false, 'shield', wait, mineHero(g.unit(t.id)), wrap.querySelector('.cd-btn'));
+          if (carry.idx.length || t.defense.length > carry.before.length) await this.rerollIn(row, carry.dice, carry.before, carry.idx, t.defense, false, 'shield', wait, mineHero(g.unit(t.id)) && !carry.held, wrap.querySelector('.cd-btn'));
           wrap.querySelector('.cd-sum')!.innerHTML = `<b>${t.blocks}</b> bloqueio${t.blocks === 1 ? '' : 's'}${carry.idx.length ? ' <span class="rrtag">↻ rerrolado</span>' : ''}`;
           if (!alive()) return;
           await wait(150);
           continue;
         }
-        if (t.stunnedNoDefense) row.innerHTML = '<span class="muted">Atordoado: sem Defesa</span>';
+        if (t.noHits) row.innerHTML = '<span class="muted">Sem acertos: não precisa rolar Defesa</span>';
+        else if (t.stunnedNoDefense) row.innerHTML = '<span class="muted">Atordoado: sem Defesa</span>';
         else if (!t.defense.length) row.innerHTML = '<span class="muted">sem dados de Defesa</span>';
         else {
           const tu = g.unit(t.id);
@@ -1422,13 +1435,14 @@ export class Hud {
             else if (defRemote) await waitRemote(wrap.querySelector('.cd-btn'), tu.guild!, `def:${t.id}`, 'rolar a defesa');
           }
           if (!alive()) return;
-          await rollRow(row, t.defense, false, 'shield', t.rr, false, undefined, mineHero(tu), wrap.querySelector('.cd-btn'), defRemote, `def:${t.id}`);
+          await rollRow(row, t.defense, false, 'shield', t.rr, false, t.base, mineHero(tu), wrap.querySelector('.cd-btn'), defRemote, `def:${t.id}`);
           wrap.querySelector('.cd-sum')!.innerHTML = `<b>${t.blocks}</b> bloqueio${t.blocks === 1 ? '' : 's'}${t.rr?.idx.length ? ' <span class="rrtag">↻ rerrolado</span>' : ''}`;
         }
         if (!alive()) return;
         await wait(150);
       }
       const f = box.querySelector('.cd-final')!;
+      this.logRoll(e);
       f.className = `cd-final show ${totalW ? 'bad' : 'good'}`;
       f.innerHTML = e.targets.length > 1
         ? e.targets.map(t => `${g.name(g.unit(t.id))}: ${t.wounds ? `−${t.wounds}` : 'bloqueou'}`).join(' · ')
@@ -1468,18 +1482,58 @@ export class Hud {
     dice: HTMLElement[]; before: DieFace[]; idx: number[];
     /** Defesa decidida depois de uma Rerrolagem de ataque (mesmo painel): os dados do ataque ainda vão girar. */
     atkPending?: { dice: HTMLElement[]; before: DieFace[]; idx: number[] };
+    /** escolheu rolar os ✷ extras guardados (já clicou: os extras rolam sem pedir outro clique) */
+    held?: boolean;
   } | null = null;
   get hasCarry() { return !!this.carry; }
 
   /** Bloco de Defesa de um alvo no painel do centro (cria se faltar). */
-  private cdDef(id: string): HTMLElement {
+  private cdDef(id: string, attacker?: Unit): HTMLElement {
     const box = $('#dicecenter', this.root);
     let w = box.querySelector<HTMLElement>(`.cd-def[data-tid="${id}"]`);
     if (!w) {
-      box.querySelector('.cd-final')?.insertAdjacentHTML('beforebegin', cdDefHtml(this.game.name(this.game.unit(id)), id));
+      const defs = box.querySelector('.cd-defs');
+      const html = this.cdDefBlock(this.game.unit(id), attacker);
+      if (defs) defs.insertAdjacentHTML('beforeend', html); else box.querySelector('.cd-final')?.insertAdjacentHTML('beforebegin', html);
+      box.querySelector('.cd-box')?.classList.add('has-def');
       w = box.querySelector<HTMLElement>(`.cd-def[data-tid="${id}"]`)!;
     }
     return w;
+  }
+
+  // ---------------------------------------------------------------- painel dos dados (o mesmo para todos na partida)
+  /** Cabeçalho: tipo do lance (Ataque / Reação…), a carta e os dados dela. */
+  private cdHead(reason: string, react: boolean, card?: string, type?: string, dice?: number): string {
+    return `<div class="cd-head"><span class="cd-reason ${react ? 'react' : ''}">${reason}</span>${card ? `<b class="cd-card">${card}</b>` : ''}${type && dice ? atkInfo(type, dice) : ''}</div>`;
+  }
+  /** Um lutador: retrato, nome, Vida (como aparece no mapa agora) e, na Defesa, de onde vêm os dados. */
+  private cdFighter(u: Unit, attacker?: Unit): string {
+    const g = this.game;
+    const v = this.shown(u);
+    const max = g.maxHp(u);
+    const hp = Math.max(0, max - v.wounds);
+    const parts = attacker ? g.defenseParts(u, attacker) : [];
+    // status do lutador: Vida (como está no mapa agora), dados de Defesa e Rerrolagem
+    const def = g.defenseDice(u, attacker);
+    const rr = u.kind === 'hero' ? g.rerollsOf(u) : g.monDef(u).rerolls ?? 0;
+    const color = u.guild ? g.guild(u.guild).color : '#7a2b8f';
+    return `<div class="cd-fighter" style="--fc:${color}"><img src="${this.portraitOf(u)}" alt=""/>
+      <div class="cd-fname"><div class="cd-nrow"><b>${g.name(u)}</b>${lupa(u.id)}</div>
+        <div class="cd-stats">${hp > 0 ? medal('hp', hp, `Vida: ${hp} de ${max}`, 'cdm') : ''}${def > 0 ? medal('def', def, `${def} dado${def === 1 ? '' : 's'} de Defesa`, 'cdm') : ''}${rr ? medal('rr', rr, `Rerrolagem ${rr}`, 'cdm') : ''}</div>
+        ${parts.length ? `<small class="cd-defsrc">🛡 ${g.defenseDice(u, attacker)}: ${parts.join(' ')}</small>` : ''}</div></div>`;
+  }
+  private cdDefBlock(u: Unit, attacker?: Unit): string {
+    return `<div class="cd-def" data-tid="${u.id}">${this.cdFighter(u, attacker)}<div class="cd-row def"></div><div class="cd-btn def"></div><div class="cd-sum def"></div></div>`;
+  }
+  /** O painel inteiro: quem ataca à esquerda, quem defende à direita, o resultado embaixo. */
+  private cdBoxHtml(atk: Unit, targets: Unit[], head: string): string {
+    return `<div class="cd-box ${targets.length ? 'has-def' : ''}">${head}
+      <div class="cd-arena">
+        <div class="cd-side cd-atk">${this.cdFighter(atk)}<div class="cd-row atk"></div><div class="cd-btn atk"></div><div class="cd-sum atk"></div></div>
+        <div class="cd-vs">VS</div>
+        <div class="cd-defs">${targets.map(t => this.cdDefBlock(t, atk)).join('')}</div>
+      </div>
+      <div class="cd-final"></div></div>`;
   }
 
   /** Rola em ondas: primeiro os dados normais; cada ✷ dá direito a +1 dado, rolado depois (você clica; Monstros e IA rolam sozinhos). */
@@ -1596,11 +1650,8 @@ export class Hud {
     const black = req.kind === 'attack';
     const ok = (f: DieFace) => f === 'crit' || f === req.success;
     const attacker = g.unit(req.kind === 'attack' ? me.id : req.vs!.id);
-    box.innerHTML = `<div class="cd-box">
-      <div class="cd-title">${req.kind === 'attack' || attacker.kind === 'hero' ? 'Ataque' : 'Reação'} · <b>${g.name(attacker)}</b>${req.card ? ` <small>${req.card.name}</small>` : ''}</div>${req.card ? atkInfo(req.card.type, req.card.dice) : ''}
-      <div class="cd-row atk"></div><div class="cd-btn atk"></div><div class="cd-sum atk"></div>
-      ${req.kind === 'defense' ? cdDefHtml(g.name(me), me.id) : ''}
-      <div class="cd-final"></div></div>`;
+    const tgtS = req.kind === 'defense' ? me : (req as { target?: string }).target ? g.unit((req as { target?: string }).target!) : null;
+    box.innerHTML = this.cdBoxHtml(attacker, tgtS ? [tgtS] : [], this.cdHead(attacker.kind === 'hero' ? 'Ataque' : 'Reação', attacker.kind !== 'hero', req.card?.name, req.card?.type, req.card?.dice));
     box.classList.remove('hidden', 'fade', 'interactive');
     const settle = (row: Element, faces: DieFace[], b: boolean, s: string) => { row.innerHTML = ''; for (const f of faces) { const d = document.createElement('span'); d.className = `cd-die ${b ? 'black' : 'white'}`; d.innerHTML = dieImg(f, b); d.classList.toggle('hit', f === 'crit' || f === s); d.classList.toggle('crit', f === 'crit'); row.append(d); } };
     (async () => {
@@ -1624,13 +1675,14 @@ export class Hud {
       if (token !== this.centerRun) return;
       const hits = req.faces.filter(ok).length;
       sum.innerHTML = `<b>${hits}</b> ${black ? 'acerto' : 'bloqueio'}${hits === 1 ? '' : 's'}`;
-      btn.innerHTML = `<span class="cd-wait">⏳ ${who} está escolhendo quais dados rerrolar…</span>`;
+      btn.innerHTML = `<span class="cd-wait">⏳ ${(req as { covered?: boolean }).covered ? `${who} já bloqueou tudo: está escolhendo se mantém ou rola mais…` : `${who} está escolhendo quais dados rerrolar…`}</span>`;
     })();
   }
   /** Acabou de acompanhar a Rerrolagem do outro (o resultado vem a seguir, normal). */
   endSpectate() { if (this.spectating) { this.spectating = false; this.resetDice(); } }
 
-  askDecision(req: { heroId: string; kind: 'attack' | 'defense'; faces: DieFace[]; success: DieFace; rerolls: number; base?: number; round?: number; vs?: { id: string; faces: DieFace[]; hits: number; type: string; base?: number }; card?: { name: string; type: string; dice: number } }): Promise<number[]> {
+  askDecision(req: { heroId: string; kind: 'attack' | 'defense'; faces: DieFace[]; success: DieFace; rerolls: number; covered?: boolean; held?: number; base?: number; round?: number; vs?: { id: string; faces: DieFace[]; hits: number; type: string; base?: number }; card?: { name: string; type: string; dice: number } }): Promise<number[]> {
+    this.closePrize();
     const g = this.game;
     const box = $('#dicecenter', this.root);
     for (const t of this.centerTimers) clearTimeout(t);
@@ -1651,12 +1703,8 @@ export class Hud {
     const prev = !cont && this.carry && this.carry.kind === 'attack' && this.carry.attackerId === attackerId && !box.classList.contains('hidden') ? this.carry : null;
     this.carry = null;
     if (!prev && !cont) {
-      const title = `${req.kind === 'attack' || attacker.kind === 'hero' ? 'Ataque' : 'Reação'} · <b>${g.name(attacker)}</b> ${lupa(attacker.id)}${req.card ? ` <small>${req.card.name}</small>` : ''}`;
-      box.innerHTML = `<div class="cd-box">
-        <div class="cd-title">${title}</div>${req.card ? atkInfo(req.card.type, req.card.dice) : ''}
-        <div class="cd-row atk"></div><div class="cd-btn atk"></div><div class="cd-sum atk"></div>
-        ${req.kind === 'defense' ? cdDefHtml(g.name(me), me.id) : ''}
-        <div class="cd-final"></div></div>`;
+      const tgtD = req.kind === 'defense' ? me : (req as { target?: string }).target ? g.unit((req as { target?: string }).target!) : null;
+      box.innerHTML = this.cdBoxHtml(attacker, tgtD ? [tgtD] : [], this.cdHead(attacker.kind === 'hero' ? 'Ataque' : 'Reação', attacker.kind !== 'hero', req.card?.name, req.card?.type, req.card?.dice));
     }
     box.classList.remove('hidden', 'fade');
     const mk = (row: Element, b: boolean) => { const d = document.createElement('span'); d.className = `cd-die ${b ? 'black' : 'white'} rolling`; d.innerHTML = dieImg('blank', b); row.append(d); return d; };
@@ -1685,7 +1733,7 @@ export class Hud {
         let dice: HTMLElement[];
         if (cont) {
           // rodada seguinte: os dados escolhidos antes giram e param; depois escolhe de novo com o que sobrou
-          if (cont.idx.length) await this.rerollIn(row, cont.dice, cont.before, cont.idx, req.faces, black, req.success, wait, true, btn);
+          if (cont.idx.length || req.faces.length > cont.before.length) await this.rerollIn(row, cont.dice, cont.before, cont.idx, req.faces, black, req.success, wait, !cont.held, btn);
           dice = cont.dice;
         } else {
           row.innerHTML = '';
@@ -1707,8 +1755,21 @@ export class Hud {
         box.classList.add('interactive'); // a escolha abaixo precisa de clique
         // escolha dos dados para rerrolar (aqui mesmo)
         const sel = new Set<number>();
-        req.faces.forEach((f, i) => { if (!ok(f, req.success) && sel.size < req.rerolls) sel.add(i); });
+        // Defesa que já bloqueou tudo: nada vem marcado e o botão principal é Manter
+        if (!req.covered) req.faces.forEach((f, i) => { if (!ok(f, req.success) && sel.size < req.rerolls) sel.add(i); });
         const paint = () => {
+          if (req.covered) {
+            dice.forEach((d, i) => d.classList.toggle('pick', sel.has(i)));
+            const hits = req.faces.filter(f => ok(f, req.success)).length;
+            sum.innerHTML = `<b>${hits}</b> bloqueio${hits === 1 ? '' : 's'} · ✔ já bloqueou todos os acertos${req.rerolls ? ` · ↻ se quiser, clique nos dados para rerrolar (${sel.size}/${req.rerolls})` : ''}`;
+            btn.innerHTML = `<button class="primary" id="cd-keep">✔ Manter</button>${req.held ? `<button id="cd-held">✷ Rolar +${req.held} dado${req.held > 1 ? 's' : ''} extra${req.held > 1 ? 's' : ''}</button>` : ''}${req.rerolls ? `<button id="cd-rr" ${sel.size ? '' : 'disabled'}>↻ Rerrolar ${sel.size || ''}</button>` : ''}`;
+            (btn.querySelector('#cd-keep') as HTMLElement).onclick = () => finish([]);
+            const hb = btn.querySelector('#cd-held') as HTMLElement | null;
+            if (hb) hb.onclick = () => finish([HELD_PICK]);
+            const rb = btn.querySelector('#cd-rr') as HTMLElement | null;
+            if (rb) rb.onclick = () => finish([...sel]);
+            return;
+          }
           dice.forEach((d, i) => d.classList.toggle('pick', sel.has(i)));
           const hits = req.faces.filter(f => ok(f, req.success)).length;
           sum.innerHTML = `<b>${hits}</b> ${black ? 'acerto' : 'bloqueio'}${hits === 1 ? '' : 's'} · ↻ ${(req.round ?? 1) > 1 ? `Ainda tem ${req.rerolls} Rerrolagem` : `Rerrolagem ${req.rerolls}`}: clique nos dados para rolar de novo (${sel.size}/${req.rerolls})${[...sel].some(i => ok(req.faces[i], req.success)) ? `<div class="rr-warn">⚠ Rerrolar um dado que já acertou pode fazer você perder esse ${req.kind === 'attack' ? 'acerto' : 'bloqueio'} — mas pode sair ✷ (crítico)!</div>` : ''}`;
@@ -1721,9 +1782,11 @@ export class Hud {
           d.classList.add('pickable');
           d.onclick = () => { if (sel.has(i)) sel.delete(i); else if (sel.size < req.rerolls) sel.add(i); paint(); };
         });
-        const key = (ev: KeyboardEvent) => { if (ev.code === 'Enter' || ev.code === 'Space') { ev.preventDefault(); ev.stopImmediatePropagation(); finish([...sel]); } };
+        const key = (ev: KeyboardEvent) => { if (ev.code === 'Enter' || ev.code === 'Space') { ev.preventDefault(); ev.stopImmediatePropagation(); finish(req.covered ? [] : [...sel]); } };
         this.diceKey(key);
-        const finish = (idx: number[]) => {
+        const finish = (pick: number[]) => {
+          const held = pick.includes(HELD_PICK);
+          const idx = pick.filter(i => i >= 0);
           this.diceUnkey(key);
           btn.innerHTML = '';
           box.classList.remove('interactive');
@@ -1731,8 +1794,9 @@ export class Hud {
           // os escolhidos já começam a girar aqui; o resultado novo para neste mesmo painel
           for (const i of idx) { dice[i].classList.remove('hit', 'crit'); dice[i].classList.add('rolling', 'rerolling'); }
           if (idx.length) { spinRow(row, black); play('dice'); sum.innerHTML = '↻ Rerrolando…'; }
-          this.carry = { heroId: req.heroId, kind: req.kind, attackerId, dice, before: req.faces.slice(), idx, atkPending };
-          resolve(idx);
+          if (held) sum.innerHTML = '✷ Rolando os dados extras…';
+          this.carry = { heroId: req.heroId, kind: req.kind, attackerId, dice, before: req.faces.slice(), idx, atkPending, held };
+          resolve(pick);
         };
         paint();
       })();

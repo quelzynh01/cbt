@@ -247,6 +247,8 @@ export interface GameState {
   hideoutTaken?: boolean;
   /** Grito de Guerra: a Guilda pode ativar outro Herói neste turno. */
   warCry?: GuildId | null;
+  /** Heróis que andaram com as Botas neste turno (não podem ser ativados — só pelo Grito de Guerra). */
+  booted?: string[];
   /** O Herói ativo morreu com Grito de Guerra / Bênção ainda valendo: a próxima ativação do turno é a extra. */
   extraOnly?: boolean;
   /** Cartas ativáveis já usadas neste turno (Manto do Deslocamento). */
@@ -283,7 +285,7 @@ export type GameEvent =
       dice: DieFace[];
       hits: number;
       crits: number;
-      targets: { id: string; defense: DieFace[]; blocks: number; wounds: number; stunnedNoDefense: boolean; rr?: RerollInfo }[];
+      targets: { id: string; defense: DieFace[]; blocks: number; wounds: number; stunnedNoDefense: boolean; rr?: RerollInfo; /** sem acertos: não precisou rolar Defesa */ noHits?: boolean; /** dados de Defesa rolados de verdade (sem os extras de ✷) */ base?: number }[];
       notes: string[];
       /** Rerrolagem do ataque: faces antes e quais dados foram rolados de novo. */
       rr?: RerollInfo;
