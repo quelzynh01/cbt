@@ -109,7 +109,7 @@ export const PATIO_DA_UNIVERSIDADE: MapDef = {
 
   missions: {
     pve: [
-      { id: 'tomos', name: 'Encontrar os Tomos', kind: 'pve', text: 'Tenha 2 dos 4 Tomos (marcadores de Missão) com os Heróis da sua Guilda. Os Tomos continuam em jogo: matar quem carrega rouba um. Dá o Título "Mestre do Conhecimento" ao primeiro.', rule: 'carry', count: 2, title: 'mestre_conhecimento', titleFirstOnly: true },
+      { id: 'tomos', name: 'Encontrar os Tomos', kind: 'pve', text: 'Tenha 2 dos 4 Tomos (marcadores de Missão) com os Heróis da sua Guilda. Os Tomos continuam em jogo: matar quem carrega rouba um. Dá o Título "Mestre do Conhecimento" (vantagem na campanha) só ao primeiro: os outros podem completar a Missão, mas sem o Título.', rule: 'carry', count: 2, title: 'mestre_conhecimento', titleFirstOnly: true },
       { id: 'troll', name: 'Matar o Troll', kind: 'pve', text: 'Mate o Troll. Dá uma carta de Recompensa (Tomo da Iluminação).', rule: 'kill_type', types: ['troll'], reward: true },
       { id: 'minotauro', name: 'Matar o Minotauro', kind: 'pve', text: 'Mate o Minotauro. Dá uma carta de Recompensa (Tomo da Iluminação).', rule: 'kill_type', types: ['minotauro'], reward: true },
     ],

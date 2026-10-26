@@ -94,7 +94,7 @@ export const PORTAO_DA_LUA: MapDef = {
 
   missions: {
     pve: [
-      { id: 'portao', name: 'Fechar o Portão', kind: 'pve', text: 'Pise no marcador de Missão Vermelho ou Verde (sem Inimigos no Espaço) para fechar o portão: remove 1 Entrada de Monstro. Dá o Título "Guardião do Portão" ao primeiro.', rule: 'step_on', colors: ['vermelho', 'verde'], removeEntry: true, title: 'guardiao_portao', titleFirstOnly: true },
+      { id: 'portao', name: 'Fechar o Portão', kind: 'pve', text: 'Pise no marcador de Missão Vermelho ou Verde (sem Inimigos no Espaço) para fechar o portão: remove 1 Entrada de Monstro. Dá o Título "Guardião do Portão" (vantagem na campanha) só ao primeiro: os outros podem completar a Missão, mas sem o Título.', rule: 'step_on', colors: ['vermelho', 'verde'], removeEntry: true, title: 'guardiao_portao', titleFirstOnly: true },
       { id: 'capitao', name: 'Matar o Capitão Orc', kind: 'pve', text: 'Mate um Capitão Orc. Dá uma carta de Recompensa (Espada do Capitão). Máximo de 2 jogadores.', rule: 'kill_type', types: ['capitao_orc'], reward: true, maxCompletions: 2 },
     ],
     rewards: ['espada_capitao', 'espada_capitao'],

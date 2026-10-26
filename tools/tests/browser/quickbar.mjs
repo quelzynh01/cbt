@@ -41,4 +41,16 @@ const end = await page.evaluate(() => { const c = window.cbt, g = c.game; return
 console.log('final:', JSON.stringify(end));
 const ok = bar.n === 1 && st.boot && st.inspected === setup.b && st.green > 0 && !end.boot && end.inspected === setup.a && !end.bar;
 console.log(ok ? 'ATALHO DAS BOTAS OK' : 'FALHOU');
+// painel de ataque: "Rolar ataque" e "Cancelar ataque" na mesma linha
+await page.evaluate(() => {
+  const c = window.cbt, g = c.game, a = g.unit(g.s.activation.heroId);
+  const m = g.units().find(u => u.kind === 'monster' && u.alive && u.cell);
+  m.cell = { ...a.cell };
+  const card = g.usableCards(a).find(x => g.attackTargets(a, x).some(t => t.id === m.id));
+  if (card) c.act({ type: 'attack', cardUid: card.uid, targetId: m.id });
+});
+await wait(2500);
+const row = await page.evaluate(() => { const r = document.querySelector('.cd-roll')?.getBoundingClientRect(), k = document.querySelector('.cd-cancel')?.getBoundingClientRect(); return r && k ? { same: Math.abs(r.top - k.top) < 8, roll: r.height, cancel: k.height } : null; });
+console.log('botões do ataque:', JSON.stringify(row));
+await page.screenshot({ path: `${OUT}/qb-atk.png` });
 await browser.close();

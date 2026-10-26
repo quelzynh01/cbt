@@ -20,11 +20,11 @@ export const QUARTEL_ASSOMBRADO: MapDef = {
   // salas dos cantos (marcador de Missão) só pelo portal, salas desbotadas fechadas
   walls: [
     // em cima
-    ...[1, 2, 3, 4, 5, 6, 7, 8].map(c => [C(c, 0), C(c, 1)] as [Cell, Cell]),
+    ...[1, 2, 6, 7].map(c => [C(c, 0), C(c, 1)] as [Cell, Cell]),
     [C(2, 0), C(3, 0)], [C(5, 0), C(6, 0)], 
     [C(0, 1), C(1, 1)], [C(0, 2), C(1, 2)], [C(0, 2), C(0, 3)],
     // embaixo (espelhado)
-    ...[1, 2, 3, 4, 5, 6, 7, 8].map(c => [C(c, 4), C(c, 5)] as [Cell, Cell]),
+    ...[1, 2, 6, 7].map(c => [C(c, 4), C(c, 5)] as [Cell, Cell]),
     [C(2, 5), C(3, 5)], [C(5, 5), C(6, 5)], 
     [C(0, 3), C(0, 4)], [C(0, 4), C(1, 4)], 
     // salas das Áreas Iniciais (portas em cima e embaixo)

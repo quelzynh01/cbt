@@ -1,4 +1,5 @@
 import { SimpleAI, type AILevel } from '../ai/ai';
+import { CARD_ART } from './cardArt';
 import { gameConfirm } from './dialog';
 import { bindInvEditor, invEditorHtml, type BagTok, type InvItem, type InvOptions } from './inventoryEditor';
 import { tokenImageId, tokenUrl } from '../render/tokens';
@@ -1764,7 +1765,8 @@ export class Controller {
           if (!info?.ok || info.pick === 'dead') continue;
           const cd = g.cardDef(c);
           if (cd.fx.bootMove && !g.bootCells(h, c).length) continue; // sem Espaço livre para ir
-          const icon = cd.fx.bootMove ? '👢' : '⚡';
+          const art = CARD_ART[c.defId];
+          const icon = art ? `<img class="iq-item" src="${import.meta.env.BASE_URL}cards/${art.img}.webp" alt=""/>` : '⚡';
           items.push(`<button data-qh="${h.id}" data-qc="${c.uid}" title="${cd.name} (${g.name(h)}): ${info.label}"><img src="${this.hud.portraitOf(h)}" alt=""/><span>${icon}</span><small>${cd.name}</small></button>`);
         }
       }

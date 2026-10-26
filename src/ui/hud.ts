@@ -580,7 +580,7 @@ export class Hud {
   }
 
   /** Carta de Recompensa (ou Título) que a Missão dá: aparece na tela até fechar no ✕. */
-  showPrize(m: { name: string; reward?: boolean; title?: string }) {
+  showPrize(m: { id?: string; name: string; reward?: boolean; title?: string; titleFirstOnly?: boolean }) {
     const g = this.game;
     const box = $('#prizebox', this.root);
     const card = m.reward ? (g.s.rewardDeck?.[0] ?? g.map.missions.rewards[0]) : null;
@@ -589,7 +589,11 @@ export class Hud {
     box.innerHTML = `<div class="pz-box"><button class="pz-x" title="Fechar">✕</button>
       <div class="aw-kind">${card ? '🃏 Recompensa' : '🏅 Título'} · ${m.name}</div>
       ${card ? `<div class="aw-card">${itemCard(card)}</div><div class="pz-sub">${left ? `Restam ${left} carta${left > 1 ? 's' : ''} de Recompensa` : 'As cartas de Recompensa já acabaram'}</div>` : ''}
-      ${m.title ? `<div class="aw-title">${TITLES[m.title] ?? m.title}</div><div class="aw-text">${TITLE_TEXT[m.title] ?? ''}</div>` : ''}</div>`;
+      ${m.title ? `<div class="aw-title">${TITLES[m.title] ?? m.title}</div><div class="aw-text">${TITLE_TEXT[m.title] ?? ''}</div>` : ''}
+      ${m.title && m.titleFirstOnly ? (() => {
+        const first = m.id ? g.s.missionDone[m.id]?.[0] : undefined;
+        return `<div class="pz-first">🥇 <b>Só o primeiro</b> a completar recebe o Título (a vantagem na campanha). Os outros também podem completar a Missão, mas sem o Título.${first ? `<br/>Já ficou com: <b style="color:${GUILDS[first].color}">${this.nameOf(first) ?? guildShort(first)}</b>` : ''}</div>`;
+      })() : ''}</div>`;
     box.classList.remove('hidden');
     paintCardArt(box);
     (box.querySelector('.pz-x') as HTMLElement).onclick = () => box.classList.add('hidden');

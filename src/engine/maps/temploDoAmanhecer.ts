@@ -23,7 +23,7 @@ export const TEMPLO_DO_AMANHECER: MapDef = {
     { code: '9A', c: 0, r: 6 }, { code: '3A', c: 3, r: 6 }, { code: '7A', c: 6, r: 6 },
   ],
 
-  pillars: [C(2, 0), C(6, 0), C(7, 0), C(8, 0), C(3, 2), C(5, 2), C(1, 4), C(3, 6), C(5, 6), C(2, 8), C(3, 8), C(4, 8), C(5, 8), C(6, 8), C(0, 1)],
+  pillars: [C(2, 0), C(6, 0), C(7, 0), C(8, 0), C(3, 2), C(5, 2), C(1, 4), C(3, 6), C(5, 6), C(2, 8), C(3, 8), C(4, 8), C(5, 8), C(6, 8), C(0, 1), C(3, 0), C(4, 0)],
 
   rooms: [C(6, 3), C(7, 3), C(8, 3), C(6, 4), C(7, 4), C(8, 4), C(6, 5), C(7, 5), C(8, 5), C(5, 3), C(5, 4), C(5, 5)],
 
@@ -39,7 +39,6 @@ export const TEMPLO_DO_AMANHECER: MapDef = {
     // Templo e nicho da entrada
     [C(5, 3), C(6, 3)], [C(5, 5), C(6, 5)], 
     // revisão dos mapas
-    [C(3, 0), C(3, 1)], [C(4, 0), C(4, 1)], [C(4, 0), C(5, 0)],
     // revisão dos mapas
     [C(4, 3), C(5, 3)], [C(4, 5), C(5, 5)],
   ],
