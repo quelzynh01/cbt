@@ -76,7 +76,8 @@ function shuffle<T>(a: T[], rnd: () => number): T[] {
 }
 
 export function newSetup(seats: SeatInfo[], aiLevel: AILevel, rnd: () => number = Math.random, mode: 'single' | 'campaign' = 'single', diceCap = true, pickOne = true, heroSet: HeroSet = 'core', edition: Edition = 'classic', pickMode: 'draft' | 'allpick' = 'draft'): OnlineSetup {
-  const order = seats.map(s => s.guild);
+  // ordem do recrutamento (e de quem escolhe o mapa) sorteada — não a ordem em que entraram na sala
+  const order = shuffle(seats.map(s => s.guild), rnd);
   const st: OnlineSetup = {
     step: 'draft', round: 0, order, hands: {}, choice: {}, picks: {}, votes: {}, equip: {}, tick: 0, aiLevel,
     mode, diceCap, upPick: {}, upBuy: {}, upArr: {}, ...(pickOne ? { pickOne } : {}), ...(heroSet !== 'core' ? { heroSet } : {}), ...(mode === 'campaign' && edition !== 'classic' ? { edition } : {}),

@@ -40,7 +40,11 @@ export interface RerollRequest { heroId: string; kind: 'attack' | 'defense'; fac
   /** Defesa que já bloqueou todos os acertos: Manter é o padrão (rolar os ✷ extras / Rerrolar só se quiser). */
   covered?: boolean;
   /** ✷ que ainda não rolaram o dado extra (responda com HELD_PICK para rolar). */
-  held?: number }
+  held?: number;
+  /** O ataque não acertou: rolar a Defesa mesmo assim? (HELD_PICK = rolar; [] = manter) */
+  noHits?: boolean;
+  /** Ataque com vários alvos: Defesas deste mesmo ataque que já foram resolvidas (mostradas antes, uma por vez). */
+  done?: { id: string; faces: DieFace[]; blocks: number; noHits?: boolean }[] }
 
 /** Escolha do jogador no meio de um ataque: para onde empurrar (Rajada de Vento) ou quem mais atingir (Raio Nova, Fender).
  *  A resposta é o índice em `cells`/`units`, ou −1 para não fazer nada. */
@@ -222,7 +226,7 @@ export class Game {
       const id = `m${i + 1}`;
       s.units[id] = {
         id, kind: 'monster', defId: baseId(m.type) + suffix, guild: null, cell: { ...m.cell },
-        wounds: 0, alive: true, stunned: false, cards: [], tokens: [], deaths: 0, num: 0,
+        wounds: 0, alive: true, stunned: false, cards: [], tokens: [], deaths: 0, num: 0, ...(m.soul ? { soul: true } : {}),
       };
     });
     // Monstros que só entram por regras do cenário (Sombra do Lorde Presas, Irmã escondida…)
@@ -350,7 +354,7 @@ export class Game {
   cardDef(c: CardInst): CardDef { return CARDS[c.defId]; }
   name(u: Unit): string {
     if (u.kind === 'hero') return `${HEROES[u.defId].name} (${GUILDS[u.guild!].name.split(' (')[0].replace('Guilda ', '')})`;
-    return u.shadow ? `Sombra do ${MONSTERS[u.defId].name}` : MONSTERS[u.defId].name;
+    return u.shadow ? `Sombra do ${MONSTERS[u.defId].name}` : u.soul ? `Alma do ${MONSTERS[u.defId].name}` : MONSTERS[u.defId].name;
   }
   floorAt(c: Cell): Token[] { return this.s.floor[key(c)] ?? []; }
   private addFloor(c: Cell, t: Token) { (this.s.floor[key(c)] ??= []).push(t); }
@@ -873,6 +877,8 @@ export class Game {
     this.log(`${this.guild(by).name} posicionou seus Heróis.`);
     if (!this.s.deploying.length) {
       this.s.deploying = null;
+      // mapa em que o Lorde Presas já começa no tabuleiro: ele surge agora (animação de entrada para todos)
+      for (const m of this.monstersOnBoard()) if (baseId(m.defId) === 'lorde_presas') this.emit({ t: 'lordEntrance', id: m.id, cell: { ...m.cell! } });
       // ninguém começa ativado: o jogador escolhe o Herói e clica em "Ativar"
       this.emit({ t: 'turn', guild: this.currentGuild().id, turn: this.s.turn });
     }
@@ -1137,19 +1143,30 @@ export class Game {
   /** Rolagem de Defesa: `need` = acertos do ataque (0 = não precisa rolar; já bloqueou tudo = para de rolar). */
   private defenseRoll(t: Unit, dice: number, attacker: Unit, need?: number): RollResult {
     if (need !== undefined && need <= 0 && dice > 0 && !t.stunned) {
-      const go = t.kind === 'hero' && this.confirm(t, 'Defesa', `<b>${this.name(attacker)}</b> não acertou: rolar a Defesa de <b>${this.name(t)}</b> mesmo assim?`, false, this.curAttack?.faces,
-        { yes: '🎲 Rolar a Defesa', no: 'Manter (não rolar)', keep: true });
-      if (!go) return { faces: [], successes: 0, crits: 0, noHits: true };
+      let go = false;
+      if (t.kind === 'hero' && t.guild && this.rerollHook) {
+        const pick = this.rerollHook({ heroId: t.id, kind: 'defense', faces: [], success: 'shield', rerolls: 0, base: 0, round: 1, guild: t.guild,
+          vs: this.curAttack ?? undefined, covered: true, noHits: true, ...(this.curDefsDone.length ? { done: this.curDefsDone.slice() } : {}) });
+        go = pick !== 'auto' && pick.includes(HELD_PICK);
+      }
+      if (!go) { this.curDefsDone.push({ id: t.id, faces: [], blocks: 0, noHits: true }); return { faces: [], successes: 0, crits: 0, noHits: true }; }
       need = undefined;
     }
     this.defNeed = need ?? null;
     this.defWho = t;
-    try { const r = this.defenseRollInner(t, dice, attacker); r.base = this.lastDefDice; return r; } finally { this.defNeed = null; this.defWho = null; }
+    try {
+      const r = this.defenseRollInner(t, dice, attacker);
+      r.base = this.lastDefDice;
+      this.curDefsDone.push({ id: t.id, faces: r.faces.slice(), blocks: r.successes });
+      return r;
+    } finally { this.defNeed = null; this.defWho = null; }
   }
 
   private lastDefDice = 0;
   /** Quem está rolando a Defesa agora, e se já escolheu continuar rolando os ✷ depois de bloquear tudo. */
   private defWho: Unit | null = null;
+  /** Defesas já resolvidas no ataque em andamento (vários alvos: o painel mostra uma de cada vez). */
+  private curDefsDone: { id: string; faces: DieFace[]; blocks: number; noHits?: boolean }[] = [];
   /** Rola os dados extras dos ✷ que ficaram guardados. */
   private rollHeld(r: RollResult, die: DieFace[], success: DieFace): RollResult {
     if (!r.held) return r;
@@ -1273,6 +1290,7 @@ export class Game {
       this.emit({ t: 'skill', id: h.id, skill: 'sorte_apostador', name: 'Sorte de Apostador' });
     }
     this.curAttack = { id: h.id, faces: atk.faces.slice(), hits: atk.successes, type: def.attackType!, base: n };
+    this.curDefsDone = [];
     if (atk.rerolled) notes.push(`↻ ${atk.rerolled} dado${atk.rerolled > 1 ? 's' : ''} rerrolado${atk.rerolled > 1 ? 's' : ''}`);
     if (ab === 'maestria_arco' && def.group === 'Arco' && atk.crits) { atk.successes += atk.crits; notes.push(`Maestria com Arco: +${atk.crits}`); }
     if (fx.critExtra && atk.crits) { atk.successes += atk.crits * fx.critExtra; notes.push(`${def.name}: +${atk.crits * fx.critExtra} acerto(s) por ✷`); }
@@ -3030,7 +3048,8 @@ export class Game {
     const card = mon ? { name: MONSTERS[who!.defId].attackName, type: success, dice: n } : kind === 'attack' && this.curCard ? { ...this.curCard, dice: n } : undefined;
     const ask = (faces: DieFace[], left: number, round: number, more?: { covered: true; held?: number }) => this.rerollHook!({ heroId: who!.id, kind, faces: faces.slice(), success, rerolls: left, base: n, round,
       guild: mon ? this.monsterControllerGuild() : who!.guild ?? undefined, target: target?.id,
-      vs: kind === 'defense' ? this.curAttack ?? undefined : undefined, card, ...(more ?? {}) });
+      vs: kind === 'defense' ? this.curAttack ?? undefined : undefined, card, ...(more ?? {}),
+      ...(kind === 'defense' && this.curDefsDone.length ? { done: this.curDefsDone.slice() } : {}) });
     const first = r.faces.slice();
     let choice: number[] | 'auto';
     let round0 = 1;
@@ -3276,6 +3295,7 @@ export class Game {
     let atk = this.rollRerolls(dice, ATTACK_DIE, md.attackType, mrr, m, 'attack', h);
     if (this.knightShield(h, atk.successes, m, atk.faces)) { atk = this.rollRerolls(dice, ATTACK_DIE, md.attackType, mrr, m, 'attack', h); notes.push('Escudo de Cavaleiro: ataque rolado de novo'); }
     this.curAttack = { id: m.id, faces: atk.faces.slice(), hits: atk.successes, type: md.attackType, base: dice };
+    this.curDefsDone = [];
     if (md.rerolls) notes.push(`Rerrolagem ${md.rerolls}`);
     if (ab.includes('critExtra') && atk.crits) { atk.successes += atk.crits; notes.push(`+${atk.crits} acerto(s) por ✷`); }
     // Troll: atinge todos os Heróis Perto; Lorde Presas: também os Inimigos Perto do alvo

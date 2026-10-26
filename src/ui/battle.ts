@@ -1,4 +1,5 @@
 import { itemArt, itemColor, medal, richText } from './cardview';
+import { SOUL_FILTER } from '../render/chibi';
 import { CARD_ART } from './cardArt';
 import { play } from '../audio/sfx';
 import { dieImg } from '../render/dice';
@@ -120,8 +121,9 @@ export class BattlePanel {
     const lunge = lk >= 0 && lk <= 1 ? Math.sin(lk * Math.PI) * 26 * (f.flip ? -1 : 1) : 0;
     const hurt = Math.max(0, 1 - (now - f.hurtT) / 420);
     if (u.shadow) ctx.filter = 'grayscale(1) contrast(1.15) brightness(0.9)';
-    drawCharacter(ctx, u.defId, { flip: f.flip, t: now / 1000, hurt, alpha: 1, stunned: u.stunned, lunge, scale: s });
-    if (u.shadow) ctx.filter = 'none';
+    if (u.soul) ctx.filter = SOUL_FILTER;
+    drawCharacter(ctx, u.defId, { flip: f.flip, t: now / 1000, hurt, alpha: u.soul ? 0.8 : 1, stunned: u.stunned, lunge, scale: s });
+    if (u.shadow || u.soul) ctx.filter = 'none';
     ctx.restore();
   }
 

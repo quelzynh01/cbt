@@ -1,0 +1,44 @@
+// Entrada do Lorde Presas (Templo): escondido enquanto posicionam; depois de todos prontos surge com animação e fala
+import puppeteer from 'puppeteer-core';
+const OUT = process.argv[2] ?? '.';
+const browser = await puppeteer.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true, args: ['--autoplay-policy=no-user-gesture-required'] });
+const page = await browser.newPage();
+await page.setViewport({ width: 1400, height: 850 });
+page.on('pageerror', e => console.log('PAGEERR', e.message));
+const wait = ms => new Promise(r => setTimeout(r, ms));
+await page.goto('http://localhost:5199/', { waitUntil: 'networkidle0' });
+await wait(2000);
+await page.click('#m-test'); await wait(800);
+await page.evaluate(() => document.querySelector('#ts-start')?.click()); await wait(3000);
+await page.evaluate(() => { const c = window.cbt; c.startTest(undefined, { ...c.testCfg, mapId: 'templo-do-amanhecer-crepuscular' }); });
+await wait(4000);
+const before = await page.evaluate(() => {
+  const c = window.cbt, g = c.game;
+  const lord = g.units().find(u => u.kind === 'monster' && u.defId.startsWith('lorde_presas'));
+  window.__played = [];
+  const A = window.Audio.prototype.play;
+  window.Audio.prototype.play = function () { window.__played.push(this.src.split('/').pop()); return A.call(this); };
+  return { deploying: g.s.deploying?.length ?? 0, alpha: c.renderer.units.get(lord.id).alpha, id: lord.id };
+});
+console.log('posicionando:', JSON.stringify(before));
+await page.screenshot({ path: `${OUT}/lord-0.png` });
+// todos prontos
+await page.evaluate(() => { const b = [...document.querySelectorAll('button')].find(x => /Pronto|Começar|Confirmar/i.test(x.textContent || '')); b?.click(); });
+await wait(1000);
+await page.evaluate(() => { const b = [...document.querySelectorAll('button')].find(x => /Sim, terminar/i.test(x.textContent || '')); b?.click(); });
+await wait(1500);
+await page.screenshot({ path: `${OUT}/lord-1.png` });
+await wait(1000);
+await page.screenshot({ path: `${OUT}/lord-2.png` });
+await wait(2500);
+const after = await page.evaluate(id => ({ deploying: window.cbt.game.s.deploying?.length ?? 0, alpha: window.cbt.renderer.units.get(id).alpha, played: window.__played }), before.id);
+console.log('depois:', JSON.stringify(after));
+await page.screenshot({ path: `${OUT}/lord-3.png` });
+await page.evaluate(id => { const c = window.cbt; c.renderer.focus([c.game.unit(id).cell], 1.2); }, before.id);
+await wait(700);
+await page.screenshot({ path: `${OUT}/lord-bats.png`, clip: { x: 400, y: 150, width: 600, height: 450 } });
+await page.evaluate(() => { const c = window.cbt, d = c.game.s.doors.find(x => x.locked); if (d) c.renderer.focus([d.a, d.b], 1.2); });
+await wait(700);
+await page.screenshot({ path: `${OUT}/lord-gate.png`, clip: { x: 400, y: 150, width: 600, height: 450 } });
+console.log(before.deploying > 0 && before.alpha === 0 && after.alpha === 1 && after.played.some(s => s.startsWith('lorde-presas-entrada')) ? 'ENTRADA DO LORDE OK' : 'FALHOU');
+await browser.close();

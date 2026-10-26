@@ -653,8 +653,13 @@ button.primary { background: linear-gradient(#e9a83a, #b9761b); border-color: #f
 
 .cd-die.pickable { cursor: var(--cur-pointer, pointer); }
 .cd-die.pick { outline: 3px solid #5ad08a; outline-offset: 2px; border-radius: 10px; transform: rotate(-8deg) scale(1.08); }
-.cd-btn { display: flex; gap: 8px; justify-content: center; align-items: center; flex-wrap: nowrap; }
+.cd-btn { display: flex; gap: 8px; justify-content: center; align-items: center; flex-wrap: wrap; max-width: 100%; }
 .cd-btn button { white-space: nowrap; }
+/* Rolar ataque + Cancelar: sempre lado a lado */
+.cd-btn:has(.cd-cancel) { flex-wrap: nowrap; }
+/* Defesa que já bloqueou tudo: Manter / dado extra / Rerrolar compactos, cabem no quadro */
+.cd-btn.cd-keepbar { gap: 6px; }
+.cd-btn.cd-keepbar button { font-size: 13px; padding: 6px 10px; min-width: 0; }
 .cd-row.vs { opacity: .95; }
 
 /* dicas do mapa: botão "!" no título das Missões, abre um balão ao lado */
@@ -1584,3 +1589,5 @@ html.touch :is(.cd-roll, .bt-act, #rr-roll, #rr-go, #cd-rr, #bt-rr)::after { con
 #itemquick span { top: 20px; right: -6px; }
 @media (max-width: 700px) { #itemquick span .iq-item { width: 24px; height: 24px; } #itemquick span { top: 14px; } }
 .pz-first { margin-top: 8px; padding: 6px 8px; border-radius: 8px; background: rgba(255, 214, 110, .12); border: 1px solid rgba(255, 214, 110, .45); font-size: 12px; line-height: 1.3; color: #f2e6d0; }
+/* vários alvos: o painel mostra um defensor de cada vez */
+.cd-def.cd-off { display: none !important; }

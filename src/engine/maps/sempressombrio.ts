@@ -119,7 +119,7 @@ export const SEMPRESSOMBRIO: MapDef = {
     // Minotauro, Troll, Irmã da Dor x2 e a Alma do Lorde Presas
     { type: 'minotauro', cell: C(4, 3) }, { type: 'troll', cell: C(4, 5) },
     { type: 'irma_dor', cell: C(4, 3) }, { type: 'irma_dor', cell: C(4, 5) },
-    { type: 'lorde_presas', cell: C(4, 4) },
+    { type: 'lorde_presas', cell: C(4, 4), soul: true },
   ],
   // Irmãs do Prazer escondidas nos marcadores Azul e Laranja
   reserve: ['irma_prazer', 'irma_prazer'],

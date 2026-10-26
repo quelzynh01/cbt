@@ -99,6 +99,8 @@ export interface Unit {
   petrified?: number;
   /** Sombra do Lorde Presas (invocada pelo marcador): aparece em preto e branco. */
   shadow?: boolean;
+  /** Alma do Lorde Presas (Distrito Sempressombrio): aparece como um espírito azulado. */
+  soul?: boolean;
   /** Banido: está no Tabuleiro de Entrada (fora do tabuleiro, mas vivo, com Ferimentos e marcadores). */
   banished?: boolean;
 }
@@ -334,6 +336,8 @@ export type GameEvent =
   | { t: 'spawnStart'; ids: string[] }
   /** target: a Entrada de Monstro que os dados indicaram (mesmo ocupada, para a câmera mostrar). */
   /** Invocação (Sombra do Lorde Presas): 2 dados contra as Entradas de Monstro; `cell` = onde surgiu (null = ficou fora do tabuleiro). */
+  /** Começo da partida (todos posicionaram): o Lorde Presas surge no lugar dele, com animação e fala. */
+  | { t: 'lordEntrance'; id: string; cell: Cell }
   | { t: 'summonRoll'; heroId: string; monsterId: string; faces: DieFace[]; cell: Cell | null; target?: Cell; color?: string }
   | { t: 'spawnRoll'; id: string; faces: DieFace[]; cell: Cell | null; reason: string; target?: Cell }
   | { t: 'respawn'; id: string; cell: Cell }

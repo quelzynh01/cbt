@@ -1227,3 +1227,6 @@ export function drawFull(canvas: HTMLCanvasElement, id: string, flip = false, bg
   drawCharacter(ctx, id, { dir: flip ? 'sw' : 'se', flip, t: 0.3, hurt: 0, alpha: 1, stunned: false, lunge: 0, scale: sc });
   ctx.restore();
 }
+
+/** Alma do Lorde Presas: espírito azul-claro, meio transparente e brilhando. */
+export const SOUL_FILTER = 'grayscale(1) sepia(1) hue-rotate(150deg) saturate(2.6) brightness(1.3) drop-shadow(0 0 10px rgba(120,230,255,0.9))';

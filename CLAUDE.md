@@ -74,7 +74,10 @@ sh tools/tests/run-engine.sh sombra        # Praça da Aurora: marcador Vermelho
 sh tools/tests/run-engine.sh escudo        # Escudo das Almas a qualquer hora (Espaço como no Descanso); Botas não pegam o que está no chão
 sh tools/tests/run-engine.sh turno         # Poção de Turno Adicional na hora (sem Entrada de Monstros); Grito de Guerra ativa quem andou com as Botas
 sh tools/tests/run-engine.sh allpick       # Recrutamento All Pick (campanha local e online)
-sh tools/tests/run-engine.sh defesa        # Defesa: sem acertos não rola; já bloqueou tudo = sem ✷ extra nem Rerrolagem
+sh tools/tests/run-engine.sh defesa        # Defesa: sem acertos não rola; já bloqueou tudo = Manter (✷ extra / Rerrolagem só se pedir); escudos no combate
+sh tools/tests/run-engine.sh ordem         # ordem dos jogadores sorteada (avulsa e 1º cenário da campanha)
+sh tools/tests/run-engine.sh alertas       # aviso de Reação de Alerta antes de andar: nenhuma Reação sem aviso (mesmo caminho do movimento)
+sh tools/tests/run-engine.sh vdoor2        # Vingança: abrir/fechar portas Perto do Monstro (1 Movimento cada, até o Movimento dele)
 sh tools/tests/run-engine.sh xsim 30 mix   # partidas IA x IA nos mapas Clássicos (mix|core|extra; MAP=id, SEED=n repete uma, BTG=1 inclui Beyond, V=1 detalha) -> 0 travadas/0 erros
 ALL=1 sh tools/tests/run-engine.sh reach2  # alcance de todos os mapas       -> "TODOS OS MAPAS OK"
 ```
@@ -93,6 +96,13 @@ node tools/tests/browser/savecamp.mjs <pasta-prints>                # campanha l
 node tools/tests/browser/dicesync.mjs <pasta-prints>                # online: dados sincronizados (o outro só vê depois do clique de quem rola)
 node tools/tests/browser/rrspec.mjs <pasta-prints>                  # online: o anfitrião acompanha a Rerrolagem do amigo
 node tools/tests/browser/quickbar.mjs <pasta-prints>                # atalho lá em cima para o item (Botas) de outro Herói; MOB=1 = celular
+node tools/tests/browser/keepbar.mjs <pasta-prints>                 # Defesa que já bloqueou tudo: Manter / +1 dado / Rerrolar cabem no quadro; MOB=1 = celular
+node tools/tests/browser/cancelatk.mjs <pasta-prints>               # Cancelar ataque: volta ao estado de antes, sem Reação nem dano (RR=1: com Rerrolagem aberta)
+node tools/tests/browser/lordentry.mjs <pasta-prints>               # Templo: Lorde Presas escondido no posicionamento e surge com animação e fala depois de todos prontos
+node tools/tests/browser/splashdef.mjs <pasta-prints>               # Lorde Presas em 2 Heróis: ataque rola 1 vez, um defensor por vez; sem acertos: pergunta no painel (ROLL=1: rola)
+node tools/tests/browser/lordsounds.mjs <pasta-prints>              # Sempressombrio: Alma do Lorde Presas; ataque do Lorde = morcego (rastro de morceguinhos) vai e volta; Irmãs: ✷ = risada, golpe = som do ataque + fala
+node tools/tests/browser/vdoorui.mjs <pasta-prints>                 # Vingança: clicar na porta Perto do Monstro abre/fecha antes de ele mover
+node tools/tests/browser/alertwarn.mjs <pasta-prints>               # Templo: aviso de Reação de Alerta (Irmãs) aparece antes de andar
 node tools/tests/browser/rratk.mjs <pasta-prints>                   # online: Rerrolagem do ATAQUE do amigo acompanhada no painel de dados
 ```
 

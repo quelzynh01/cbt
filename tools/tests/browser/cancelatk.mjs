@@ -1,0 +1,41 @@
+// Cancelar ataque: volta ao estado de antes e NÃO rola Reação nem dano
+import puppeteer from 'puppeteer-core';
+const OUT = process.argv[2] ?? '.';
+const browser = await puppeteer.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true });
+const page = await browser.newPage();
+await page.setViewport({ width: 1400, height: 850 });
+page.on('pageerror', e => console.log('PAGEERR', e.message));
+const wait = ms => new Promise(r => setTimeout(r, ms));
+await page.goto('http://localhost:5199/', { waitUntil: 'networkidle0' });
+await wait(2000);
+await page.click('#m-test'); await wait(800);
+await page.evaluate(() => document.querySelector('#ts-start')?.click()); await wait(3000);
+await page.evaluate(() => { const b = [...document.querySelectorAll('button')].find(x => /Pronto|Começar|Confirmar/i.test(x.textContent || '')); b?.click(); });
+await wait(1000);
+await page.evaluate(() => { const b = [...document.querySelectorAll('button')].find(x => /Sim, terminar/i.test(x.textContent || '')); b?.click(); });
+await wait(2500);
+const RR = process.env.RR ?? '0';
+const info = await page.evaluate(rr => {
+  const c = window.cbt, g = c.game;
+  const h = g.heroesOf(g.currentGuild().id).find(u => u.alive && u.cell);
+  c.act({ type: 'activate', heroId: h.id });
+  const m = g.units().find(u => u.kind === 'monster' && u.alive && u.cell);
+  m.cell = { ...h.cell };
+  if (rr === '1') h.cards.push({ uid: 'rr-test', defId: 'coracao_unicornio', exhausted: false, uses: 0 });
+  window.__evs = [];
+  const orig = c.renderer.enqueue.bind(c.renderer);
+  c.renderer.enqueue = evs => { window.__evs.push(...evs.map(e => e.t + (e.reason ? ':' + e.reason : ''))); return orig(evs); };
+  return { h: h.id, m: m.id, wounds: h.wounds, mw: m.wounds };
+}, RR);
+await wait(800);
+await page.evaluate(i => { const c = window.cbt, g = c.game, h = g.unit(i.h); const card = g.usableCards(h).find(x => g.attackTargets(h, x).some(t => t.id === i.m)); c.act({ type: 'attack', cardUid: card.uid, targetId: i.m }); }, info);
+let ok = false;
+for (let k = 0; k < 30 && !ok; k++) { await wait(300); ok = await page.evaluate(() => !!document.querySelector('.cd-cancel')); }
+console.log('botão cancelar:', ok, 'eventos até aqui:', await page.evaluate(() => window.__evs.join(',')));
+await page.evaluate(() => { window.__evs = []; document.querySelector('.cd-cancel')?.click(); });
+await wait(6000);
+const after = await page.evaluate(i => { const g = window.cbt.game; return { evs: window.__evs.join(','), wounds: g.unit(i.h).wounds, mw: g.unit(i.m).wounds, attacked: !!g.s.activation?.attacked, dice: !document.getElementById('dicecenter').classList.contains('hidden') }; }, info);
+console.log('depois de cancelar:', JSON.stringify(after));
+await page.screenshot({ path: `${OUT}/cancel.png` });
+console.log(!after.evs.includes('attack') && after.wounds === info.wounds && after.mw === info.mw && !after.attacked && !after.dice ? 'CANCELAR ATAQUE OK' : 'FALHOU');
+await browser.close();

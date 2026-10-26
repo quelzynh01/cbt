@@ -77,6 +77,7 @@ export class Controller {
       inspect: id => this.hud.showCard(id),
     });
     this.hud.busy = () => this.renderer.busy;
+    this.hud.onDefTarget = (id, attacker) => this.warnOne(id, attacker);
     this.hud.view = id => this.renderer.viewUnit(id);
     this.renderer.hooks = {
       onEvent: e => {
@@ -1028,8 +1029,18 @@ export class Controller {
   }
 
   /** Visão dos jogadores: acompanha as jogadas da IA (e de quem joga), mostrando onde ela "clicou". */
+  /** A entrada do Lorde Presas acabou de passar: a câmera vai para quem joga primeiro. */
+  private afterLord = false;
   private followEvent(e: GameEvent) {
-    if (!this.game || this.stopped || getSettings().view !== 'players' || this.game.s.deploying?.length) return;
+    if (!this.game || this.stopped) return;
+    if (e.t === 'lordEntrance') { this.afterLord = true; return; }
+    if (e.t === 'turn' && this.afterLord) {
+      this.afterLord = false;
+      const cells = this.game.heroesOf(e.guild).filter(h => h.alive && h.cell).map(h => h.cell!);
+      if (cells.length) this.renderer.glideCells(cells);
+      return;
+    }
+    if (getSettings().view !== 'players' || this.game.s.deploying?.length) return;
     const cur = this.game.currentGuild();
     if (e.t === 'turn') {
       if (this.isMine(e.guild)) return;
@@ -1711,12 +1722,14 @@ export class Controller {
     const attacker = e.attackerId;
     const au = g.unit(attacker);
     if (au.kind === 'hero' && au.guild && this.isMine(au.guild)) return;
-    const ids = e.targets.map(t => t.id);
-    for (const id of ids) {
-      const t = g.unit(id);
-      if (t.kind !== 'hero' || !t.guild || !this.isMine(t.guild) || !t.alive) continue;
-      if (this.renderer.markTarget(id)) this.hud.alertTarget(id, attacker);
-    }
+    // vários alvos (ex.: Lorde Presas): só o primeiro agora; os outros quando a Defesa deles começar no painel
+    if (e.targets[0]) this.warnOne(e.targets[0].id, attacker);
+  }
+  private warnOne(id: string, attacker: string) {
+    const g = this.game;
+    const t = g?.unit(id);
+    if (!t || t.kind !== 'hero' || !t.guild || !this.isMine(t.guild) || !t.alive) return;
+    if (this.renderer.markTarget(id)) this.hud.alertTarget(id, attacker);
   }
 
   /** Botas (Das Boot / Die Booten): escolhendo para onde mover o outro Herói. */
@@ -1913,7 +1926,7 @@ export class Controller {
         if (!go || this.game !== g) return;
       }
     }
-    const alerts = getSettings().alertConfirm === false ? [] : g.alertPreview(cell);
+    const alerts = getSettings().alertConfirm === false ? [] : g.alertPreview(cell, false); // o mesmo caminho do movimento (sem abrir portas)
     if (alerts.length) {
       const h = g.unit(g.s.activation!.heroId);
       const rows = alerts.map(m => {

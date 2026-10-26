@@ -1,6 +1,6 @@
 import { entryPlaque } from './dice';
 import { getSettings } from '../ui/settings';
-import { play, playOnce, type Sfx } from '../audio/sfx';
+import { isSister, playSisterAttack, play, playLordEntrance, playOnce, playRandom, type Sfx } from '../audio/sfx';
 import { CARDS } from '../engine/cards';
 import { CARD_ART } from '../ui/cardArt';
 import { drawTokenImage, tokenImage, tokenImageId } from './tokens';
@@ -11,7 +11,7 @@ import type { Cell, GameEvent, Token } from '../engine/types';
 import {
   drawBush, drawChestToken, drawCrates, drawGem, drawManhole, drawMushroom, drawPortal, drawTree, star,
 } from './art';
-import { charScale as baseScale, drawCharacter, type Dir } from './chibi';
+import { SOUL_FILTER, charScale as baseScale, drawCharacter, type Dir } from './chibi';
 import { CLIFF, TH, TW, diamondPath, g2s, hash, isoBox, s2g, shade, type Pt } from './iso';
 /** Personagens maiores para acompanhar os Espaços grandes. */
 const charScale = (id: string) => baseScale(id) * 1.35;
@@ -61,7 +61,7 @@ interface UnitView {
 }
 
 interface Floater { text: string; color: string; x: number; y: number; t0: number; dur: number; size: number }
-interface Projectile { from: Pt; to: Pt; t0: number; dur: number; kind: 'arrow' | 'orb' | 'stone' | 'blade'; arc: number }
+interface Projectile { from: Pt; to: Pt; t0: number; dur: number; kind: 'arrow' | 'orb' | 'stone' | 'blade' | 'bat'; arc: number }
 
 export interface RendererHooks {
   /** Retornar true segura a fila de animações até release() (ex.: tela de batalha). */
@@ -81,7 +81,7 @@ const HIT_RESULT = new Set<GameEvent['t']>(['damage', 'death', 'stun', 'heal', '
 
 const DUR: Partial<Record<GameEvent['t'], number>> = {
   move: 280, door: 220, attack: 1500, damage: 480, heal: 420, death: 520, stun: 200, pickup: 650, drop: 200,
-  spawn: 420, respawn: 420, spawnRoll: 0, tomb: 2600, notice: 1600, mission: 1500, reaction: 520, turn: 950, rest: 700, card: 800, coins: 0, log: 0, gameover: 0,
+  spawn: 420, respawn: 420, spawnRoll: 0, lordEntrance: 3400, tomb: 2600, notice: 1600, mission: 1500, reaction: 520, turn: 950, rest: 700, card: 800, coins: 0, log: 0, gameover: 0,
 };
 
 /** Espada (lâmina para +x, cabo na origem): Fender girando e Arremesso de Lâmina. */
@@ -386,7 +386,7 @@ export class Renderer {
       const nv: UnitView = {
         id: u.id, kind: u.kind, defId: u.defId, guild: u.guild, num: u.num,
         cell: u.alive && u.cell ? { ...u.cell } : null, wounds: u.wounds, maxHp: g.maxHp(u), alive: u.alive && !!u.cell,
-        stunned: u.stunned, pos: v?.pos ?? { gx: 0, gy: 0 }, tween: null, alpha: 1, fade: null, bag: u.tokens.slice(),
+        stunned: u.stunned, pos: v?.pos ?? { gx: 0, gy: 0 }, tween: null, alpha: this.lordWaits(u) ? 0 : 1, fade: null, bag: u.tokens.slice(),
         hurtT0: v?.hurtT0 ?? -9, lunge: null, flip: v?.flip ?? false, dir: v?.dir ?? this.centerDir(u.cell),
       };
       this.units.set(u.id, nv);
@@ -398,6 +398,13 @@ export class Renderer {
     this.hideoutGone = !!g.s.hideoutTaken;
     this.layoutUnits(true);
   }
+
+  /** Lorde Presas no tabuleiro antes de todos posicionarem: fica escondido até a entrada dele. */
+  private lordWaits(u: { kind: string; defId: string; alive: boolean; cell: Cell | null }) {
+    return u.kind === 'monster' && u.alive && !!u.cell && u.defId.replace(/\d+$/, '') === 'lorde_presas' && !!this.game.s.deploying?.length;
+  }
+  /** Entrada do Lorde Presas (começo da partida ou Sombra invocada): fumaça e anéis de sangue no Espaço. */
+  private lordFx: { cell: Cell; t0: number } | null = null;
 
   /** Direção de quem olha para o meio do tabuleiro a partir de `c`. */
   centerDir(c: Cell | null): Dir {
@@ -547,13 +554,16 @@ export class Renderer {
         this.floatAt(e.id, `+${e.amount}`, '#6cff7a', 32);
         break;
       }
-      default: this.startEvent2(e, now); break;
+      default: { const d = this.startEvent2(e, now); if (d !== undefined && dur !== Infinity) dur = d; break; }
     }
     return dur;
   }
 
   /** Animação do ataque (investida ou projétil). Retorna quanto tempo leva (ms). */
   animateAttack(e: Strike): number {
+    return this.animateAttack0(e);
+  }
+  private animateAttack0(e: Strike): number {
     const now = this.t;
     const a = this.units.get(e.attackerId);
     const t = this.units.get(e.targets[0]?.id);
@@ -587,7 +597,22 @@ export class Renderer {
           a.lunge = { dx, dy, t0: now + 150 / sp, dur: 620 / sp, depth: Math.floor(t.pos.gx) + Math.floor(t.pos.gy) };
           // som de cada Monstro (Orcs) ou da arma
           const base = a.defId.replace(/\d+$/, '');
-          setTimeout(() => play(base === 'orc' || base === 'capitao_orc' ? 'orc-sound' : 'atack-sword'), 330 / sp);
+          setTimeout(() => isSister(base) ? playSisterAttack(base) : play(base === 'orc' || base === 'capitao_orc' ? 'orc-sound' : 'atack-sword'), 330 / sp);
+        } else if (a.defId.replace(/\d+$/, '') === 'lorde_presas' && !e.thrown) {
+          let longest = 0;
+          for (const tg of e.targets) {
+            const tv = this.units.get(tg.id)!;
+            const p2 = g2s(tv.pos.gx, tv.pos.gy);
+            const from = { x: pa.x, y: pa.y - 60 }, to = { x: p2.x, y: p2.y - 40 };
+            if (Math.hypot(to.x - from.x, to.y - from.y) < 40) { const s = to.x >= from.x ? 1 : -1; to.x += 50 * s; }
+            const dur = Math.min(1600, 800 + Math.hypot(to.x - from.x, to.y - from.y) * 0.6) / sp;
+            longest = Math.max(longest, dur);
+            this.projectiles.push({ from, to, t0: now + 200 / sp, dur, kind: 'bat', arc: 50 });
+          }
+          setTimeout(() => play('atack-lorde-pressas'), 120 / sp);
+          // o morcego acerta na metade (chega no alvo) e volta para o Lorde
+          this.lastImpact = 200 / sp + longest / 2;
+          return 200 / sp + longest;
         } else {
           for (const tg of e.targets) {
             const tv = this.units.get(tg.id)!;
@@ -600,7 +625,7 @@ export class Renderer {
             this.projectiles.push({ from, to, t0: now + 250 / sp, dur: Math.min(900, 380 + dist * 0.35) / sp, kind: e.thrown ? 'blade' : kind, arc: e.thrown ? Math.max(20, Math.min(70, dist * 0.15)) : Math.max(50, Math.min(220, dist * 0.5)) });
           }
           const base = a.defId.replace(/\d+$/, '');
-          setTimeout(() => play(e.thrown ? 'atack-sword' : base === 'goblin' ? 'archer-sound' : kind === 'orb' ? 'atack-magic' : 'atack-bow'), 230 / sp);
+          setTimeout(() => isSister(base) ? playSisterAttack(base) : play(e.thrown ? 'atack-sword' : base === 'goblin' ? 'archer-sound' : kind === 'orb' ? 'atack-magic' : 'atack-bow'), 230 / sp);
         }
         // investida: encosta no alvo em 150 + 35% de 620 ms
         if (e.attackType === 'melee' && !e.thrown) { this.lastImpact = 370 / sp; return 820 / sp; }
@@ -612,7 +637,9 @@ export class Renderer {
     }
   }
 
-  private startEvent2(e: GameEvent, now: number) {
+  /** Retorna a duração quando o evento precisa de mais tempo que o padrão (DUR). */
+  private startEvent2(e: GameEvent, now: number): number | undefined {
+    let dur: number | undefined;
     switch (e.t) {
       case 'damage': {
         const u = this.units.get(e.id)!;
@@ -676,8 +703,24 @@ export class Renderer {
         u.fade = { from: 0, to: 1, t0: now, dur: 400 / this.speed };
         u.dir = this.centerDir(e.cell);
         u.alpha = 0;
+        // Sombra do Lorde Presas invocada: a mesma entrada (fumaça, anéis e a fala dele)
+        if (e.t === 'spawn' && u.defId.replace(/\d+$/, '') === 'lorde_presas') {
+          dur = 2000 / this.speed;
+          u.fade = { from: 0, to: 1, t0: now + 400, dur: 1100 / this.speed };
+          this.lordFx = { cell: { ...e.cell }, t0: now };
+          playLordEntrance();
+        }
         const s = this.slotPositions().get(u.id);
         if (s) u.pos = { ...s };
+        break;
+      }
+      case 'lordEntrance': {
+        const u = this.units.get(e.id);
+        dur = Math.max(2400, 3400 / this.speed);
+        if (u) { u.alpha = 0; u.fade = { from: 0, to: 1, t0: now + 700, dur: 1300 }; u.dir = this.centerDir(e.cell); }
+        this.lordFx = { cell: { ...e.cell }, t0: now };
+        this.glideCells([e.cell], Math.max(this.cam.zoom, 0.8));
+        playLordEntrance();
         break;
       }
       case 'spawnRoll': {
@@ -692,6 +735,7 @@ export class Renderer {
       default:
         break;
     }
+    return dur;
   }
 
   /** Marcadores pegos pelo mesmo Herói logo em seguida (mesmo Espaço): saem da fila juntos para aparecerem de uma vez. */
@@ -822,7 +866,7 @@ export class Renderer {
     this.layoutUnits(false);
     for (const u of this.units.values()) {
       if (u.fade) {
-        const k = Math.min(1, (now - u.fade.t0) / u.fade.dur);
+        const k = Math.max(0, Math.min(1, (now - u.fade.t0) / u.fade.dur));
         u.alpha = u.fade.from + (u.fade.to - u.fade.from) * k;
         if (k >= 1 && u.fade.to === 1) u.fade = null;
       }
@@ -1085,6 +1129,7 @@ export class Renderer {
       ctx.fillStyle = `rgba(184,146,255,${0.18 + pulse * 0.22})`; ctx.fill();
       ctx.strokeStyle = `rgba(214,190,255,${0.6 + pulse * 0.4})`; ctx.lineWidth = 5; ctx.setLineDash([14, 8]); ctx.stroke(); ctx.setLineDash([]);
     }
+    if (this.lordFx) this.drawLordFx(false);
     // Entradas de Monstro: placa no chão com os 2 símbolos de dado que fazem o Monstro surgir ali
     for (const em of this.game.s.entryMarkers) {
       const k = key(em.cell);
@@ -1524,6 +1569,80 @@ export class Renderer {
     for (const sp of list) sp.draw();
   }
 
+  /** Fiapos de luz azul subindo em volta da Alma (atrás do corpo). */
+  private drawSoulWisps(ctx: CanvasRenderingContext2D, sc: number, tt: number) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const halo = ctx.createRadialGradient(0, -50 * sc, 4, 0, -50 * sc, 70 * sc);
+    halo.addColorStop(0, 'rgba(140,235,255,0.35)'); halo.addColorStop(1, 'rgba(80,180,255,0)');
+    ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(0, -50 * sc, 70 * sc, 0, Math.PI * 2); ctx.fill();
+    for (let i = 0; i < 7; i++) {
+      const k = (tt * 0.35 + hash(i, 41)) % 1;
+      const x = (hash(i, 43) - 0.5) * 60 * sc + Math.sin(tt * 2 + i) * 6;
+      const y = -10 - k * 110 * sc;
+      ctx.fillStyle = `rgba(170,240,255,${(1 - k) * 0.7})`;
+      ctx.beginPath(); ctx.arc(x, y, (2 + hash(i, 47) * 3) * sc, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  private drawLordFx(top: boolean) {
+    const fx = this.lordFx!;
+    const age = (this.t - fx.t0) / 1000;
+    if (age > 3.6) { this.lordFx = null; return; }
+    const ctx = this.ctx;
+    const p = g2s(fx.cell.c + 0.5, fx.cell.r + 0.5);
+    const fade = Math.min(1, age / 0.25) * Math.max(0, Math.min(1, (3.6 - age) / 0.8));
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    if (!top) {
+      // poça escura e anéis vermelhos se abrindo no chão
+      ctx.save();
+      ctx.scale(1, 0.5);
+      const pool = ctx.createRadialGradient(0, 0, 0, 0, 0, 120);
+      pool.addColorStop(0, `rgba(40,0,10,${0.85 * fade})`);
+      pool.addColorStop(0.6, `rgba(120,0,20,${0.5 * fade})`);
+      pool.addColorStop(1, 'rgba(120,0,20,0)');
+      ctx.fillStyle = pool;
+      ctx.beginPath(); ctx.arc(0, 0, 120, 0, Math.PI * 2); ctx.fill();
+      for (let i = 0; i < 3; i++) {
+        const k = ((age * 0.9 + i / 3) % 1);
+        ctx.strokeStyle = `rgba(255,40,40,${(1 - k) * 0.9 * fade})`;
+        ctx.lineWidth = 6 * (1 - k) + 1;
+        ctx.beginPath(); ctx.arc(0, 0, 20 + k * 130, 0, Math.PI * 2); ctx.stroke();
+      }
+      ctx.restore();
+    } else {
+      // coluna de luz vermelha e fumaça/brasas subindo
+      const beam = ctx.createLinearGradient(0, 0, 0, -260);
+      const b = Math.max(0, 1 - Math.abs(age - 0.9) / 0.9) * fade;
+      beam.addColorStop(0, `rgba(255,60,40,${0.55 * b})`);
+      beam.addColorStop(1, 'rgba(255,60,40,0)');
+      ctx.fillStyle = beam;
+      ctx.beginPath(); ctx.moveTo(-46, 0); ctx.lineTo(46, 0); ctx.lineTo(20, -260); ctx.lineTo(-20, -260); ctx.closePath(); ctx.fill();
+      // fumaça escura subindo
+      for (let i = 0; i < 16; i++) {
+        const h = hash(i, 7);
+        const life = (age * (0.45 + h * 0.5) + h) % 1;
+        const x = (hash(i, 13) - 0.5) * 110 + Math.sin(age * 3 + i) * 10;
+        ctx.fillStyle = `rgba(20,0,8,${(1 - life) * 0.5 * fade})`;
+        ctx.beginPath(); ctx.arc(x, -life * (140 + h * 110), 10 + life * 22, 0, Math.PI * 2); ctx.fill();
+      }
+      // revoada de morcegos saindo em espiral do Lorde
+      for (let i = 0; i < 12; i++) {
+        const h = hash(i, 29);
+        const start = h * 0.9;
+        const k = (age - start) / (1.6 + hash(i, 31) * 0.8);
+        if (k <= 0 || k >= 1) continue;
+        const ang = i * 2.4 + k * (3 + h * 2) * (i % 2 ? 1 : -1);
+        const r = 14 + k * (150 + h * 90);
+        const x = Math.cos(ang) * r, y = -40 - k * (150 + h * 120) + Math.sin(ang) * r * 0.35;
+        drawBat(ctx, x, y, 34 + h * 20, age * 18 + i, Math.min(1, (1 - k) * 2.5) * fade, Math.cos(ang) < 0);
+      }
+    }
+    ctx.restore();
+  }
+
   private drawUnit(u: UnitView, tt: number) {
     const ctx = this.ctx;
     const p = g2s(u.pos.gx, u.pos.gy);
@@ -1642,9 +1761,14 @@ export class Renderer {
     const blink = this.puppetIds().has(u.id);
     // Sombra do Lorde Presas: em preto e branco
     const isShadow = !!this.game?.s.units[u.id]?.shadow;
-    const fx = [isShadow ? 'grayscale(1) contrast(1.15) brightness(0.9)' : '', blink ? `brightness(${1.25 + 0.45 * Math.sin(tt * 7)}) drop-shadow(0 0 8px rgba(184,146,255,0.95))` : ''].filter(Boolean).join(' ');
+    // Alma do Lorde Presas: espírito azul-claro, meio transparente, flutuando com fiapos de luz
+    const isSoul = !!this.game?.s.units[u.id]?.soul && u.alive;
+    if (isSoul) this.drawSoulWisps(ctx, L.scale, tt);
+    const fx = [isShadow ? 'grayscale(1) contrast(1.15) brightness(0.9)' : '', isSoul ? SOUL_FILTER : '', blink ? `brightness(${1.25 + 0.45 * Math.sin(tt * 7)}) drop-shadow(0 0 8px rgba(184,146,255,0.95))` : ''].filter(Boolean).join(' ');
     if (fx) ctx.filter = fx;
-    drawCharacter(ctx, u.defId, { dir, flip, t: idleT, hurt, alpha: 1, stunned: u.stunned, lunge: 0, scale: L.scale * 0.66 });
+    if (isSoul) ctx.translate(0, -6 - Math.sin(tt * 2) * 5);
+    drawCharacter(ctx, u.defId, { dir, flip, t: idleT, hurt, alpha: isSoul ? 0.72 + 0.08 * Math.sin(tt * 3) : 1, stunned: u.stunned, lunge: 0, scale: L.scale * 0.66 });
+    if (isSoul) ctx.translate(0, 6 + Math.sin(tt * 2) * 5);
     if (fx) ctx.filter = 'none';
     if (spinFx && spinFront) spinFx();
     if (u.stunned) this.drawStun(ctx, -78 * L.scale - 6, tt);
@@ -1673,6 +1797,13 @@ export class Renderer {
         ctx.shadowBlur = 0;
       });
       ctx.restore();
+    }
+    if (u.alive && u.kind === 'monster' && this.game?.map.id === 'templo-do-amanhecer-crepuscular' && u.defId.replace(/\d+$/, '') === 'lorde_presas') {
+      for (let k = 0; k < 2; k++) {
+        const a = tt * 1.4 + k * Math.PI;
+        const x = Math.cos(a) * 46 * L.scale, y = -70 * L.scale + Math.sin(a) * 12 * L.scale - Math.sin(tt * 2.5 + k) * 8;
+        drawBat(ctx, x, y, 30 * L.scale, tt * 14 + k * 2, 0.7 + 0.3 * (Math.sin(a) + 1) / 2, Math.sin(a) < 0);
+      }
     }
     // Herói ativado: seta dourada pulando em cima da cabeça
     if (activated) {
@@ -1861,6 +1992,24 @@ export class Renderer {
     for (const p of this.projectiles) {
       const k = (this.t - p.t0) / p.dur;
       if (k < 0) continue;
+      if (p.kind === 'bat') {
+        // vai até o alvo e volta (morde na metade)
+        const q = k < 0.5 ? k * 2 : (1 - k) * 2;
+        const bx = p.from.x + (p.to.x - p.from.x) * q + Math.sin(k * 18) * 6;
+        const by = p.from.y + (p.to.y - p.from.y) * q - Math.sin(q * Math.PI) * p.arc + Math.cos(k * 22) * 5;
+        const goingRight = (p.to.x >= p.from.x) === (k < 0.5);
+        // rastro: fumaça vermelho-escura e morceguinhos ficando para trás
+        const posAt = (kk: number) => { const qq = kk < 0.5 ? kk * 2 : (1 - kk) * 2; return { x: p.from.x + (p.to.x - p.from.x) * qq + Math.sin(kk * 18) * 6, y: p.from.y + (p.to.y - p.from.y) * qq - Math.sin(qq * Math.PI) * p.arc + Math.cos(kk * 22) * 5 }; };
+        // rastro: morceguinhos ficando para trás, cada vez menores e mais apagados
+        for (let i = 7; i >= 1; i--) {
+          const kk = k - i * 0.035;
+          if (kk < 0) continue;
+          const q2 = posAt(kk), f = 1 - i / 8;
+          drawBat(ctx, q2.x + Math.sin(i * 5.3 + this.t / 260) * 12, q2.y + Math.cos(i * 3.7 + this.t / 300) * 9, 20 + f * 14, this.t / 32 + i * 1.7, 0.45 + 0.55 * f, !goingRight);
+        }
+        drawBat(ctx, bx, by, 60, this.t / 40, 1, !goingRight);
+        continue;
+      }
       const at = (q: number) => ({ x: p.from.x + (p.to.x - p.from.x) * q, y: p.from.y + (p.to.y - p.from.y) * q - Math.sin(q * Math.PI) * p.arc });
       const { x, y } = at(k);
       // rastro
@@ -1898,6 +2047,7 @@ export class Renderer {
       }
       ctx.restore();
     }
+    if (this.lordFx) this.drawLordFx(true);
     // textos flutuantes
     this.floaters = this.floaters.filter(f => this.t - f.t0 < f.dur);
     for (const f of this.floaters) {
@@ -2231,6 +2381,10 @@ function drawDoor(ctx: CanvasRenderingContext2D, b: EdgeBox, open: boolean, smal
     : [[b.x0 + post, b.my], [b.x1 - post, b.my]];
   const h = small ? 44 : 54;
   const drawPost = (px: number, py: number) => isoBox(ctx, px - post, py - post, px + post, py + post, 0, h + 6, '#cfc4a8', '#9e9277', '#857a62', 'rgba(50,35,20,0.6)');
+  if (locked && !open) {
+    drawEnergyGate(ctx, b, h, drawPost, ends);
+    return;
+  }
   drawPost(ends[0][0], ends[0][1]);
   if (!open) {
     const t = 0.028;
@@ -2259,6 +2413,88 @@ function drawDoor(ctx: CanvasRenderingContext2D, b: EdgeBox, open: boolean, smal
     else isoBox(ctx, b.x0 + post * 2, b.my - t, b.x1 - post * 2, b.my + t, 0, 3, '#c79a5e', '#8a6237', '#6e4a26');
   }
   drawPost(ends[1][0], ends[1][1]);
+}
+
+/** Portal trancado: colunas de pedra com runas e uma cortina de energia roxa entre elas (ondas subindo e faíscas). */
+function drawEnergyGate(ctx: CanvasRenderingContext2D, b: EdgeBox, h: number, drawPost: (x: number, y: number) => void, ends: number[][]) {
+  const t = performance.now() / 1000;
+  const H = h + 10;
+  const [a0, a1] = ends;
+  const at = (f: number, z: number) => g2s(a0[0] + (a1[0] - a0[0]) * f, a0[1] + (a1[1] - a0[1]) * f, z);
+  drawPost(a0[0], a0[1]);
+  ctx.save();
+  // brilho no chão
+  const g0 = at(0, 0), g1 = at(1, 0);
+  ctx.globalCompositeOperation = 'lighter';
+  const glow = ctx.createRadialGradient((g0.x + g1.x) / 2, (g0.y + g1.y) / 2, 2, (g0.x + g1.x) / 2, (g0.y + g1.y) / 2, 60);
+  glow.addColorStop(0, `rgba(190,90,255,${0.45 + 0.15 * Math.sin(t * 3)})`); glow.addColorStop(1, 'rgba(120,40,200,0)');
+  ctx.fillStyle = glow; ctx.beginPath(); ctx.ellipse((g0.x + g1.x) / 2, (g0.y + g1.y) / 2, 60, 26, 0, 0, Math.PI * 2); ctx.fill();
+  // cortina de energia
+  const top0 = at(0, H), top1 = at(1, H);
+  const grad = ctx.createLinearGradient(0, g0.y, 0, top0.y);
+  grad.addColorStop(0, `rgba(200,110,255,${0.55 + 0.1 * Math.sin(t * 4)})`);
+  grad.addColorStop(0.6, 'rgba(150,60,230,0.35)');
+  grad.addColorStop(1, 'rgba(120,40,210,0.08)');
+  ctx.fillStyle = grad;
+  ctx.beginPath(); ctx.moveTo(g0.x, g0.y); ctx.lineTo(g1.x, g1.y); ctx.lineTo(top1.x, top1.y); ctx.lineTo(top0.x, top0.y); ctx.closePath(); ctx.fill();
+  // ondas subindo
+  ctx.lineWidth = 2;
+  for (let i = 0; i < 4; i++) {
+    const z = ((t * 0.45 + i / 4) % 1) * H;
+    ctx.strokeStyle = `rgba(235,190,255,${0.75 * (1 - z / H)})`;
+    ctx.beginPath();
+    for (let s = 0; s <= 12; s++) {
+      const f = s / 12;
+      const p = at(f, z + Math.sin(f * 9 + t * 5 + i) * 3);
+      if (s) ctx.lineTo(p.x, p.y); else ctx.moveTo(p.x, p.y);
+    }
+    ctx.stroke();
+  }
+  // faíscas
+  for (let i = 0; i < 9; i++) {
+    const k = (t * (0.3 + hash(i, 3) * 0.4) + hash(i, 5)) % 1;
+    const p = at(0.1 + hash(i, 9) * 0.8, k * H);
+    ctx.fillStyle = `rgba(250,225,255,${1 - k})`;
+    ctx.beginPath(); ctx.arc(p.x, p.y, 1.6 + hash(i, 11) * 1.6, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
+  drawPost(a1[0], a1[1]);
+  // runas brilhando no alto das colunas
+  ctx.save();
+  ctx.shadowColor = '#d58bff'; ctx.shadowBlur = 10; ctx.fillStyle = '#f0d4ff';
+  for (const [px, py] of ends) { const p = g2s(px, py, h - 6); ctx.beginPath(); ctx.arc(p.x, p.y, 3 + Math.sin(t * 4) * 0.8, 0, Math.PI * 2); ctx.fill(); }
+  ctx.restore();
+}
+
+/** Morcego preto batendo as asas (x, y = centro; size = envergadura; flap = fase da batida). */
+function drawBat(ctx: CanvasRenderingContext2D, x: number, y: number, size: number, flap: number, alpha: number, flip = false) {
+  const w = Math.sin(flap) * 0.6; // asa para cima/baixo
+  ctx.save();
+  ctx.translate(x, y);
+  if (flip) ctx.scale(-1, 1);
+  ctx.globalAlpha *= Math.max(0, Math.min(1, alpha));
+  ctx.fillStyle = '#120812';
+  ctx.strokeStyle = 'rgba(255,60,60,0.35)';
+  ctx.lineWidth = 1;
+  const s = size / 2;
+  for (const side of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.quadraticCurveTo(side * s * 0.5, -s * (0.5 + w), side * s, -s * (0.2 + w));
+    ctx.lineTo(side * s * 0.8, s * 0.05);
+    ctx.lineTo(side * s * 0.62, -s * 0.05 * (1 + w));
+    ctx.lineTo(side * s * 0.45, s * 0.12);
+    ctx.lineTo(side * s * 0.28, 0);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+  }
+  // corpo, orelhas e olhos vermelhos
+  ctx.beginPath(); ctx.ellipse(0, s * 0.05, s * 0.16, s * 0.26, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-s * 0.12, -s * 0.12); ctx.lineTo(-s * 0.08, -s * 0.34); ctx.lineTo(-s * 0.02, -s * 0.16);
+  ctx.moveTo(s * 0.12, -s * 0.12); ctx.lineTo(s * 0.08, -s * 0.34); ctx.lineTo(s * 0.02, -s * 0.16); ctx.fill();
+  ctx.fillStyle = '#ff3b3b';
+  ctx.beginPath(); ctx.arc(-s * 0.06, -s * 0.06, Math.max(0.8, s * 0.04), 0, Math.PI * 2); ctx.arc(s * 0.06, -s * 0.06, Math.max(0.8, s * 0.04), 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
 }
 
 function drawDoorIcon(ctx: CanvasRenderingContext2D, p: Pt, open: boolean, t: number) {

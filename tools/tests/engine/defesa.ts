@@ -34,7 +34,7 @@ type G = { roll: (...a: unknown[]) => { faces: string[]; successes: number; crit
   const m = Object.values(g.s.units).find(u => u.kind === 'monster' && u.alive)!;
   m.cell = { ...grom.cell! };
   let asked = '';
-  g.choiceHook = r => { if (r.choice === 'confirm') { asked = r.yes ?? ''; return 0; } return 'auto'; };
+  g.rerollHook = r => { if (r.noHits) { asked = `Rolar (no painel, ${r.vs?.faces.length ?? 0} dados de ataque)`; return [HELD_PICK]; } return 'auto'; };
   const gg = g as unknown as G;
   const orig = gg.roll.bind(g);
   let first = true;
@@ -113,5 +113,25 @@ for (const use of [false, true]) {
   gg.monsterAttack(ms[1], maya, 'alerta');
   const ok2 = asked.includes('Escudo de Cavaleiro') && asked.includes('Escudo do Rei') && !!grom.spent === use && !!maya.spent === use;
   check(ok2, `escudos perguntados no combate (${asked.join(', ')}); ${use ? 'usou: Heróis exaustos' : 'não usou: Heróis prontos'}`);
+}
+{
+  // Lorde Presas (vários alvos): um ataque só; o 2º defensor recebe a Defesa do 1º já resolvida (o painel troca o defensor)
+  const g = Game.create(MAPS['templo-do-amanhecer-crepuscular'], { seed: 5, fixedOrder: true, players: [
+    { guild: 'azul', controller: 'human', heroes: ['grom', 'maya', 'zazu'], cards: { grom: ['coracao_unicornio'], maya: ['coracao_unicornio'] } }, { guild: 'vermelho', controller: 'ai' }] });
+  g.s.deploying = null;
+  const [grom, maya] = g.heroesOf('azul');
+  const lord = Object.values(g.s.units).find(u => u.kind === 'monster' && u.alive && u.defId.startsWith('lorde_presas'))!;
+  grom.cell = { ...lord.cell! };
+  maya.cell = { ...g.board.neighbors(lord.cell!).find(c => g.board.isClose(lord.cell!, c) && g.board.playable(c) && !g.board.isPillar(c))! };
+  const reqs: { hero: string; vs: string; done: string[] }[] = [];
+  g.rerollHook = r => { if (r.kind === 'defense') reqs.push({ hero: r.heroId, vs: (r.vs?.faces ?? []).join(','), done: (r.done ?? []).map(d => d.id) }); return []; };
+  g.choiceHook = r => r.choice === 'multi' ? 1 : 'auto';
+  const gg = g as unknown as G;
+  const orig = gg.roll.bind(g);
+  gg.roll = (...a: unknown[]) => a[1] !== DEFENSE_DIE ? { faces: ['ranged', 'ranged', 'ranged', 'blank'], successes: 3, crits: 0 } : orig(...a);
+  gg.monsterAttack(lord, grom, 'vinganca');
+  const ev = g.drain().filter(x => x.t === 'attack') as { targets: { id: string }[] }[];
+  const two = reqs.length === 2 && reqs[0].hero !== reqs[1].hero && reqs[0].vs === reqs[1].vs && reqs[1].done.includes(reqs[0].hero) && reqs[0].done.length === 0;
+  check(ev.length === 1 && ev[0].targets.length === 2 && two, `Lorde Presas: 1 ataque, 2 defensores em sequência (${JSON.stringify(reqs.map(r => ({ h: r.hero, done: r.done })))})`);
 }
 console.log(ok ? 'DEFESA SÓ QUANDO PRECISA OK' : 'FALHOU');

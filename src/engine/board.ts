@@ -18,7 +18,7 @@ export interface MapDef {
   missionMarkers: { cell: Cell; color: string }[];
   /** Marcador de Missão da cor de cada Guilda, por Área Inicial (índice 0 = Jogador 1). */
   missionMarkersByArea?: Cell[];
-  monsters: { type: string; cell: Cell }[];
+  monsters: { type: string; cell: Cell; soul?: boolean }[];
   missions: { pve: MissionDef[]; rewards: string[] };
   /** Dificuldade do cenário (Livro de Campanha). */
   difficulty?: 'facil' | 'medio' | 'dificil' | 'muito';
