@@ -24,7 +24,7 @@ export const HEROES: Record<string, HeroDef> = {
   vapor: {
     id: 'vapor', name: 'Vapor', nameEn: 'Wisp', title: 'Ladrão Silencioso',
     defense: 2, hp: 3, ability: 'furtivo', abilityName: 'Furtividade',
-    abilityText: 'Ao se mover, não aciona Reação de Alerta.',
+    abilityText: 'Uma vez por turno, ao se mover, pode esquivar da Reação de Alerta (não aciona Alerta naquele movimento).',
   },
   espetado: {
     id: 'espetado', name: 'Espetado', nameEn: 'Spike', title: 'Barbadragão Anão',
@@ -343,4 +343,12 @@ export const GUILDS: Record<GuildId, { name: string; color: string; dark: string
   vermelho: { name: 'Guilda Vermelha (Raposa)', color: '#d8432f', dark: '#8e2418', light: '#ff9d8c' },
   verde: { name: 'Guilda Verde (Panda)', color: '#3fa34d', dark: '#22632b', light: '#9be3a4' },
   laranja: { name: 'Guilda Laranja (Leão)', color: '#e38a1c', dark: '#965a0d', light: '#ffcb85' },
+};
+
+/** Monstros de destaque por mapa: surgem com entrada (som de orc) quando todos posicionam e ficam com aura de fogo/lava. */
+export const FIRE_BOSSES: Record<string, string> = {
+  'portao-da-lua': 'capitao_orc',
+  'covil-dos-orcs': 'capitao_orc',
+  'viveiro-das-aguias': 'feral_martelador',
+  'mansao': 'troll',
 };

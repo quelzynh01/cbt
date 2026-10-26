@@ -1,7 +1,6 @@
 import { Board, key, parseKey, sameCell, type MapDef, type LosBlock, mapTitlesOf } from './board';
 import {
-  heroPool, ATTACK_DIE, CARDS, DEFENSE_DIE, ENTRY_PAIRS, EXPLORATION_BAG, GUILDS, HEROES, HERO_ORDER, MONSTERS, TOKEN_INFO, distributeStartingGear, levelSuffix, lowerSuffix,
-} from './data';
+  heroPool, ATTACK_DIE, CARDS, DEFENSE_DIE, ENTRY_PAIRS, EXPLORATION_BAG, GUILDS, HEROES, HERO_ORDER, MONSTERS, TOKEN_INFO, distributeStartingGear, levelSuffix, lowerSuffix, FIRE_BOSSES } from './data';
 import { nextRandom, randInt, shuffle } from './rng';
 import { CURSES, curseDeck, type CardFx } from './cards';
 import { TITLES } from './titles';
@@ -43,6 +42,9 @@ export interface RerollRequest { heroId: string; kind: 'attack' | 'defense'; fac
   held?: number;
   /** O ataque não acertou: rolar a Defesa mesmo assim? (HELD_PICK = rolar; [] = manter) */
   noHits?: boolean;
+  /** Escudo de Cavaleiro (depois do ataque: obrigar a rolar de novo) ou do Rei (antes da Defesa: +bonus dados). HELD_PICK = usar. */
+  shield?: 'knight' | 'king';
+  bonus?: number;
   /** Ataque com vários alvos: Defesas deste mesmo ataque que já foram resolvidas (mostradas antes, uma por vez). */
   done?: { id: string; faces: DieFace[]; blocks: number; noHits?: boolean }[] }
 
@@ -870,6 +872,13 @@ export class Game {
     return true;
   }
 
+  /** Chefes que surgem com animação quando todos terminam de posicionar: Lorde Presas; Minotauro na Arena do Sol Brilhante; os de FIRE_BOSSES (com aura de fogo). */
+  isBossEntrance(m: Unit): boolean {
+    if (m.kind !== 'monster' || !m.alive || !m.cell) return false;
+    const b = baseId(m.defId);
+    return b === 'lorde_presas' || (b === 'minotauro' && this.map.id === 'arena-do-sol-brilhante') || FIRE_BOSSES[this.map.id] === b;
+  }
+
   /** A Guilda terminou de posicionar. Quando a última termina, a partida começa. */
   deployDone(by: GuildId): boolean {
     if (!this.s.deploying?.includes(by)) return false;
@@ -878,7 +887,12 @@ export class Game {
     if (!this.s.deploying.length) {
       this.s.deploying = null;
       // mapa em que o Lorde Presas já começa no tabuleiro: ele surge agora (animação de entrada para todos)
-      for (const m of this.monstersOnBoard()) if (baseId(m.defId) === 'lorde_presas') this.emit({ t: 'lordEntrance', id: m.id, cell: { ...m.cell! } });
+      // chefes do mesmo tipo surgem juntos (ex.: os 2 Capitães Orc do Portão da Lua)
+      const bosses = this.monstersOnBoard().filter(m => this.isBossEntrance(m));
+      for (const type of [...new Set(bosses.map(m => baseId(m.defId)))]) {
+        const [first, ...rest] = bosses.filter(m => baseId(m.defId) === type);
+        this.emit({ t: 'lordEntrance', id: first.id, cell: { ...first.cell! }, ...(rest.length ? { others: rest.map(m => ({ id: m.id, cell: { ...m.cell! } })) } : {}) });
+      }
       // ninguém começa ativado: o jogador escolhe o Herói e clica em "Ativar"
       this.emit({ t: 'turn', guild: this.currentGuild().id, turn: this.s.turn });
     }
@@ -943,7 +957,7 @@ export class Game {
       this.s.blessing = null;
       this.s.warCry = null;
       this.s.extraOnly = false;
-      this.s.booted = [];
+      this.s.booted = []; this.s.stealthUsed = [];
     } else if (a?.heroId === heroId) return true;
     else if (!this.freeMode && done.includes(heroId) && !this.activationFresh()) return false;
     // trocar de uma ativação ainda sem ações não conta como ativação
@@ -1007,7 +1021,7 @@ export class Game {
     const a = this.s.activation;
     if (!a || a.moveLocked) return [];
     const h = this.unit(a.heroId);
-    if (!h.cell || this.ab(h) === 'furtivo') return [];
+    if (!h.cell || (this.ab(h) === 'furtivo' && !(this.s.stealthUsed ?? []).includes(h.id))) return [];
     const nodes = this.reachable(h, a.mp, h.cell, openDoors);
     const node = nodes.get(key(target));
     if (!node || node.prev === null) return [];
@@ -1049,6 +1063,8 @@ export class Game {
     if (this.s.blessing?.heroId === h.id) this.s.blessing = null;
     // último Espaço do caminho onde o Herói podia parar (se o Movimento for interrompido num Espaço cheio, volta para ele)
     let lastOk: Cell = { ...h.cell };
+    // Furtividade (Vapor): 1 vez por turno, o jogador escolhe esquivar das Reações de Alerta deste movimento
+    let stealth: boolean | null = null;
     for (const st of steps) {
       if (!h.alive || !h.cell) break; // morreu ou foi banido no caminho
       if (st.door) {
@@ -1062,8 +1078,17 @@ export class Game {
         // Reação de Alerta: sair de um Espaço Perto de um Monstro (p.19)
         // Vapor (Passos Silenciosos) não aciona Alerta ao se mover
         const near = this.monstersCloseTo(from);
-        const alerters = this.ab(h) === 'furtivo' ? [] : near;
-        if (this.ab(h) === 'furtivo' && near.length) this.emit({ t: 'skill', id: h.id, skill: 'furtivo', name: 'Furtividade' });
+        let alerters = near;
+        if (this.ab(h) === 'furtivo' && near.some(m => this.monsterCanAttack(m, h))) {
+          if (stealth === null) {
+            const free = !(this.s.stealthUsed ?? []).includes(h.id);
+            const who = near.filter(m => this.monsterCanAttack(m, h)).map(m => `<b>${this.name(m)}</b>`).join(', ');
+            stealth = free && this.confirm(h, 'Furtividade', `<b>${this.name(h)}</b> vai sair de perto de ${who} e receber Reação de Alerta. Usar a Furtividade para esquivar? <small>(1 vez por turno)</small>`, true, undefined,
+              { yes: '💨 Esquivar', no: 'Não esquivar (guardar)' });
+            if (stealth) this.s.stealthUsed = [...(this.s.stealthUsed ?? []), h.id];
+          }
+          if (stealth) { alerters = []; this.emit({ t: 'skill', id: h.id, skill: 'furtivo', name: 'Furtividade' }); }
+        }
         for (const m of alerters) {
           if (!h.alive || !h.cell) break; // morreu ou foi banido no caminho
           this.emit({ t: 'reaction', monsterId: m.id, kind: 'alerta' });
@@ -1179,9 +1204,8 @@ export class Game {
       const ks = t.cards.find(c => this.cardDef(c).fx.kingShield);
       const n = ks ? this.cardDef(ks).fx.kingShield! : 0;
       const hits = this.defNeed ?? this.curAttack?.hits ?? 0;
-      if (ks && !t.spent && t.alive && dice > 0 && (ks.armed || this.confirm(t, 'Escudo do Rei',
-        `<b>${this.name(attacker)}</b> rolou <b>${hits}</b> acerto${hits === 1 ? '' : 's'} contra <b>${this.name(t)}</b>. Exaustar o Herói para rolar <b>+${n}</b> dados de Defesa?`,
-        hits >= this.maxHp(t) - t.wounds && hits > dice, this.curAttack?.faces, { yes: `🛡️ Usar o Escudo do Rei (+${n})`, no: 'Não usar' }))) {
+      const vs = this.curAttack ?? { id: attacker.id, faces: [], hits, type: 'melee', base: 0 };
+      if (ks && !t.spent && t.alive && dice > 0 && (ks.armed || this.shieldAsk(t, 'king', vs, hits >= this.maxHp(t) - t.wounds && hits > dice, n))) {
         dice += n;
         ks.armed = false;
         t.spent = true;
@@ -1275,7 +1299,7 @@ export class Game {
     if (this.ab(target) === 'encantado') { rrAtk = 0; notes.push('Encantado: sem Rerrolagem'); }
     a.bonusDice = 0; // Fúria dos Mortos vale só para este ataque
     let atk = this.heroRoll(h, n, ATTACK_DIE, def.attackType!, this.s.debug.attackDice, 'attack', rrAtk, target);
-    if (this.knightShield(target, atk.successes, h, atk.faces)) { atk = this.roll(n, ATTACK_DIE, def.attackType!, 'normal'); notes.push(`Escudo de Cavaleiro: ataque rolado de novo`); }
+    if (this.knightShield(target, { id: h.id, faces: atk.faces.slice(), hits: atk.successes, type: def.attackType!, base: n })) { atk = this.roll(n, ATTACK_DIE, def.attackType!, 'normal'); notes.push(`Escudo de Cavaleiro: ataque rolado de novo`); }
     // Sorte de Apostador (Tomrick): exaustar o Herói para trocar um dado que falhou por ✷
     const failIdx = atk.faces.findIndex(f => f !== def.attackType && f !== 'crit');
     if (ab === 'sorte_apostador' && def.magic && !h.spent && failIdx >= 0 && !this.freeMode
@@ -1778,13 +1802,20 @@ export class Game {
   }
 
   /** Escudo de Cavaleiro armado: o atacante rola de novo (o Herói fica exausto). */
-  private knightShield(t: Unit, hits: number, attacker: Unit, faces: DieFace[]): boolean {
+  /** Escudo de Cavaleiro / do Rei: o jogador decide no painel dos dados (o ataque já aparece). IA: `auto`. */
+  private shieldAsk(t: Unit, shield: 'knight' | 'king', vs: NonNullable<RerollRequest['vs']>, auto: boolean, bonus = 0): boolean {
+    if (!t.guild || !this.rerollHook) return auto;
+    const pick = this.rerollHook({ heroId: t.id, kind: 'defense', faces: [], success: 'shield', rerolls: 0, base: 0, round: 1, guild: t.guild,
+      vs, shield, ...(bonus ? { bonus } : {}), ...(shield === 'king' && this.curDefsDone.length ? { done: this.curDefsDone.slice() } : {}) });
+    return pick === 'auto' ? auto : pick.includes(HELD_PICK);
+  }
+
+  private knightShield(t: Unit, vs: NonNullable<RerollRequest['vs']>): boolean {
+    const hits = vs.hits;
     if (t.kind !== 'hero' || t.spent || !t.alive || hits <= 0) return false;
     const ks = t.cards.find(c => this.cardDef(c).fx.knightShield);
     if (!ks) return false;
-    if (!ks.armed && !this.confirm(t, 'Escudo de Cavaleiro',
-      `<b>${this.name(attacker)}</b> rolou <b>${hits}</b> acerto${hits === 1 ? '' : 's'} contra <b>${this.name(t)}</b>. Exaustar o Herói para obrigar a rolar o ataque de novo?`,
-      hits >= this.maxHp(t) - t.wounds, faces, { yes: '🛡️ Usar o Escudo de Cavaleiro', no: 'Não usar' })) return false;
+    if (!ks.armed && !this.shieldAsk(t, 'knight', vs, hits >= this.maxHp(t) - t.wounds)) return false;
     ks.armed = false;
     t.spent = true;
     this.emit({ t: 'skill', id: t.id, skill: 'escudo_cavaleiro', name: 'Escudo de Cavaleiro' });
@@ -2398,11 +2429,11 @@ export class Game {
       this.s.extraHero = h.id;
       this.s.activation = null;
       this.s.activatedThisTurn = [];
-      this.s.booted = [];
+      this.s.booted = []; this.s.stealthUsed = [];
       this.s.blessing = null;
       this.s.warCry = null;
       this.s.extraOnly = false;
-      this.s.booted = [];
+      this.s.booted = []; this.s.stealthUsed = [];
       this.s.turnUsed = [];
       this.clearTurnFx();
       h.tokens.splice(i, 1);
@@ -2442,7 +2473,7 @@ export class Game {
       this.s.blessing = null;
       this.s.warCry = null;
       this.s.extraOnly = false;
-      this.s.booted = [];
+      this.s.booted = []; this.s.stealthUsed = [];
       this.s.turnUsed = [];
       this.clearTurnFx();
       this.log('Turno adicional! Ative outro Herói.');
@@ -2457,7 +2488,7 @@ export class Game {
     this.s.blessing = null;
     this.s.warCry = null;
     this.s.extraOnly = false;
-    this.s.booted = [];
+    this.s.booted = []; this.s.stealthUsed = [];
     this.s.turnUsed = [];
     this.clearTurnFx();
     if (this.s.shroud?.length) this.s.shroud = this.s.shroud.filter(id => this.unit(id).guild !== this.currentGuild().id);
@@ -3057,7 +3088,9 @@ export class Game {
       // Herói que já bloqueou tudo na primeira rolagem: Manter é o padrão; rolar os ✷ extras / Rerrolar só se quiser (IA mantém)
       if (!who || !this.rerollHook || (!r.held && !canRr(r.faces))) return r;
       choice = ask(r.faces, canRr(r.faces) ? rerolls : 0, 1, { covered: true, ...(r.held ? { held: r.held } : {}) });
-      if (choice === 'auto' || !choice.length) return { ...r, held: undefined, rr: { before: first, idx: [], asked: true } };
+      // IA / quem não decide aqui ('auto'): mantém, e os dados rolam normalmente na tela (não foram mostrados ainda)
+      if (choice === 'auto') return { ...r, held: undefined };
+      if (!choice.length) return { ...r, held: undefined, rr: { before: first, idx: [], asked: true } };
       if (choice.includes(HELD_PICK)) {
         r = this.rollHeld(r, die, success);
         if (!canRr(r.faces)) return { ...r, rr: { before: first, idx: [], asked: true } };
@@ -3293,7 +3326,7 @@ export class Game {
     if (md !== MONSTERS[m.defId]) notes.push('Destruidor da Pedra Sangrenta: Orc mais fraco');
     const mrr = this.ab(h) === 'encantado' ? 0 : md.rerolls;
     let atk = this.rollRerolls(dice, ATTACK_DIE, md.attackType, mrr, m, 'attack', h);
-    if (this.knightShield(h, atk.successes, m, atk.faces)) { atk = this.rollRerolls(dice, ATTACK_DIE, md.attackType, mrr, m, 'attack', h); notes.push('Escudo de Cavaleiro: ataque rolado de novo'); }
+    if (this.knightShield(h, { id: m.id, faces: atk.faces.slice(), hits: atk.successes, type: md.attackType, base: dice })) { atk = this.rollRerolls(dice, ATTACK_DIE, md.attackType, mrr, m, 'attack', h); notes.push('Escudo de Cavaleiro: ataque rolado de novo'); }
     this.curAttack = { id: m.id, faces: atk.faces.slice(), hits: atk.successes, type: md.attackType, base: dice };
     this.curDefsDone = [];
     if (md.rerolls) notes.push(`Rerrolagem ${md.rerolls}`);

@@ -1,0 +1,38 @@
+// MAP/TYPE/N (padrão Portão da Lua, capitao_orc, 2): os Monstros de destaque escondidos no posicionamento, surgem juntos (som de orc) e ficam com aura de lava
+import puppeteer from 'puppeteer-core';
+const OUT = process.argv[2] ?? '.';
+const browser = await puppeteer.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true, args: ['--autoplay-policy=no-user-gesture-required'] });
+const page = await browser.newPage();
+await page.setViewport({ width: 1400, height: 850 });
+page.on('pageerror', e => console.log('PAGEERR', e.message));
+const wait = ms => new Promise(r => setTimeout(r, ms));
+await page.goto('http://localhost:5199/', { waitUntil: 'networkidle0' });
+await wait(2000);
+await page.click('#m-test'); await wait(800);
+await page.evaluate(() => document.querySelector('#ts-start')?.click()); await wait(3000);
+await page.evaluate(map => { const c = window.cbt; c.startTest(undefined, { ...c.testCfg, mapId: map }); }, process.env.MAP ?? 'portao-da-lua');
+await wait(4000);
+await page.evaluate(t => { window.__type = t; }, process.env.TYPE ?? 'capitao_orc');
+const before = await page.evaluate(() => {
+  const c = window.cbt, g = c.game;
+  const caps = g.units().filter(u => u.kind === 'monster' && u.defId.startsWith(window.__type));
+  window.__played = [];
+  const A = window.Audio.prototype.play;
+  window.Audio.prototype.play = function () { window.__played.push(this.src.split('/').pop()); return A.call(this); };
+  return { ids: caps.map(u => u.id), alpha: caps.map(u => c.renderer.units.get(u.id).alpha) };
+});
+await page.evaluate(() => { const b = [...document.querySelectorAll('button')].find(x => /Pronto|Começar|Confirmar/i.test(x.textContent || '')); b?.click(); });
+await wait(1000);
+await page.evaluate(() => { const b = [...document.querySelectorAll('button')].find(x => /Sim, terminar/i.test(x.textContent || '')); b?.click(); });
+await wait(1700);
+await page.screenshot({ path: `${OUT}/cap-entrada.png` });
+const mid = await page.evaluate(ids => ids.map(id => window.cbt.renderer.units.get(id).alpha), before.ids);
+await wait(3500);
+const after = await page.evaluate(ids => ({ alpha: ids.map(id => window.cbt.renderer.units.get(id).alpha), played: window.__played.slice() }), before.ids);
+await page.evaluate(ids => { const c = window.cbt; c.renderer.focus([c.game.unit(ids[0]).cell], 1.2); }, before.ids);
+await wait(700);
+await page.screenshot({ path: `${OUT}/aura-${process.env.MAP ?? 'portao-da-lua'}.png`, clip: { x: 450, y: 180, width: 500, height: 420 } });
+console.log(JSON.stringify({ before, mid, after }));
+const ok = before.ids.length === Number(process.env.N ?? 2) && before.alpha.every(a => a === 0) && after.alpha.every(a => a === 1) && after.played.includes('orc-sound.mp3') && !after.played.some(s => s.startsWith('lorde'));
+console.log(ok ? `ENTRADA E AURA OK (${process.env.MAP ?? 'portao-da-lua'})` : 'FALHOU');
+await browser.close();

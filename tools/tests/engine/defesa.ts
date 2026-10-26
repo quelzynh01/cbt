@@ -103,7 +103,7 @@ for (const use of [false, true]) {
   const [grom, maya] = g.heroesOf('azul');
   const ms = Object.values(g.s.units).filter(u => u.kind === 'monster' && u.alive);
   const asked: string[] = [];
-  g.choiceHook = r => { if (r.choice === 'confirm' && r.source.startsWith('Escudo')) { asked.push(r.source); return use ? 0 : -1; } return 'auto'; };
+  g.rerollHook = r => { if (r.shield) { asked.push(`${r.shield === 'knight' ? 'Escudo de Cavaleiro' : 'Escudo do Rei'} (ataque na tela: ${r.vs?.faces.length ?? 0} dados)`); return use ? [HELD_PICK] : []; } return 'auto'; };
   const gg = g as unknown as G;
   const orig = gg.roll.bind(g);
   gg.roll = (...a: unknown[]) => a[1] !== DEFENSE_DIE ? { faces: ['melee', 'melee', 'blank'], successes: 2, crits: 0 } : orig(...a);
@@ -111,7 +111,7 @@ for (const use of [false, true]) {
   gg.monsterAttack(ms[0], grom, 'alerta');
   ms[1].cell = { ...maya.cell! };
   gg.monsterAttack(ms[1], maya, 'alerta');
-  const ok2 = asked.includes('Escudo de Cavaleiro') && asked.includes('Escudo do Rei') && !!grom.spent === use && !!maya.spent === use;
+  const ok2 = asked.some(x => x.startsWith('Escudo de Cavaleiro') && !x.includes(': 0 dados')) && asked.some(x => x.startsWith('Escudo do Rei') && !x.includes(': 0 dados')) && !!grom.spent === use && !!maya.spent === use;
   check(ok2, `escudos perguntados no combate (${asked.join(', ')}); ${use ? 'usou: Heróis exaustos' : 'não usou: Heróis prontos'}`);
 }
 {
@@ -133,5 +133,24 @@ for (const use of [false, true]) {
   const ev = g.drain().filter(x => x.t === 'attack') as { targets: { id: string }[] }[];
   const two = reqs.length === 2 && reqs[0].hero !== reqs[1].hero && reqs[0].vs === reqs[1].vs && reqs[1].done.includes(reqs[0].hero) && reqs[0].done.length === 0;
   check(ev.length === 1 && ev[0].targets.length === 2 && two, `Lorde Presas: 1 ataque, 2 defensores em sequência (${JSON.stringify(reqs.map(r => ({ h: r.hero, done: r.done })))})`);
+}
+{
+  // IA defendendo (quem decide responde 'auto'): já bloqueou tudo -> mantém, mas os dados NÃO contam como já mostrados (rolam na tela)
+  const g = mk({ grom: ['coracao_unicornio'] });
+  const [grom] = g.heroesOf('azul');
+  const m = Object.values(g.s.units).find(u => u.kind === 'monster' && u.alive)!;
+  m.cell = { ...grom.cell! };
+  g.rerollHook = () => 'auto';
+  const gg = g as unknown as G;
+  const orig = gg.roll.bind(g);
+  gg.roll = (...a: unknown[]) => {
+    const n = a[0] as number;
+    if (a[1] === DEFENSE_DIE && n > 1) return { faces: Array(n).fill('shield'), successes: n, crits: 0 };
+    if (a[1] !== DEFENSE_DIE) return { faces: ['melee', 'blank', 'blank'], successes: 1, crits: 0 };
+    return orig(...a);
+  };
+  gg.monsterAttack(m, grom, 'vinganca');
+  const e = g.drain().find(x => x.t === 'attack') as { targets: { defense: string[]; rr?: { asked: boolean } }[] };
+  check(e.targets[0].defense.length > 0 && !e.targets[0].rr?.asked, `IA na Vingança: Defesa rola na tela (rr.asked = ${e.targets[0].rr?.asked ?? 'nenhum'})`);
 }
 console.log(ok ? 'DEFESA SÓ QUANDO PRECISA OK' : 'FALHOU');

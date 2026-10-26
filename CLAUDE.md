@@ -78,6 +78,8 @@ sh tools/tests/run-engine.sh defesa        # Defesa: sem acertos não rola; já 
 sh tools/tests/run-engine.sh ordem         # ordem dos jogadores sorteada (avulsa e 1º cenário da campanha)
 sh tools/tests/run-engine.sh alertas       # aviso de Reação de Alerta antes de andar: nenhuma Reação sem aviso (mesmo caminho do movimento)
 sh tools/tests/run-engine.sh vdoor2        # Vingança: abrir/fechar portas Perto do Monstro (1 Movimento cada, até o Movimento dele)
+sh tools/tests/run-engine.sh alertas2      # Templo, Grom: todo Espaço x todo destino; nenhuma Reação de Alerta sem aviso
+sh tools/tests/run-engine.sh furtivo       # Vapor (Wisp): Furtividade 1 vez por turno, perguntando "Esquivar?" (IA esquiva)
 sh tools/tests/run-engine.sh xsim 30 mix   # partidas IA x IA nos mapas Clássicos (mix|core|extra; MAP=id, SEED=n repete uma, BTG=1 inclui Beyond, V=1 detalha) -> 0 travadas/0 erros
 ALL=1 sh tools/tests/run-engine.sh reach2  # alcance de todos os mapas       -> "TODOS OS MAPAS OK"
 ```
@@ -102,6 +104,9 @@ node tools/tests/browser/lordentry.mjs <pasta-prints>               # Templo: Lo
 node tools/tests/browser/splashdef.mjs <pasta-prints>               # Lorde Presas em 2 Heróis: ataque rola 1 vez, um defensor por vez; sem acertos: pergunta no painel (ROLL=1: rola)
 node tools/tests/browser/lordsounds.mjs <pasta-prints>              # Sempressombrio: Alma do Lorde Presas; ataque do Lorde = morcego (rastro de morceguinhos) vai e volta; Irmãs: ✷ = risada, golpe = som do ataque + fala
 node tools/tests/browser/vdoorui.mjs <pasta-prints>                 # Vingança: clicar na porta Perto do Monstro abre/fecha antes de ele mover
+node tools/tests/browser/shieldui.mjs <pasta-prints>                # Escudo de Cavaleiro / do Rei: pergunta no painel dos dados, com o ataque já rolado
+node tools/tests/browser/minotaur.mjs <pasta-prints>                # Arena: entrada do Minotauro, risada no ✷, fala ao matar; Vapor pergunta "Esquivar?"
+node tools/tests/browser/captains.mjs <pasta-prints>                # MAP=/TYPE=/N=: Monstros de destaque (FIRE_BOSSES) surgem juntos com som de orc e ficam com aura de lava
 node tools/tests/browser/alertwarn.mjs <pasta-prints>               # Templo: aviso de Reação de Alerta (Irmãs) aparece antes de andar
 node tools/tests/browser/rratk.mjs <pasta-prints>                   # online: Rerrolagem do ATAQUE do amigo acompanhada no painel de dados
 ```

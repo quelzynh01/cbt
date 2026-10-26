@@ -1,11 +1,11 @@
 import { entryPlaque } from './dice';
 import { getSettings } from '../ui/settings';
-import { isSister, playSisterAttack, play, playLordEntrance, playOnce, playRandom, type Sfx } from '../audio/sfx';
+import { isMinotaur, playMinoEntrance, playMinoKill, isSister, playSisterAttack, play, playLordEntrance, playOnce, playRandom, type Sfx } from '../audio/sfx';
 import { CARDS } from '../engine/cards';
 import { CARD_ART } from '../ui/cardArt';
 import { drawTokenImage, tokenImage, tokenImageId } from './tokens';
 import { key, sameCell, type LosBlock } from '../engine/board';
-import { GUILDS, MONSTERS, teamName } from '../engine/data';
+import { FIRE_BOSSES, GUILDS, MONSTERS, teamName } from '../engine/data';
 import type { Game } from '../engine/game';
 import type { Cell, GameEvent, Token } from '../engine/types';
 import {
@@ -401,10 +401,14 @@ export class Renderer {
 
   /** Lorde Presas no tabuleiro antes de todos posicionarem: fica escondido até a entrada dele. */
   private lordWaits(u: { kind: string; defId: string; alive: boolean; cell: Cell | null }) {
-    return u.kind === 'monster' && u.alive && !!u.cell && u.defId.replace(/\d+$/, '') === 'lorde_presas' && !!this.game.s.deploying?.length;
+    if (!this.game.s.deploying?.length || u.kind !== 'monster' || !u.alive || !u.cell) return false;
+    const b = u.defId.replace(/\d+$/, '');
+    return b === 'lorde_presas' || (b === 'minotauro' && this.game.map.id === 'arena-do-sol-brilhante') || FIRE_BOSSES[this.game.map.id] === b;
   }
   /** Entrada do Lorde Presas (começo da partida ou Sombra invocada): fumaça e anéis de sangue no Espaço. */
-  private lordFx: { cell: Cell; t0: number } | null = null;
+  private lordFxs: { cell: Cell; t0: number; kind: 'lord' | 'mino' | 'lava' }[] = [];
+  /** Último ataque animado (para a fala do Minotauro quando ele mata alguém). */
+  private lastStrike: { attackerId: string; targets: string[]; t: number } | null = null;
 
   /** Direção de quem olha para o meio do tabuleiro a partir de `c`. */
   centerDir(c: Cell | null): Dir {
@@ -561,6 +565,7 @@ export class Renderer {
 
   /** Animação do ataque (investida ou projétil). Retorna quanto tempo leva (ms). */
   animateAttack(e: Strike): number {
+    this.lastStrike = { attackerId: e.attackerId, targets: e.targets.map(t => t.id), t: this.t };
     return this.animateAttack0(e);
   }
   private animateAttack0(e: Strike): number {
@@ -707,7 +712,7 @@ export class Renderer {
         if (e.t === 'spawn' && u.defId.replace(/\d+$/, '') === 'lorde_presas') {
           dur = 2000 / this.speed;
           u.fade = { from: 0, to: 1, t0: now + 400, dur: 1100 / this.speed };
-          this.lordFx = { cell: { ...e.cell }, t0: now };
+          this.lordFxs.push({ cell: { ...e.cell }, t0: now, kind: 'lord' });
           playLordEntrance();
         }
         const s = this.slotPositions().get(u.id);
@@ -715,12 +720,21 @@ export class Renderer {
         break;
       }
       case 'lordEntrance': {
-        const u = this.units.get(e.id);
         dur = Math.max(2400, 3400 / this.speed);
-        if (u) { u.alpha = 0; u.fade = { from: 0, to: 1, t0: now + 700, dur: 1300 }; u.dir = this.centerDir(e.cell); }
-        this.lordFx = { cell: { ...e.cell }, t0: now };
-        this.glideCells([e.cell], Math.max(this.cam.zoom, 0.8));
-        playLordEntrance();
+        // todos os chefes desta entrada surgem juntos (ex.: os 2 Capitães Orc do Portão da Lua)
+        const all = [{ id: e.id, cell: e.cell }, ...(e.others ?? [])];
+        let kind: 'lord' | 'mino' | 'lava' = 'lord';
+        for (const b of all) {
+          const u = this.units.get(b.id);
+          if (u) { u.alpha = 0; u.fade = { from: 0, to: 1, t0: now + 700, dur: 1300 }; u.dir = this.centerDir(b.cell); }
+          const base = u?.defId.replace(/\d+$/, '') ?? '';
+          kind = base === 'minotauro' ? 'mino' : base === 'lorde_presas' ? 'lord' : 'lava';
+          this.lordFxs.push({ cell: { ...b.cell }, t0: now, kind });
+        }
+        this.glideCells(all.map(b => b.cell), Math.max(this.cam.zoom, 0.8));
+        if (kind === 'mino') playMinoEntrance();
+        else if (kind === 'lava') { play('orc-sound'); setTimeout(() => play('orc-sound', 0.9), 450); }
+        else playLordEntrance();
         break;
       }
       case 'spawnRoll': {
@@ -771,6 +785,9 @@ export class Renderer {
       this.pickupsAlong = [];
     }
     if (e.t === 'death') {
+      const ls = this.lastStrike;
+      const killer = ls && this.t - ls.t < 6000 && ls.targets.includes(e.id) ? this.units.get(ls.attackerId) : null;
+      if (killer && isMinotaur(killer.defId) && this.units.get(e.id)?.kind === 'hero') setTimeout(() => playMinoKill(), 250);
       const u = this.units.get(e.id)!;
       u.alive = false;
       u.cell = null;
@@ -1129,7 +1146,7 @@ export class Renderer {
       ctx.fillStyle = `rgba(184,146,255,${0.18 + pulse * 0.22})`; ctx.fill();
       ctx.strokeStyle = `rgba(214,190,255,${0.6 + pulse * 0.4})`; ctx.lineWidth = 5; ctx.setLineDash([14, 8]); ctx.stroke(); ctx.setLineDash([]);
     }
-    if (this.lordFx) this.drawLordFx(false);
+    if (this.lordFxs.length) this.drawLordFx(false);
     // Entradas de Monstro: placa no chão com os 2 símbolos de dado que fazem o Monstro surgir ali
     for (const em of this.game.s.entryMarkers) {
       const k = key(em.cell);
@@ -1569,6 +1586,43 @@ export class Renderer {
     for (const sp of list) sp.draw();
   }
 
+  /** Monstros de destaque (FIRE_BOSSES: Capitães Orc, Feral Martelador, Troll): poça de lava, chamas e brasas subindo. */
+  private drawLavaAura(ctx: CanvasRenderingContext2D, sc: number, tt: number, front: boolean) {
+    ctx.save();
+    if (!front) {
+      // poça de lava brilhando no chão
+      ctx.save();
+      ctx.scale(1, 0.5);
+      const R = 46 * sc;
+      const pulse = 0.75 + 0.25 * Math.sin(tt * 3);
+      const g = ctx.createRadialGradient(0, 0, R * 0.15, 0, 0, R * 1.25);
+      g.addColorStop(0, `rgba(255,220,90,${0.85 * pulse})`); g.addColorStop(0.45, `rgba(255,110,10,${0.75 * pulse})`);
+      g.addColorStop(0.8, 'rgba(160,30,0,0.45)'); g.addColorStop(1, 'rgba(120,20,0,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, R * 1.25, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+      // chamas atrás do corpo
+      ctx.globalCompositeOperation = 'lighter';
+      for (let i = 0; i < 14; i++) {
+        const k = (tt * (0.9 + hash(i, 61) * 0.6) + hash(i, 63)) % 1;
+        const x = (hash(i, 67) - 0.5) * 64 * sc;
+        const y = -k * 120 * sc;
+        const r = (26 - k * 18) * sc;
+        const f = ctx.createRadialGradient(x, y, 0, x, y, r);
+        f.addColorStop(0, `rgba(255,210,90,${0.75 * (1 - k)})`); f.addColorStop(0.5, `rgba(255,110,10,${0.45 * (1 - k)})`); f.addColorStop(1, 'rgba(255,60,0,0)');
+        ctx.fillStyle = f; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+      }
+    } else {
+      // brasas subindo na frente
+      for (let i = 0; i < 10; i++) {
+        const k = (tt * (0.4 + hash(i, 71) * 0.4) + hash(i, 73)) % 1;
+        const x = (hash(i, 79) - 0.5) * 70 * sc + Math.sin(tt * 3 + i) * 5;
+        ctx.fillStyle = `rgba(255,${150 + Math.floor(hash(i, 83) * 90)},50,${1 - k})`;
+        ctx.beginPath(); ctx.arc(x, -10 - k * 120 * sc, (1.5 + hash(i, 89) * 2) * sc, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+
   /** Fiapos de luz azul subindo em volta da Alma (atrás do corpo). */
   private drawSoulWisps(ctx: CanvasRenderingContext2D, sc: number, tt: number) {
     ctx.save();
@@ -1587,49 +1641,69 @@ export class Renderer {
   }
 
   private drawLordFx(top: boolean) {
-    const fx = this.lordFx!;
+    this.lordFxs = this.lordFxs.filter(f => (this.t - f.t0) / 1000 <= 3.6);
+    for (const fx of this.lordFxs) this.drawOneFx(fx, top);
+  }
+
+  /** Cores da entrada: Lorde (sangue), Minotauro (areia/sol), Capitão Orc (lava). */
+  private static FX_PAL = {
+    lord: { pool0: '40,0,10', pool1: '120,0,20', ring: '255,40,40', beam: '255,60,40', smoke: '20,0,8' },
+    mino: { pool0: '90,50,10', pool1: '200,140,40', ring: '255,200,60', beam: '255,210,90', smoke: '190,150,90' },
+    lava: { pool0: '70,12,0', pool1: '255,90,0', ring: '255,150,30', beam: '255,120,30', smoke: '60,20,10' },
+  };
+
+  private drawOneFx(fx: { cell: Cell; t0: number; kind: 'lord' | 'mino' | 'lava' }, top: boolean) {
     const age = (this.t - fx.t0) / 1000;
-    if (age > 3.6) { this.lordFx = null; return; }
+    const P = Renderer.FX_PAL[fx.kind];
     const ctx = this.ctx;
     const p = g2s(fx.cell.c + 0.5, fx.cell.r + 0.5);
     const fade = Math.min(1, age / 0.25) * Math.max(0, Math.min(1, (3.6 - age) / 0.8));
     ctx.save();
     ctx.translate(p.x, p.y);
     if (!top) {
-      // poça escura e anéis vermelhos se abrindo no chão
+      // poça no chão e anéis se abrindo
       ctx.save();
       ctx.scale(1, 0.5);
       const pool = ctx.createRadialGradient(0, 0, 0, 0, 0, 120);
-      pool.addColorStop(0, `rgba(40,0,10,${0.85 * fade})`);
-      pool.addColorStop(0.6, `rgba(120,0,20,${0.5 * fade})`);
-      pool.addColorStop(1, 'rgba(120,0,20,0)');
+      pool.addColorStop(0, `rgba(${P.pool0},${0.8 * fade})`);
+      pool.addColorStop(0.6, `rgba(${P.pool1},${0.5 * fade})`);
+      pool.addColorStop(1, `rgba(${P.pool1},0)`);
       ctx.fillStyle = pool;
       ctx.beginPath(); ctx.arc(0, 0, 120, 0, Math.PI * 2); ctx.fill();
       for (let i = 0; i < 3; i++) {
         const k = ((age * 0.9 + i / 3) % 1);
-        ctx.strokeStyle = `rgba(255,40,40,${(1 - k) * 0.9 * fade})`;
+        ctx.strokeStyle = `rgba(${P.ring},${(1 - k) * 0.9 * fade})`;
         ctx.lineWidth = 6 * (1 - k) + 1;
         ctx.beginPath(); ctx.arc(0, 0, 20 + k * 130, 0, Math.PI * 2); ctx.stroke();
       }
       ctx.restore();
     } else {
-      // coluna de luz vermelha e fumaça/brasas subindo
+      // coluna de luz e fumaça subindo
       const beam = ctx.createLinearGradient(0, 0, 0, -260);
       const b = Math.max(0, 1 - Math.abs(age - 0.9) / 0.9) * fade;
-      beam.addColorStop(0, `rgba(255,60,40,${0.55 * b})`);
-      beam.addColorStop(1, 'rgba(255,60,40,0)');
+      beam.addColorStop(0, `rgba(${P.beam},${0.55 * b})`);
+      beam.addColorStop(1, `rgba(${P.beam},0)`);
       ctx.fillStyle = beam;
       ctx.beginPath(); ctx.moveTo(-46, 0); ctx.lineTo(46, 0); ctx.lineTo(20, -260); ctx.lineTo(-20, -260); ctx.closePath(); ctx.fill();
-      // fumaça escura subindo
       for (let i = 0; i < 16; i++) {
         const h = hash(i, 7);
         const life = (age * (0.45 + h * 0.5) + h) % 1;
         const x = (hash(i, 13) - 0.5) * 110 + Math.sin(age * 3 + i) * 10;
-        ctx.fillStyle = `rgba(20,0,8,${(1 - life) * 0.5 * fade})`;
+        ctx.fillStyle = `rgba(${P.smoke},${(1 - life) * 0.5 * fade})`;
         ctx.beginPath(); ctx.arc(x, -life * (140 + h * 110), 10 + life * 22, 0, Math.PI * 2); ctx.fill();
       }
-      // revoada de morcegos saindo em espiral do Lorde
-      for (let i = 0; i < 12; i++) {
+      // Capitão Orc: brasas e fagulhas de lava subindo
+      if (fx.kind === 'lava') {
+        for (let i = 0; i < 30; i++) {
+          const h = hash(i, 17);
+          const life = (age * (0.6 + h * 0.6) + h) % 1;
+          const x = (hash(i, 19) - 0.5) * 120 + Math.sin(age * 4 + i) * 8;
+          ctx.fillStyle = `rgba(255,${130 + Math.floor(h * 100)},40,${(1 - life) * fade})`;
+          ctx.beginPath(); ctx.arc(x, -life * (120 + h * 140), 2 + h * 2.5, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+      // revoada de morcegos: só o Lorde Presas
+      for (let i = 0; i < (fx.kind === 'lord' ? 12 : 0); i++) {
         const h = hash(i, 29);
         const start = h * 0.9;
         const k = (age - start) / (1.6 + hash(i, 31) * 0.8);
@@ -1642,6 +1716,7 @@ export class Renderer {
     }
     ctx.restore();
   }
+
 
   private drawUnit(u: UnitView, tt: number) {
     const ctx = this.ctx;
@@ -1764,13 +1839,16 @@ export class Renderer {
     // Alma do Lorde Presas: espírito azul-claro, meio transparente, flutuando com fiapos de luz
     const isSoul = !!this.game?.s.units[u.id]?.soul && u.alive;
     if (isSoul) this.drawSoulWisps(ctx, L.scale, tt);
-    const fx = [isShadow ? 'grayscale(1) contrast(1.15) brightness(0.9)' : '', isSoul ? SOUL_FILTER : '', blink ? `brightness(${1.25 + 0.45 * Math.sin(tt * 7)}) drop-shadow(0 0 8px rgba(184,146,255,0.95))` : ''].filter(Boolean).join(' ');
+    const lava = u.alive && u.kind === 'monster' && !!this.game && FIRE_BOSSES[this.game.map.id] === u.defId.replace(/\d+$/, '');
+    if (lava) this.drawLavaAura(ctx, L.scale, tt, false);
+    const fx = [isShadow ? 'grayscale(1) contrast(1.15) brightness(0.9)' : '', isSoul ? SOUL_FILTER : '', lava ? `drop-shadow(0 0 ${7 + 4 * Math.sin(tt * 5)}px rgba(255,110,20,0.95)) drop-shadow(0 -4px 14px rgba(255,60,0,0.6))` : '', blink ? `brightness(${1.25 + 0.45 * Math.sin(tt * 7)}) drop-shadow(0 0 8px rgba(184,146,255,0.95))` : ''].filter(Boolean).join(' ');
     if (fx) ctx.filter = fx;
     if (isSoul) ctx.translate(0, -6 - Math.sin(tt * 2) * 5);
     drawCharacter(ctx, u.defId, { dir, flip, t: idleT, hurt, alpha: isSoul ? 0.72 + 0.08 * Math.sin(tt * 3) : 1, stunned: u.stunned, lunge: 0, scale: L.scale * 0.66 });
     if (isSoul) ctx.translate(0, 6 + Math.sin(tt * 2) * 5);
     if (fx) ctx.filter = 'none';
     if (spinFx && spinFront) spinFx();
+    if (lava) this.drawLavaAura(ctx, L.scale, tt, true);
     if (u.stunned) this.drawStun(ctx, -78 * L.scale - 6, tt);
     // em volta do corpo, girando: 1 caveirinha roxa (Maldição) e, pequenos, os itens que o Herói carrega na bolsa
     const bag = u.alive && u.kind === 'hero' ? u.bag : [];
@@ -2047,7 +2125,7 @@ export class Renderer {
       }
       ctx.restore();
     }
-    if (this.lordFx) this.drawLordFx(true);
+    if (this.lordFxs.length) this.drawLordFx(true);
     // textos flutuantes
     this.floaters = this.floaters.filter(f => this.t - f.t0 < f.dur);
     for (const f of this.floaters) {

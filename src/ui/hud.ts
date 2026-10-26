@@ -7,7 +7,7 @@ import { SOUL_FILTER } from '../render/chibi';
 import type { CardInst, Cell, DieFace, GameEvent, GuildId, RerollInfo, Token, Unit } from '../engine/types';
 import { tokenImageId, tokenUrl } from '../render/tokens';
 import { dieImg } from '../render/dice';
-import { isSister, play, playOnce, playSisterCrit } from '../audio/sfx';
+import { playCritVoice, play, playOnce } from '../audio/sfx';
 import { soundWidget } from '../audio/widget';
 import { drawFace, getArtVersion } from '../render/chibi';
 import { CURSES } from '../engine/cards';
@@ -1418,7 +1418,7 @@ export class Hud {
       if (!alive()) return;
       box.querySelector('.cd-sum.atk')!.innerHTML = `<b>${e.hits}</b> acerto${e.hits === 1 ? '' : 's'}${e.crits ? ` <span class="crit">(${e.crits}✷)</span>` : ''}${e.rr?.idx.length ? ' <span class="rrtag">↻ rerrolado</span>' : ''}`;
       // Irmãs: ✷ no ataque = risada (uma vez por ataque, mesmo se já tocou no painel da Defesa)
-      if (e.crits && isSister(atk.defId) && this.critPlayed !== `${e.attackerId}:${e.dice.join(',')}`) playSisterCrit();
+      if (e.crits && this.critPlayed !== `${e.attackerId}:${e.dice.join(',')}`) playCritVoice(atk.defId);
       this.critPlayed = '';
       await wait(150);
       // defesas
@@ -1711,6 +1711,12 @@ export class Hud {
         btn.innerHTML = `<span class="cd-wait">⏳ ${who}: rolar a Defesa mesmo assim ou manter?</span>`;
         return;
       }
+      const sh = (req as { shield?: string }).shield;
+      if (sh) {
+        row.innerHTML = '';
+        btn.innerHTML = `<span class="cd-wait">⏳ ${who} está decidindo se usa o ${sh === 'knight' ? 'Escudo de Cavaleiro' : 'Escudo do Rei'}…</span>`;
+        return;
+      }
       if ((req.round ?? 1) > 1) settle(row, req.faces, black, req.success);
       else {
         btn.innerHTML = `<span class="cd-wait">⏳ Aguardando ${who} rolar…</span>`;
@@ -1728,7 +1734,7 @@ export class Hud {
   /** Acabou de acompanhar a Rerrolagem do outro (o resultado vem a seguir, normal). */
   endSpectate() { if (this.spectating) { this.spectating = false; this.resetDice(); } }
 
-  askDecision(req: { heroId: string; kind: 'attack' | 'defense'; faces: DieFace[]; success: DieFace; rerolls: number; covered?: boolean; held?: number; noHits?: boolean;
+  askDecision(req: { heroId: string; kind: 'attack' | 'defense'; faces: DieFace[]; success: DieFace; rerolls: number; covered?: boolean; held?: number; noHits?: boolean; shield?: 'knight' | 'king'; bonus?: number;
     done?: { id: string; faces: DieFace[]; blocks: number; noHits?: boolean }[]; base?: number; round?: number; vs?: { id: string; faces: DieFace[]; hits: number; type: string; base?: number }; card?: { name: string; type: string; dice: number } }): Promise<number[]> {
     this.closePrize();
     const g = this.game;
@@ -1782,7 +1788,7 @@ export class Hud {
           await wait(250);
         }
         if (req.vs) this.shownAtk = atkKey;
-        if (req.vs && !cont && !sameAtk && !prev && req.vs.faces.includes('crit') && isSister(attacker.defId)) { playSisterCrit(); this.critPlayed = atkKey; }
+        if (req.vs && !cont && !sameAtk && !prev && req.vs.faces.includes('crit') && playCritVoice(attacker.defId)) this.critPlayed = atkKey;
         // vários alvos: as Defesas anteriores deste ataque aparecem antes, uma de cada vez (o painel troca o defensor)
         for (const d of req.done ?? []) {
           if (this.defShown.has(d.id)) continue;
@@ -1798,6 +1804,43 @@ export class Hud {
           await wait(900);
         }
         const holder = req.kind === 'attack' ? box.querySelector('.cd-box')! : this.focusDef(me.id, attacker);
+        // Escudo de Cavaleiro (rolar o ataque de novo) / do Rei (+dados na Defesa): a pergunta aparece aqui, com o ataque na tela
+        if (req.shield) {
+          holder.classList?.add('show');
+          const r1 = holder.querySelector('.cd-row')!, b1 = holder.querySelector('.cd-btn')!, s1 = holder.querySelector('.cd-sum')!;
+          const knight = req.shield === 'knight';
+          const hits = req.vs?.hits ?? 0;
+          r1.innerHTML = '';
+          s1.innerHTML = knight
+            ? `🛡️ <b>Escudo de Cavaleiro</b>: exaustar <b>${g.name(me)}</b> para obrigar <b>${g.name(attacker)}</b> a rolar o ataque de novo (${hits} acerto${hits === 1 ? '' : 's'})?`
+            : `🛡️ <b>Escudo do Rei</b>: exaustar <b>${g.name(me)}</b> para rolar <b>+${req.bonus ?? 2}</b> dados de Defesa?`;
+          b1.classList.add('cd-keepbar');
+          b1.innerHTML = `<button class="primary" id="cd-keep">Não usar</button><button id="cd-held">🛡️ ${knight ? 'Rolar o ataque de novo' : `Usar (+${req.bonus ?? 2} dados)`}</button>`;
+          box.classList.add('interactive');
+          const end = (use: boolean) => {
+            this.diceUnkey(k1);
+            b1.innerHTML = ''; b1.classList.remove('cd-keepbar');
+            box.classList.remove('interactive');
+            if (knight && use) {
+              // o ataque vai ser rolado de novo: o painel recomeça com os dados novos
+              s1.innerHTML = '🛡️ Escudo de Cavaleiro: o ataque é rolado de novo!';
+              this.carry = null; this.shownAtk = '';
+            } else if (knight) {
+              s1.innerHTML = '';
+              this.carry = { heroId: req.heroId, kind: 'attack', attackerId, dice: [], before: req.vs?.faces.slice() ?? [], idx: [] };
+            } else {
+              // Escudo do Rei: a Defesa rola em seguida, sem pedir outro clique
+              s1.innerHTML = use ? `🛡️ Escudo do Rei: +${req.bonus ?? 2} dados de Defesa` : '';
+              this.carry = { heroId: req.heroId, kind: 'defense', attackerId, dice: [], before: [], idx: [], held: true, defClicked: true };
+            }
+            resolve(use ? [HELD_PICK] : []);
+          };
+          const k1 = (ev: KeyboardEvent) => { if (ev.code === 'Enter' || ev.code === 'Space') { ev.preventDefault(); ev.stopImmediatePropagation(); end(false); } };
+          this.diceKey(k1);
+          (b1.querySelector('#cd-keep') as HTMLElement).onclick = () => end(false);
+          (b1.querySelector('#cd-held') as HTMLElement).onclick = () => end(true);
+          return;
+        }
         // o ataque não acertou: a pergunta aparece aqui, depois dos dados do ataque (Manter é o padrão)
         if (req.noHits) {
           holder.classList?.add('show');

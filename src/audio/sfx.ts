@@ -6,11 +6,13 @@ export type Sfx = 'healing' | 'refresh' | 'teletransport' | 'trap' | 'pick-item'
   | 'dice' | 'atack-sword' | 'atack-bow' | 'atack-magic' | 'stun' | 'foot-step' | 'gold' | 'cleave' | 'rajada-de-vento' | 'hobsbawn' | 'bow-critico'
   | 'archer-sound' | 'orc-sound' | 'mission' | 'end-game'
   | 'lorde-presas-entrada-1' | 'lorde-presas-entrada-2' | 'lorde-presas-entrada-3' | 'lorde-presas-entrada-4'
-  | 'atack-sister1' | 'atack-sister2' | 'lol-sister1' | 'lol-sister2' | 'lol-sister3' | 'sister-dor-crit' | 'sister-prazer-crit' | 'atack-lorde-pressas';
+  | 'atack-sister1' | 'atack-sister2' | 'lol-sister1' | 'lol-sister2' | 'lol-sister3' | 'sister-dor-crit' | 'sister-prazer-crit' | 'atack-lorde-pressas'
+  | 'centaur-entrance1' | 'centaur-entrance2' | 'centaur-kills1' | 'centaur-kills2' | 'centaur-lol1' | 'centaur-lol2';
 const NAMES: Sfx[] = ['healing', 'refresh', 'teletransport', 'trap', 'pick-item', 'scan', 'skill-wisp', 'skill-spike',
   'dice', 'atack-sword', 'atack-bow', 'atack-magic', 'stun', 'foot-step', 'gold', 'cleave', 'rajada-de-vento', 'hobsbawn', 'bow-critico', 'archer-sound', 'orc-sound', 'mission', 'end-game',
   'lorde-presas-entrada-1', 'lorde-presas-entrada-2', 'lorde-presas-entrada-3', 'lorde-presas-entrada-4',
-  'atack-sister1', 'atack-sister2', 'lol-sister1', 'lol-sister2', 'lol-sister3', 'sister-dor-crit', 'sister-prazer-crit', 'atack-lorde-pressas'];
+  'atack-sister1', 'atack-sister2', 'lol-sister1', 'lol-sister2', 'lol-sister3', 'sister-dor-crit', 'sister-prazer-crit', 'atack-lorde-pressas',
+  'centaur-entrance1', 'centaur-entrance2', 'centaur-kills1', 'centaur-kills2', 'centaur-lol1', 'centaur-lol2'];
 /** Sons que não são .mp3. */
 const EXT: Partial<Record<Sfx, string>> = { mission: 'wav', 'end-game': 'wav' };
 const url = (n: Sfx) => `${import.meta.env.BASE_URL}sounds/${n}.${EXT[n] ?? 'mp3'}`;
@@ -86,3 +88,14 @@ export function playSisterAttack(defId: string) {
   setTimeout(() => play(defId.startsWith('irma_dor') ? 'sister-dor-crit' : 'sister-prazer-crit'), (SISTER_ATTACK_MS[pick] ?? 2500) + 100);
 }
 export function playSisterCrit() { playRandom(SISTER_LOL); }
+
+/** Minotauro: entrada (Arena do Sol Brilhante), quando mata um Herói e ✷ no ataque. */
+export const isMinotaur = (defId: string) => /^minotauro/.test(defId);
+export function playMinoEntrance() { playRandom(['centaur-entrance1', 'centaur-entrance2']); }
+export function playMinoKill() { playRandom(['centaur-kills1', 'centaur-kills2']); }
+/** ✷ no ataque: fala de quem atacou (Irmãs = risada; Minotauro = risada dele). */
+export function playCritVoice(defId: string): boolean {
+  if (isSister(defId)) { playSisterCrit(); return true; }
+  if (isMinotaur(defId)) { playRandom(['centaur-lol1', 'centaur-lol2']); return true; }
+  return false;
+}

@@ -250,6 +250,8 @@ export interface GameState {
   /** Grito de Guerra: a Guilda pode ativar outro Herói neste turno. */
   warCry?: GuildId | null;
   /** Heróis que andaram com as Botas neste turno (não podem ser ativados — só pelo Grito de Guerra). */
+  /** Heróis que já usaram a Furtividade (Vapor) neste turno. */
+  stealthUsed?: string[];
   booted?: string[];
   /** O Herói ativo morreu com Grito de Guerra / Bênção ainda valendo: a próxima ativação do turno é a extra. */
   extraOnly?: boolean;
@@ -337,7 +339,7 @@ export type GameEvent =
   /** target: a Entrada de Monstro que os dados indicaram (mesmo ocupada, para a câmera mostrar). */
   /** Invocação (Sombra do Lorde Presas): 2 dados contra as Entradas de Monstro; `cell` = onde surgiu (null = ficou fora do tabuleiro). */
   /** Começo da partida (todos posicionaram): o Lorde Presas surge no lugar dele, com animação e fala. */
-  | { t: 'lordEntrance'; id: string; cell: Cell }
+  | { t: 'lordEntrance'; id: string; cell: Cell; /** outros chefes que surgem junto (ex.: os 2 Capitães Orc) */ others?: { id: string; cell: Cell }[] }
   | { t: 'summonRoll'; heroId: string; monsterId: string; faces: DieFace[]; cell: Cell | null; target?: Cell; color?: string }
   | { t: 'spawnRoll'; id: string; faces: DieFace[]; cell: Cell | null; reason: string; target?: Cell }
   | { t: 'respawn'; id: string; cell: Cell }
