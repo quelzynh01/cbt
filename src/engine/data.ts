@@ -346,9 +346,22 @@ export const GUILDS: Record<GuildId, { name: string; color: string; dark: string
 };
 
 /** Monstros de destaque por mapa: surgem com entrada (som de orc) quando todos posicionam e ficam com aura de fogo/lava. */
-export const FIRE_BOSSES: Record<string, string> = {
-  'portao-da-lua': 'capitao_orc',
-  'covil-dos-orcs': 'capitao_orc',
-  'viveiro-das-aguias': 'feral_martelador',
-  'mansao': 'troll',
+export type BossAura = 'fire' | 'dark' | 'sand' | 'sister';
+export const FIRE_BOSSES: Record<string, { type: string; aura: BossAura }[]> = {
+  'portao-da-lua': [{ type: 'capitao_orc', aura: 'fire' }],
+  'covil-dos-orcs': [{ type: 'capitao_orc', aura: 'fire' }],
+  'viveiro-das-aguias': [{ type: 'feral_martelador', aura: 'dark' }],
+  'mansao': [{ type: 'troll', aura: 'fire' }],
+  'patio-da-universidade': [{ type: 'troll', aura: 'fire' }, { type: 'minotauro', aura: 'sand' }],
+  'arena-do-sol-brilhante': [{ type: 'minotauro', aura: 'sand' }],
+  'distrito-do-alquimista': [{ type: 'irma_dor', aura: 'sister' }, { type: 'irma_prazer', aura: 'sister' }],
 };
+/** Aura do Monstro de destaque neste mapa (ou undefined). */
+export function bossAura(mapId: string, defId: string): BossAura | undefined {
+  const b = defId.replace(/\d+$/, '');
+  return FIRE_BOSSES[mapId]?.find(x => x.type === b)?.aura;
+}
+/** Mapas em que as Irmãs (da Dor e do Prazer) surgem juntas no começo: uma fala e a outra ri. */
+export const SISTER_ENTRANCE: string[] = ['distrito-do-alquimista'];
+/** Dois chefes diferentes que surgem em dupla (um de cada vez, ordem sorteada): o primeiro tem a entrada dele, o segundo ri. */
+export const DUO_ENTRANCE: Record<string, string[]> = { 'patio-da-universidade': ['troll', 'minotauro'] };

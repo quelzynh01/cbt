@@ -80,6 +80,7 @@ sh tools/tests/run-engine.sh alertas       # aviso de Reação de Alerta antes d
 sh tools/tests/run-engine.sh vdoor2        # Vingança: abrir/fechar portas Perto do Monstro (1 Movimento cada, até o Movimento dele)
 sh tools/tests/run-engine.sh alertas2      # Templo, Grom: todo Espaço x todo destino; nenhuma Reação de Alerta sem aviso
 sh tools/tests/run-engine.sh furtivo       # Vapor (Wisp): Furtividade 1 vez por turno, perguntando "Esquivar?" (IA esquiva)
+sh tools/tests/run-engine.sh irmas         # ordem de entrada sorteada: Irmãs (Alquimista) e dupla Troll + Minotauro (Pátio)
 sh tools/tests/run-engine.sh xsim 30 mix   # partidas IA x IA nos mapas Clássicos (mix|core|extra; MAP=id, SEED=n repete uma, BTG=1 inclui Beyond, V=1 detalha) -> 0 travadas/0 erros
 ALL=1 sh tools/tests/run-engine.sh reach2  # alcance de todos os mapas       -> "TODOS OS MAPAS OK"
 ```
@@ -106,7 +107,11 @@ node tools/tests/browser/lordsounds.mjs <pasta-prints>              # Sempressom
 node tools/tests/browser/vdoorui.mjs <pasta-prints>                 # Vingança: clicar na porta Perto do Monstro abre/fecha antes de ele mover
 node tools/tests/browser/shieldui.mjs <pasta-prints>                # Escudo de Cavaleiro / do Rei: pergunta no painel dos dados, com o ataque já rolado
 node tools/tests/browser/minotaur.mjs <pasta-prints>                # Arena: entrada do Minotauro, risada no ✷, fala ao matar; Vapor pergunta "Esquivar?"
-node tools/tests/browser/captains.mjs <pasta-prints>                # MAP=/TYPE=/N=: Monstros de destaque (FIRE_BOSSES) surgem juntos com som de orc e ficam com aura de lava
+node tools/tests/browser/captains.mjs <pasta-prints>                # MAP=/TYPE=/N=/SND=: Monstros de destaque (FIRE_BOSSES) surgem juntos com som de orc e aura de lava; Irmãs no Alquimista: MAP=distrito-do-alquimista TYPE=irma_ SND=sister-,lol-sister
+node tools/tests/browser/trollsounds.mjs                            # Mansão: entrada do Troll; ataque em 1 = troll-ataque, em 2 = risada; atacado sem dano = risada
+node tools/tests/browser/feralspot.mjs <pasta-prints>               # Viveiro: Ferais Marteladores na ponta do Espaço (fora do portal); quem chega pelo portal fica de frente para ele
+node tools/tests/browser/bossmark.mjs <pasta-prints>               # círculo de invocação (giz) no chão onde os chefes surgem
+node tools/tests/browser/markvis.mjs <pasta-prints>                # círculo some quando o chefe surge e volta quando ele morre; aura das Irmãs no Alquimista
 node tools/tests/browser/alertwarn.mjs <pasta-prints>               # Templo: aviso de Reação de Alerta (Irmãs) aparece antes de andar
 node tools/tests/browser/rratk.mjs <pasta-prints>                   # online: Rerrolagem do ATAQUE do amigo acompanhada no painel de dados
 ```

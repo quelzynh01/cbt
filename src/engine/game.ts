@@ -1,6 +1,6 @@
 import { Board, key, parseKey, sameCell, type MapDef, type LosBlock, mapTitlesOf } from './board';
 import {
-  heroPool, ATTACK_DIE, CARDS, DEFENSE_DIE, ENTRY_PAIRS, EXPLORATION_BAG, GUILDS, HEROES, HERO_ORDER, MONSTERS, TOKEN_INFO, distributeStartingGear, levelSuffix, lowerSuffix, FIRE_BOSSES } from './data';
+  heroPool, ATTACK_DIE, CARDS, DEFENSE_DIE, ENTRY_PAIRS, EXPLORATION_BAG, GUILDS, HEROES, HERO_ORDER, MONSTERS, TOKEN_INFO, distributeStartingGear, levelSuffix, lowerSuffix, bossAura, SISTER_ENTRANCE, DUO_ENTRANCE } from './data';
 import { nextRandom, randInt, shuffle } from './rng';
 import { CURSES, curseDeck, type CardFx } from './cards';
 import { TITLES } from './titles';
@@ -875,8 +875,19 @@ export class Game {
   /** Chefes que surgem com animação quando todos terminam de posicionar: Lorde Presas; Minotauro na Arena do Sol Brilhante; os de FIRE_BOSSES (com aura de fogo). */
   isBossEntrance(m: Unit): boolean {
     if (m.kind !== 'monster' || !m.alive || !m.cell) return false;
-    const b = baseId(m.defId);
-    return b === 'lorde_presas' || (b === 'minotauro' && this.map.id === 'arena-do-sol-brilhante') || FIRE_BOSSES[this.map.id] === b;
+    return this.isBossType(baseId(m.defId));
+  }
+
+  /** Espaços onde os chefes do mapa surgem (marcados no chão com o círculo de invocação). */
+  bossSpawnCells(): Cell[] {
+    const out: Cell[] = [];
+    for (const m of this.map.monsters) if (this.isBossType(baseId(m.type)) && !out.some(c => sameCell(c, m.cell))) out.push({ ...m.cell });
+    return out;
+  }
+
+  private isBossType(b: string): boolean {
+    return b === 'lorde_presas' || (b === 'minotauro' && this.map.id === 'arena-do-sol-brilhante') || !!bossAura(this.map.id, b)
+      || (/^irma_/.test(b) && SISTER_ENTRANCE.includes(this.map.id)) || !!DUO_ENTRANCE[this.map.id]?.includes(b);
   }
 
   /** A Guilda terminou de posicionar. Quando a última termina, a partida começa. */
@@ -889,8 +900,12 @@ export class Game {
       // mapa em que o Lorde Presas já começa no tabuleiro: ele surge agora (animação de entrada para todos)
       // chefes do mesmo tipo surgem juntos (ex.: os 2 Capitães Orc do Portão da Lua)
       const bosses = this.monstersOnBoard().filter(m => this.isBossEntrance(m));
-      for (const type of [...new Set(bosses.map(m => baseId(m.defId)))]) {
-        const [first, ...rest] = bosses.filter(m => baseId(m.defId) === type);
+      // as duas Irmãs surgem em sequência; a dupla do mapa (ex.: Troll e Minotauro no Pátio) também
+      const group = (m: Unit) => /^irma_/.test(baseId(m.defId)) ? 'irmas' : DUO_ENTRANCE[this.map.id]?.includes(baseId(m.defId)) ? 'dupla' : baseId(m.defId);
+      for (const type of [...new Set(bosses.map(group))]) {
+        const list = bosses.filter(m => group(m) === type);
+        if ((type === 'irmas' || type === 'dupla') && list.length > 1 && randInt(this.s, 2)) list.reverse();
+        const [first, ...rest] = list;
         this.emit({ t: 'lordEntrance', id: first.id, cell: { ...first.cell! }, ...(rest.length ? { others: rest.map(m => ({ id: m.id, cell: { ...m.cell! } })) } : {}) });
       }
       // ninguém começa ativado: o jogador escolhe o Herói e clica em "Ativar"

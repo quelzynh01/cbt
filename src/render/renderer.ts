@@ -1,11 +1,11 @@
 import { entryPlaque } from './dice';
 import { getSettings } from '../ui/settings';
-import { isMinotaur, playMinoEntrance, playMinoKill, isSister, playSisterAttack, play, playLordEntrance, playOnce, playRandom, type Sfx } from '../audio/sfx';
+import { playMinoLaugh, isTroll, playTrollAttack, playTrollEntrance, playTrollLaugh, isMinotaur, playMinoEntrance, playSisterLaugh, playSisterVoice, playMinoKill, isSister, playSisterAttack, play, playLordEntrance, playOnce, playRandom, type Sfx } from '../audio/sfx';
 import { CARDS } from '../engine/cards';
 import { CARD_ART } from '../ui/cardArt';
 import { drawTokenImage, tokenImage, tokenImageId } from './tokens';
 import { key, sameCell, type LosBlock } from '../engine/board';
-import { FIRE_BOSSES, GUILDS, MONSTERS, teamName } from '../engine/data';
+import { DUO_ENTRANCE, bossAura, GUILDS, MONSTERS, SISTER_ENTRANCE, teamName } from '../engine/data';
 import type { Game } from '../engine/game';
 import type { Cell, GameEvent, Token } from '../engine/types';
 import {
@@ -256,6 +256,20 @@ export class Renderer {
     this.glideTo(cx, cy - 40, zoom);
   }
 
+  /** Vai suave até enquadrar todos os Espaços, com pouca borda (personagens bem visíveis). */
+  glideFit(cells: Cell[]) {
+    if (!cells.length) return;
+    const pts = cells.map(c => g2s(c.c + 0.5, c.r + 0.5));
+    const x0 = Math.min(...pts.map(p => p.x)), x1 = Math.max(...pts.map(p => p.x));
+    const y0 = Math.min(...pts.map(p => p.y)) - 150, y1 = Math.max(...pts.map(p => p.y)) + 30;
+    const v = this.view();
+    const small = v.w < 700;
+    // área livre da tela (sem o painel da direita, o placar em cima e a ficha embaixo)
+    const L = small ? 10 : 20, R = v.w - (small ? 10 : 320), T = small ? 150 : 110, B = v.h - (small ? 150 : 200);
+    const z = Math.max(0.2, Math.min(0.95, (R - L) / Math.max(1, x1 - x0 + 140), (B - T) / Math.max(1, y1 - y0)));
+    this.camGoal = { zoom: z, x: (L + R) / 2 - ((x0 + x1) / 2) * z, y: (T + B) / 2 - ((y0 + y1) / 2) * z };
+  }
+
   /** Posição no mundo do centro de um Espaço. */
   cellWorld(c: Cell): Pt { return g2s(c.c + 0.5, c.r + 0.5); }
 
@@ -403,10 +417,11 @@ export class Renderer {
   private lordWaits(u: { kind: string; defId: string; alive: boolean; cell: Cell | null }) {
     if (!this.game.s.deploying?.length || u.kind !== 'monster' || !u.alive || !u.cell) return false;
     const b = u.defId.replace(/\d+$/, '');
-    return b === 'lorde_presas' || (b === 'minotauro' && this.game.map.id === 'arena-do-sol-brilhante') || FIRE_BOSSES[this.game.map.id] === b;
+    return b === 'lorde_presas' || (b === 'minotauro' && this.game.map.id === 'arena-do-sol-brilhante') || !!bossAura(this.game.map.id, b)
+      || (/^irma_/.test(b) && SISTER_ENTRANCE.includes(this.game.map.id)) || !!DUO_ENTRANCE[this.game.map.id]?.includes(b);
   }
   /** Entrada do Lorde Presas (começo da partida ou Sombra invocada): fumaça e anéis de sangue no Espaço. */
-  private lordFxs: { cell: Cell; t0: number; kind: 'lord' | 'mino' | 'lava' }[] = [];
+  private lordFxs: { cell: Cell; t0: number; kind: 'lord' | 'mino' | 'lava' | 'sister' | 'dark'; len?: number }[] = [];
   /** Último ataque animado (para a fala do Minotauro quando ele mata alguém). */
   private lastStrike: { attackerId: string; targets: string[]; t: number } | null = null;
 
@@ -430,7 +445,11 @@ export class Renderer {
     return 'stone';
   }
 
+  /** Pares que dividem o Espaço com um chefe (ex.: Martelador no portal): ficam de frente um para o outro. */
+  private facePairs: [string, string][] = [];
+  private faced = new Set<string>();
   private slotPositions(): Map<string, { gx: number; gy: number }> {
+    this.facePairs = [];
     const byCell = new Map<string, UnitView[]>();
     for (const u of this.units.values()) if (u.alive && u.cell) {
       const k = key(u.cell);
@@ -447,6 +466,16 @@ export class Renderer {
         // Monstro Enorme (Rei Pavoroso): ocupa o Espaço inteiro, fica no meio
         if (list.length === 1 && MONSTERS[u.defId]?.abilities?.includes('huge')) { out.set(u.id, { gx: cx + 0.05, gy: cy + 0.05 }); return; }
         if (hasMission && list.length === 1) { out.set(u.id, { gx: cx + 0.17 + 0.1, gy: cy - 0.17 + 0.1 }); return; }
+        // Monstro de destaque num Espaço com portal: fica sempre na ponta de fora do Espaço (o portal fica à vista);
+        // quem chega no Espaço (ex.: pelo portal) fica do lado de dentro, de frente para ele
+        const boss = list.find(x => x.kind === 'monster' && bossAura(this.game.map.id, x.defId) && this.game.map.portals.some(p => sameCell(p.cell, x.cell)));
+        if (boss && list.length <= 2) {
+          const m = this.game.map;
+          const sx = Math.sign(cx - m.cols / 2) || 1, sy = Math.sign(cy - m.rows / 2) || 1;
+          if (u === boss) out.set(u.id, { gx: cx + sx * 0.3, gy: cy + sy * 0.3 });
+          else { out.set(u.id, { gx: cx - sx * 0.12, gy: cy - sy * 0.12 }); this.facePairs.push([boss.id, u.id]); }
+          return;
+        }
         // personagens na metade da frente do Espaço; o fundo fica para itens/marcadores
         if (list.length === 1) out.set(u.id, { gx: cx + 0.08, gy: cy + 0.08 });
         else {
@@ -484,6 +513,20 @@ export class Renderer {
 
   private layoutUnits(snap: boolean) {
     const slots = this.slotPositions();
+    // quem acabou de dividir o Espaço com o chefe: os dois se viram um para o outro (uma vez por encontro)
+    const now = new Set<string>();
+    for (const [a, b] of this.facePairs) {
+      const k = `${a}|${b}`;
+      now.add(k);
+      if (this.faced.has(k)) continue;
+      const ua = this.units.get(a), ub = this.units.get(b), sa = slots.get(a), sb = slots.get(b);
+      if (!ua || !ub || !sa || !sb || ub.tween) continue;
+      const pa = g2s(sa.gx, sa.gy), pb = g2s(sb.gx, sb.gy);
+      ua.dir = dirFromScreen(pb.x - pa.x, pb.y - pa.y); ua.flip = pb.x < pa.x;
+      ub.dir = dirFromScreen(pa.x - pb.x, pa.y - pb.y); ub.flip = pa.x < pb.x;
+      this.faced.add(k);
+    }
+    for (const k of [...this.faced]) if (!now.has(k)) this.faced.delete(k);
     for (const u of this.units.values()) {
       const s = slots.get(u.id);
       if (!s) continue;
@@ -566,7 +609,15 @@ export class Renderer {
   /** Animação do ataque (investida ou projétil). Retorna quanto tempo leva (ms). */
   animateAttack(e: Strike): number {
     this.lastStrike = { attackerId: e.attackerId, targets: e.targets.map(t => t.id), t: this.t };
-    return this.animateAttack0(e);
+    const dur = this.animateAttack0(e);
+    const g = this.game;
+    const att = g?.s.units[e.attackerId];
+    const after = dur + 200 / this.speed;
+    // Troll atacou: se continua vivo, a fala dele; se acertou mais de um alvo, ri
+    if (att && isTroll(att.defId)) setTimeout(() => { if (g.s.units[e.attackerId]?.alive) { if (e.targets.length > 1) playTrollLaugh(); else playTrollAttack(); } }, after);
+    // Troll atacado sem sofrer dano (bloqueou tudo ou o ataque errou): ri
+    else if (e.targets.some(t => { const u = g?.s.units[t.id]; return !!u && isTroll(u.defId) && 'wounds' in t && !(t as { wounds?: number }).wounds; })) setTimeout(() => playTrollLaugh(), after);
+    return dur;
   }
   private animateAttack0(e: Strike): number {
     const now = this.t;
@@ -721,20 +772,32 @@ export class Renderer {
       }
       case 'lordEntrance': {
         dur = Math.max(2400, 3400 / this.speed);
-        // todos os chefes desta entrada surgem juntos (ex.: os 2 Capitães Orc do Portão da Lua)
+        // vários chefes: um de cada vez, dividindo o tempo da tela (a câmera vai em cada um)
         const all = [{ id: e.id, cell: e.cell }, ...(e.others ?? [])];
-        let kind: 'lord' | 'mino' | 'lava' = 'lord';
-        for (const b of all) {
+        const slice = dur / all.length;
+        const zoom = Math.max(this.cam.zoom, 0.8);
+        // Irmãs ou dupla de chefes diferentes (Troll + Minotauro): o primeiro tem a entrada/fala dele, o segundo ri
+        const baseOf = (id: string) => this.units.get(id)?.defId.replace(/\d+$/, '') ?? '';
+        const mixed = all.length > 1 && new Set(all.map(b => baseOf(b.id))).size > 1;
+        all.forEach((b, i) => {
+          const at = now + i * slice;
           const u = this.units.get(b.id);
-          if (u) { u.alpha = 0; u.fade = { from: 0, to: 1, t0: now + 700, dur: 1300 }; u.dir = this.centerDir(b.cell); }
+          if (u) { u.alpha = 0; u.fade = { from: 0, to: 1, t0: at + slice * 0.2, dur: slice * 0.4 }; u.dir = this.centerDir(b.cell); }
           const base = u?.defId.replace(/\d+$/, '') ?? '';
-          kind = base === 'minotauro' ? 'mino' : base === 'lorde_presas' ? 'lord' : 'lava';
-          this.lordFxs.push({ cell: { ...b.cell }, t0: now, kind });
-        }
-        this.glideCells(all.map(b => b.cell), Math.max(this.cam.zoom, 0.8));
-        if (kind === 'mino') playMinoEntrance();
-        else if (kind === 'lava') { play('orc-sound'); setTimeout(() => play('orc-sound', 0.9), 450); }
-        else playLordEntrance();
+          const aura = bossAura(this.game.map.id, base);
+          const kind: 'lord' | 'mino' | 'lava' | 'sister' | 'dark' = base === 'minotauro' ? 'mino' : base === 'lorde_presas' ? 'lord' : /^irma_/.test(base) ? 'sister'
+            : aura === 'dark' ? 'dark' : 'lava';
+          this.lordFxs.push({ cell: { ...b.cell }, t0: at, kind, len: Math.min(3.6, slice / 1000 + 0.6) });
+          const go = () => {
+            this.glideCells([b.cell], zoom);
+            if (mixed && i > 0) { if (/^irma_/.test(base)) playSisterLaugh(); else if (isTroll(base)) playTrollLaugh(); else if (isMinotaur(base)) playMinoLaugh(); else play('orc-sound'); }
+            else if (kind === 'mino') playMinoEntrance();
+            else if (kind === 'sister') { if (i === 0) playSisterVoice(base); else playSisterLaugh(); }
+            else if (kind === 'lava' || kind === 'dark') { if (isTroll(base)) playTrollEntrance(); else play('orc-sound'); }
+            else playLordEntrance();
+          };
+          if (i === 0) go(); else setTimeout(go, i * slice);
+        });
         break;
       }
       case 'spawnRoll': {
@@ -1146,6 +1209,7 @@ export class Renderer {
       ctx.fillStyle = `rgba(184,146,255,${0.18 + pulse * 0.22})`; ctx.fill();
       ctx.strokeStyle = `rgba(214,190,255,${0.6 + pulse * 0.4})`; ctx.lineWidth = 5; ctx.setLineDash([14, 8]); ctx.stroke(); ctx.setLineDash([]);
     }
+    this.drawBossMarks();
     if (this.lordFxs.length) this.drawLordFx(false);
     // Entradas de Monstro: placa no chão com os 2 símbolos de dado que fazem o Monstro surgir ali
     for (const em of this.game.s.entryMarkers) {
@@ -1587,7 +1651,8 @@ export class Renderer {
   }
 
   /** Monstros de destaque (FIRE_BOSSES: Capitães Orc, Feral Martelador, Troll): poça de lava, chamas e brasas subindo. */
-  private drawLavaAura(ctx: CanvasRenderingContext2D, sc: number, tt: number, front: boolean) {
+  private drawLavaAura(ctx: CanvasRenderingContext2D, sc: number, tt: number, front: boolean, dark = false) {
+    if (dark) { this.drawDarkAura(ctx, sc, tt, front); return; }
     ctx.save();
     if (!front) {
       // poça de lava brilhando no chão
@@ -1623,6 +1688,204 @@ export class Renderer {
     ctx.restore();
   }
 
+  /** Aura preta (ex.: Ferais Marteladores do Viveiro das Águias): sombra no chão, fumaça negra e fiapos roxos subindo. */
+  private drawDarkAura(ctx: CanvasRenderingContext2D, sc: number, tt: number, front: boolean) {
+    ctx.save();
+    if (!front) {
+      ctx.save();
+      ctx.scale(1, 0.5);
+      const R = 48 * sc;
+      const pulse = 0.8 + 0.2 * Math.sin(tt * 2.5);
+      const g = ctx.createRadialGradient(0, 0, R * 0.1, 0, 0, R * 1.3);
+      g.addColorStop(0, `rgba(0,0,0,${0.9 * pulse})`); g.addColorStop(0.55, `rgba(30,6,45,${0.7 * pulse})`);
+      g.addColorStop(0.85, 'rgba(90,30,140,0.35)'); g.addColorStop(1, 'rgba(90,30,140,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, R * 1.3, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+      // fumaça negra subindo atrás do corpo
+      for (let i = 0; i < 14; i++) {
+        const k = (tt * (0.6 + hash(i, 101) * 0.5) + hash(i, 103)) % 1;
+        const x = (hash(i, 107) - 0.5) * 64 * sc + Math.sin(tt * 2 + i) * 4;
+        const y = -k * 120 * sc;
+        const r = (30 - k * 14) * sc;
+        const f = ctx.createRadialGradient(x, y, 0, x, y, r);
+        f.addColorStop(0, `rgba(0,0,0,${0.9 * (1 - k)})`); f.addColorStop(0.6, `rgba(40,10,65,${0.5 * (1 - k)})`); f.addColorStop(1, 'rgba(50,15,80,0)');
+        ctx.fillStyle = f; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+      }
+    } else {
+      // fiapos roxos e cinzas subindo na frente
+      for (let i = 0; i < 10; i++) {
+        const k = (tt * (0.35 + hash(i, 109) * 0.35) + hash(i, 113)) % 1;
+        const x = (hash(i, 127) - 0.5) * 70 * sc + Math.sin(tt * 3 + i) * 5;
+        ctx.fillStyle = i % 2 ? `rgba(170,110,240,${(1 - k) * 0.9})` : `rgba(15,5,20,${(1 - k) * 0.9})`;
+        ctx.beginPath(); ctx.arc(x, -10 - k * 120 * sc, (1.8 + hash(i, 131) * 2.2) * sc, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+
+  /** Círculos de invocação (giz, feitos à mão) nos Espaços onde os chefes do mapa surgem. */
+  private bossMarks: { map: string; spots: { c: Cell; gx: number; gy: number; small: boolean; ids: string[] }[] } | null = null;
+  private drawBossMarks() {
+    const g = this.game;
+    if (!g) return;
+    if (this.bossMarks?.map !== g.map.id) {
+      const m = g.map;
+      this.bossMarks = { map: m.id, spots: g.bossSpawnCells().map(c => {
+        // os chefes que nascem neste Espaço (ids m1, m2… na ordem do mapa)
+        const ids = m.monsters.map((x, i) => ({ x, id: `m${i + 1}` })).filter(o => sameCell(o.x.cell, c) && g.s.units[o.id] && g.isBossEntrance({ ...g.s.units[o.id], alive: true, cell: c })).map(o => o.id);
+        return { c, gx: c.c + 0.5, gy: c.r + 0.5, small: false, ids };
+      }) };
+    }
+    const ctx = this.ctx;
+    for (const s of this.bossMarks.spots) {
+      // visível até o chefe surgir; some enquanto ele está em campo (desbota junto com a entrada) e volta quando ele morre
+      const shown = Math.max(0, ...s.ids.map(id => { const u = this.units.get(id); return u && u.alive && u.cell && !this.lordWaits(u) ? u.alpha : 0; }));
+      const vis = 1 - Math.min(1, shown);
+      if (vis <= 0.01) continue;
+      const p = g2s(s.gx, s.gy);
+      const seed = s.c.c * 31 + s.c.r * 17;
+      const R = TW * (s.small ? 0.15 : 0.2);
+      const wob = (i: number, k: number) => (hash(seed + i, k) - 0.5);
+      ctx.save();
+      ctx.globalAlpha *= vis;
+      ctx.translate(p.x, p.y);
+      ctx.scale(1, TH / TW);
+      ctx.strokeStyle = 'rgba(248,242,226,0.88)';
+      ctx.fillStyle = 'rgba(248,242,226,0.88)';
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      ctx.shadowColor = 'rgba(255,250,235,0.5)'; ctx.shadowBlur = 4;
+      // círculo torto (duas voltas que não fecham certinho, como giz)
+      for (let pass = 0; pass < 2; pass++) {
+        ctx.lineWidth = pass ? 2 : 3.2;
+        ctx.beginPath();
+        const start = wob(pass, 3) * 0.6, N = 48;
+        for (let i = 0; i <= N + 2; i++) {
+          const a = start + (i / N) * Math.PI * 2;
+          const r = R * (1 + wob(i + pass * 50, 5) * 0.06 + pass * 0.03);
+          const x = Math.cos(a) * r, y = Math.sin(a) * r;
+          if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+        }
+        ctx.stroke();
+      }
+      // x pequeno no meio
+      ctx.lineWidth = 4;
+      const xs = R * 0.2;
+      ctx.beginPath();
+      ctx.moveTo(-xs + wob(1, 7) * 3, -xs + wob(2, 7) * 3); ctx.lineTo(xs + wob(3, 7) * 3, xs + wob(4, 7) * 3);
+      ctx.moveTo(xs + wob(5, 7) * 3, -xs + wob(6, 7) * 3); ctx.lineTo(-xs + wob(7, 7) * 3, xs + wob(8, 7) * 3);
+      ctx.stroke();
+      // runas em volta do círculo (traços tortos, cada uma diferente)
+      ctx.lineWidth = 2.6;
+      const n = s.small ? 11 : 14;
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2 + wob(i, 11) * 0.12;
+        const rr = R * 1.24;
+        const cx2 = Math.cos(a) * rr, cy2 = Math.sin(a) * rr;
+        const sz = R * 0.13;
+        ctx.save();
+        ctx.translate(cx2, cy2);
+        ctx.rotate(a + Math.PI / 2 + wob(i, 13) * 0.5);
+        ctx.beginPath();
+        const kind = Math.floor(hash(seed + i, 17) * 5);
+        if (kind === 0) { ctx.moveTo(-sz, sz); ctx.lineTo(0, -sz); ctx.lineTo(sz, sz); }
+        else if (kind === 1) { ctx.moveTo(0, -sz); ctx.lineTo(0, sz); ctx.moveTo(-sz * 0.8, -sz * 0.2); ctx.lineTo(sz * 0.8, sz * 0.3); }
+        else if (kind === 2) { ctx.moveTo(-sz, -sz); ctx.lineTo(sz * 0.4, 0); ctx.lineTo(-sz, sz); }
+        else if (kind === 3) { ctx.moveTo(-sz, 0); ctx.lineTo(0, -sz); ctx.lineTo(sz, 0); ctx.lineTo(0, sz); }
+        else { ctx.moveTo(-sz * 0.7, -sz); ctx.lineTo(sz * 0.7, -sz * 0.3); ctx.moveTo(-sz * 0.7, sz * 0.2); ctx.lineTo(sz * 0.7, sz); }
+        ctx.stroke();
+        ctx.restore();
+      }
+      ctx.restore();
+    }
+  }
+
+  /** Aura das Irmãs (Distrito do Alquimista): névoa rosa e roxa no chão, fiapos girando e faíscas cor-de-rosa subindo. */
+  private drawSisterAura(ctx: CanvasRenderingContext2D, sc: number, tt: number, front: boolean) {
+    ctx.save();
+    if (!front) {
+      ctx.save();
+      ctx.scale(1, 0.5);
+      const R = 48 * sc;
+      const pulse = 0.8 + 0.2 * Math.sin(tt * 2.6);
+      const g = ctx.createRadialGradient(0, 0, R * 0.1, 0, 0, R * 1.3);
+      g.addColorStop(0, `rgba(255,140,220,${0.7 * pulse})`); g.addColorStop(0.5, `rgba(190,60,200,${0.55 * pulse})`);
+      g.addColorStop(0.85, 'rgba(120,30,170,0.3)'); g.addColorStop(1, 'rgba(120,30,170,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, R * 1.3, 0, Math.PI * 2); ctx.fill();
+      ctx.lineWidth = 2.5;
+      for (let i = 0; i < 2; i++) {
+        const a0 = -tt * (1.3 + i * 0.5) + i * 3;
+        ctx.strokeStyle = `rgba(255,160,235,${0.6 - i * 0.2})`;
+        ctx.beginPath(); ctx.arc(0, 0, R * (0.7 + i * 0.3), a0, a0 + Math.PI * 0.9); ctx.stroke();
+      }
+      ctx.restore();
+      // névoa subindo atrás do corpo
+      ctx.globalCompositeOperation = 'lighter';
+      for (let i = 0; i < 10; i++) {
+        const k = (tt * (0.45 + hash(i, 171) * 0.4) + hash(i, 173)) % 1;
+        const a = tt * 1.2 + i * 0.7;
+        const x = Math.cos(a) * (20 + k * 18) * sc;
+        const y = -k * 100 * sc;
+        const r = (18 - k * 9) * sc;
+        const f = ctx.createRadialGradient(x, y, 0, x, y, r);
+        f.addColorStop(0, `rgba(240,110,220,${0.4 * (1 - k)})`); f.addColorStop(1, 'rgba(160,50,200,0)');
+        ctx.fillStyle = f; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+      }
+    } else {
+      for (let i = 0; i < 12; i++) {
+        const k = (tt * (0.35 + hash(i, 181) * 0.35) + hash(i, 191)) % 1;
+        const a = tt * 1.8 + i;
+        const x = Math.cos(a) * (28 + k * 12) * sc;
+        ctx.fillStyle = i % 3 ? `rgba(255,170,235,${(1 - k) * 0.95})` : `rgba(200,120,255,${(1 - k) * 0.95})`;
+        ctx.beginPath(); ctx.arc(x, -8 - k * 115 * sc, (1.4 + hash(i, 193) * 1.8) * sc, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+
+  /** Aura de areia (Minotauro): redemoinho de poeira dourada no chão, grãos girando e subindo. */
+  private drawSandAura(ctx: CanvasRenderingContext2D, sc: number, tt: number, front: boolean) {
+    ctx.save();
+    if (!front) {
+      ctx.save();
+      ctx.scale(1, 0.5);
+      const R = 50 * sc;
+      const pulse = 0.8 + 0.2 * Math.sin(tt * 2);
+      const g = ctx.createRadialGradient(0, 0, R * 0.1, 0, 0, R * 1.3);
+      g.addColorStop(0, `rgba(255,225,150,${0.7 * pulse})`); g.addColorStop(0.5, `rgba(220,170,80,${0.55 * pulse})`);
+      g.addColorStop(0.85, 'rgba(190,140,60,0.3)'); g.addColorStop(1, 'rgba(190,140,60,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, R * 1.3, 0, Math.PI * 2); ctx.fill();
+      // anéis de vento girando no chão
+      ctx.lineWidth = 2.5;
+      for (let i = 0; i < 3; i++) {
+        const a0 = tt * (1.6 + i * 0.4) + i * 2;
+        ctx.strokeStyle = `rgba(255,215,130,${0.55 - i * 0.12})`;
+        ctx.beginPath(); ctx.arc(0, 0, R * (0.55 + i * 0.25), a0, a0 + Math.PI * 1.1); ctx.stroke();
+      }
+      ctx.restore();
+      // nuvem de poeira atrás do corpo
+      for (let i = 0; i < 12; i++) {
+        const k = (tt * (0.4 + hash(i, 141) * 0.35) + hash(i, 143)) % 1;
+        const a = tt * 1.5 + i;
+        const x = Math.cos(a) * (26 + k * 22) * sc;
+        const y = -k * 90 * sc + Math.sin(a) * 6;
+        const r = (16 - k * 8) * sc;
+        const f = ctx.createRadialGradient(x, y, 0, x, y, r);
+        f.addColorStop(0, `rgba(225,185,110,${0.5 * (1 - k)})`); f.addColorStop(1, 'rgba(225,185,110,0)');
+        ctx.fillStyle = f; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+      }
+    } else {
+      // grãos de areia girando e subindo na frente
+      for (let i = 0; i < 16; i++) {
+        const k = (tt * (0.35 + hash(i, 151) * 0.4) + hash(i, 157)) % 1;
+        const a = tt * 2.2 + i * 0.9;
+        const x = Math.cos(a) * (30 + k * 18) * sc;
+        ctx.fillStyle = `rgba(255,${200 + Math.floor(hash(i, 163) * 40)},120,${(1 - k) * 0.95})`;
+        ctx.beginPath(); ctx.arc(x, -6 - k * 110 * sc, (1.3 + hash(i, 167) * 1.6) * sc, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+
   /** Fiapos de luz azul subindo em volta da Alma (atrás do corpo). */
   private drawSoulWisps(ctx: CanvasRenderingContext2D, sc: number, tt: number) {
     ctx.save();
@@ -1641,8 +1904,8 @@ export class Renderer {
   }
 
   private drawLordFx(top: boolean) {
-    this.lordFxs = this.lordFxs.filter(f => (this.t - f.t0) / 1000 <= 3.6);
-    for (const fx of this.lordFxs) this.drawOneFx(fx, top);
+    this.lordFxs = this.lordFxs.filter(f => (this.t - f.t0) / 1000 <= (f.len ?? 3.6));
+    for (const fx of this.lordFxs) if (this.t >= fx.t0) this.drawOneFx(fx, top);
   }
 
   /** Cores da entrada: Lorde (sangue), Minotauro (areia/sol), Capitão Orc (lava). */
@@ -1650,14 +1913,17 @@ export class Renderer {
     lord: { pool0: '40,0,10', pool1: '120,0,20', ring: '255,40,40', beam: '255,60,40', smoke: '20,0,8' },
     mino: { pool0: '90,50,10', pool1: '200,140,40', ring: '255,200,60', beam: '255,210,90', smoke: '190,150,90' },
     lava: { pool0: '70,12,0', pool1: '255,90,0', ring: '255,150,30', beam: '255,120,30', smoke: '60,20,10' },
+    sister: { pool0: '60,0,45', pool1: '200,60,170', ring: '255,120,225', beam: '255,150,235', smoke: '90,20,70' },
+    dark: { pool0: '5,0,10', pool1: '60,20,90', ring: '150,90,210', beam: '80,30,130', smoke: '10,4,16' },
   };
 
-  private drawOneFx(fx: { cell: Cell; t0: number; kind: 'lord' | 'mino' | 'lava' }, top: boolean) {
+  private drawOneFx(fx: { cell: Cell; t0: number; kind: 'lord' | 'mino' | 'lava' | 'sister' | 'dark'; len?: number }, top: boolean) {
     const age = (this.t - fx.t0) / 1000;
+    const LEN = fx.len ?? 3.6;
     const P = Renderer.FX_PAL[fx.kind];
     const ctx = this.ctx;
     const p = g2s(fx.cell.c + 0.5, fx.cell.r + 0.5);
-    const fade = Math.min(1, age / 0.25) * Math.max(0, Math.min(1, (3.6 - age) / 0.8));
+    const fade = Math.min(1, age / 0.25) * Math.max(0, Math.min(1, (LEN - age) / 0.8));
     ctx.save();
     ctx.translate(p.x, p.y);
     if (!top) {
@@ -1839,16 +2105,20 @@ export class Renderer {
     // Alma do Lorde Presas: espírito azul-claro, meio transparente, flutuando com fiapos de luz
     const isSoul = !!this.game?.s.units[u.id]?.soul && u.alive;
     if (isSoul) this.drawSoulWisps(ctx, L.scale, tt);
-    const lava = u.alive && u.kind === 'monster' && !!this.game && FIRE_BOSSES[this.game.map.id] === u.defId.replace(/\d+$/, '');
-    if (lava) this.drawLavaAura(ctx, L.scale, tt, false);
-    const fx = [isShadow ? 'grayscale(1) contrast(1.15) brightness(0.9)' : '', isSoul ? SOUL_FILTER : '', lava ? `drop-shadow(0 0 ${7 + 4 * Math.sin(tt * 5)}px rgba(255,110,20,0.95)) drop-shadow(0 -4px 14px rgba(255,60,0,0.6))` : '', blink ? `brightness(${1.25 + 0.45 * Math.sin(tt * 7)}) drop-shadow(0 0 8px rgba(184,146,255,0.95))` : ''].filter(Boolean).join(' ');
+    const lava = u.alive && u.kind === 'monster' && this.game ? bossAura(this.game.map.id, u.defId) ?? null : null;
+    if (lava === 'sister') this.drawSisterAura(ctx, L.scale, tt, false);
+    else if (lava === 'sand') this.drawSandAura(ctx, L.scale, tt, false);
+    else if (lava) this.drawLavaAura(ctx, L.scale, tt, false, lava === 'dark');
+    const fx = [isShadow ? 'grayscale(1) contrast(1.15) brightness(0.9)' : '', isSoul ? SOUL_FILTER : '', lava === 'fire' ? `drop-shadow(0 0 ${7 + 4 * Math.sin(tt * 5)}px rgba(255,110,20,0.95)) drop-shadow(0 -4px 14px rgba(255,60,0,0.6))` : lava === 'sister' ? `drop-shadow(0 0 ${7 + 3 * Math.sin(tt * 3.5)}px rgba(255,90,200,0.9)) drop-shadow(0 -3px 12px rgba(150,40,200,0.6))` : lava === 'sand' ? `drop-shadow(0 0 ${7 + 3 * Math.sin(tt * 3)}px rgba(255,205,110,0.9)) drop-shadow(0 -3px 12px rgba(220,160,60,0.6))` : lava === 'dark' ? `drop-shadow(0 0 ${9 + 4 * Math.sin(tt * 4)}px rgba(0,0,0,1)) drop-shadow(0 0 4px rgba(0,0,0,1)) drop-shadow(0 -4px 16px rgba(80,25,130,0.85))` : '', blink ? `brightness(${1.25 + 0.45 * Math.sin(tt * 7)}) drop-shadow(0 0 8px rgba(184,146,255,0.95))` : ''].filter(Boolean).join(' ');
     if (fx) ctx.filter = fx;
     if (isSoul) ctx.translate(0, -6 - Math.sin(tt * 2) * 5);
     drawCharacter(ctx, u.defId, { dir, flip, t: idleT, hurt, alpha: isSoul ? 0.72 + 0.08 * Math.sin(tt * 3) : 1, stunned: u.stunned, lunge: 0, scale: L.scale * 0.66 });
     if (isSoul) ctx.translate(0, 6 + Math.sin(tt * 2) * 5);
     if (fx) ctx.filter = 'none';
     if (spinFx && spinFront) spinFx();
-    if (lava) this.drawLavaAura(ctx, L.scale, tt, true);
+    if (lava === 'sister') this.drawSisterAura(ctx, L.scale, tt, true);
+    else if (lava === 'sand') this.drawSandAura(ctx, L.scale, tt, true);
+    else if (lava) this.drawLavaAura(ctx, L.scale, tt, true, lava === 'dark');
     if (u.stunned) this.drawStun(ctx, -78 * L.scale - 6, tt);
     // em volta do corpo, girando: 1 caveirinha roxa (Maldição) e, pequenos, os itens que o Herói carrega na bolsa
     const bag = u.alive && u.kind === 'hero' ? u.bag : [];
@@ -2386,7 +2656,8 @@ function floorImage(id: string, ready: () => void): HTMLImageElement | null {
 
 /** Tamanho do boneco: Monstros Enormes (ocupam o Espaço inteiro, como 2 personagens) são bem maiores. */
 function unitScale(defId: string): number {
-  return charScale(defId) * (MONSTERS[defId]?.abilities?.includes('huge') ? 1.6 : 1);
+  const small = defId.replace(/\d+$/, '') === 'goblin' ? 0.85 : 1; // Goblin Arqueiro: um pouco menor
+  return charScale(defId) * small * (MONSTERS[defId]?.abilities?.includes('huge') ? 1.6 : 1);
 }
 
 /** Direção isométrica de um passo na grade: +c ↘, +r ↙, -c ↖, -r ↗. */

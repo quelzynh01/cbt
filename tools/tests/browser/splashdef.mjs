@@ -52,7 +52,7 @@ for (let i = 0; i < 80; i++) {
   const cur = v.defs.length === 1 ? v.defs[0] : null;
   if (cur && seen[seen.length - 1] !== cur) { if (seen.includes(cur)) backToFirst = true; seen.push(cur); log.push(`defensor: ${cur}`); await page.screenshot({ path: `${OUT}/splash-${seen.length}.png` }); }
   if (i % 4 === 0) log.push(`[${v.open ? 'open' : 'closed'} ${v.defs.join('/')} ${v.btns.filter(b => b !== '🔍').join(',')}]`);
-  const c = await click('Rolar defesa|Manter$|✔ Manter|Continuar');
+  const c = await click('Rolar defesa|Manter$|✔ Manter|Continuar|Crítico');
   if (c) log.push(c);
 }
 console.log(log.join(' | '));

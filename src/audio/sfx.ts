@@ -7,12 +7,14 @@ export type Sfx = 'healing' | 'refresh' | 'teletransport' | 'trap' | 'pick-item'
   | 'archer-sound' | 'orc-sound' | 'mission' | 'end-game'
   | 'lorde-presas-entrada-1' | 'lorde-presas-entrada-2' | 'lorde-presas-entrada-3' | 'lorde-presas-entrada-4'
   | 'atack-sister1' | 'atack-sister2' | 'lol-sister1' | 'lol-sister2' | 'lol-sister3' | 'sister-dor-crit' | 'sister-prazer-crit' | 'atack-lorde-pressas'
-  | 'centaur-entrance1' | 'centaur-entrance2' | 'centaur-kills1' | 'centaur-kills2' | 'centaur-lol1' | 'centaur-lol2';
+  | 'centaur-entrance1' | 'centaur-entrance2' | 'centaur-kills1' | 'centaur-kills2' | 'centaur-lol1' | 'centaur-lol2'
+  | 'troll-entrance1' | 'troll-entrance2' | 'troll-entrance3' | 'troll-ataque1' | 'troll-ataque2' | 'troll-lol1' | 'troll-lol2';
 const NAMES: Sfx[] = ['healing', 'refresh', 'teletransport', 'trap', 'pick-item', 'scan', 'skill-wisp', 'skill-spike',
   'dice', 'atack-sword', 'atack-bow', 'atack-magic', 'stun', 'foot-step', 'gold', 'cleave', 'rajada-de-vento', 'hobsbawn', 'bow-critico', 'archer-sound', 'orc-sound', 'mission', 'end-game',
   'lorde-presas-entrada-1', 'lorde-presas-entrada-2', 'lorde-presas-entrada-3', 'lorde-presas-entrada-4',
   'atack-sister1', 'atack-sister2', 'lol-sister1', 'lol-sister2', 'lol-sister3', 'sister-dor-crit', 'sister-prazer-crit', 'atack-lorde-pressas',
-  'centaur-entrance1', 'centaur-entrance2', 'centaur-kills1', 'centaur-kills2', 'centaur-lol1', 'centaur-lol2'];
+  'centaur-entrance1', 'centaur-entrance2', 'centaur-kills1', 'centaur-kills2', 'centaur-lol1', 'centaur-lol2',
+  'troll-entrance1', 'troll-entrance2', 'troll-entrance3', 'troll-ataque1', 'troll-ataque2', 'troll-lol1', 'troll-lol2'];
 /** Sons que não são .mp3. */
 const EXT: Partial<Record<Sfx, string>> = { mission: 'wav', 'end-game': 'wav' };
 const url = (n: Sfx) => `${import.meta.env.BASE_URL}sounds/${n}.${EXT[n] ?? 'mp3'}`;
@@ -99,3 +101,14 @@ export function playCritVoice(defId: string): boolean {
   if (isMinotaur(defId)) { playRandom(['centaur-lol1', 'centaur-lol2']); return true; }
   return false;
 }
+
+/** Entrada das Irmãs: a primeira a surgir fala (a fala dela: Dor ou Prazer); a outra ri. */
+export function playSisterVoice(defId: string) { play(defId.startsWith('irma_dor') ? 'sister-dor-crit' : 'sister-prazer-crit'); }
+export function playSisterLaugh() { playRandom(SISTER_LOL); }
+
+/** Troll: entrada; depois do ataque (se continuar vivo); risada quando não sofre dano ou acerta mais de um alvo. */
+export const isTroll = (defId: string) => /^troll/.test(defId);
+export function playTrollEntrance() { playRandom(['troll-entrance1', 'troll-entrance2', 'troll-entrance3']); }
+export function playTrollAttack() { playRandom(['troll-ataque1', 'troll-ataque2']); }
+export function playTrollLaugh() { playRandom(['troll-lol1', 'troll-lol2']); }
+export function playMinoLaugh() { playRandom(['centaur-lol1', 'centaur-lol2']); }
