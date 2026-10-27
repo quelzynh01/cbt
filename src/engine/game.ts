@@ -986,7 +986,8 @@ export class Game {
       this.s.extraOnly = false;
       this.s.booted = []; this.s.stealthUsed = [];
     } else if (a?.heroId === heroId) return true;
-    else if (!this.freeMode && done.includes(heroId) && !this.activationFresh()) return false;
+    // quem já jogou neste turno não volta (nem trocando de uma ativação ainda sem ações, ex.: o Aliado da Bênção)
+    else if (!this.freeMode && done.includes(heroId)) return false;
     // trocar de uma ativação ainda sem ações não conta como ativação
     const prevFresh = a && a.heroId !== heroId && this.activationFresh() ? a.heroId : null;
     this.s.activation = { heroId, mp: this.startMp(h), moved: false, moveLocked: false, attacked: false };
@@ -3410,6 +3411,15 @@ export class Game {
       dice: atk.faces, hits: atk.successes, crits: atk.crits, notes, rr: atk.rr,
       targets: res.map(r => ({ id: r.t.id, defense: r.dr.faces, blocks: r.dr.successes, wounds: r.wounds, stunnedNoDefense: r.t.stunned, rr: r.dr.rr, ...(r.dr.noHits ? { noHits: true } : {}), ...(r.dr.base !== undefined ? { base: r.dr.base } : {}) })),
     });
+    // Irmã do Prazer / Lorde Presas: cada ✷ cura 2 — logo depois do ataque, ANTES do dano de retribuição
+    // (Vingança do Espetado, Amuleto da Retribuição). Conta o dano inteiro, inclusive o que passou da Vida:
+    // quem estava com a Vida em -2 e cura 2 fica com 0 (morre); só sobrevive com pelo menos 1 de Vida.
+    if (ab.includes('critHeal') && atk.crits && m.alive && m.wounds) {
+      const x = Math.min(m.wounds, atk.crits * 2);
+      m.wounds -= x;
+      this.emit({ t: 'heal', id: m.id, amount: x, wounds: m.wounds });
+      this.log(`${this.name(m)} se cura ${x} (${atk.crits}✷): Vida ${md.hp - m.wounds}/${md.hp}.`);
+    }
     for (const r of res) {
       if (r.wounds > 0) this.damageHero(r.t, r.wounds, { kind: 'monster', id: m.id });
       if (r.wounds > 0 && ab.includes('daze') && r.t.alive && !r.t.stunned) this.setStun(r.t, true);
@@ -3420,13 +3430,6 @@ export class Game {
         if (ready.length) this.log(`${md.name} exaustou ${ready.length} carta(s) de ${this.name(r.t)}.`);
       }
       this.retaliate(r.t, r.dr, Math.min(atk.successes, r.dr.successes), m);
-    }
-    if (ab.includes('critHeal') && atk.crits && m.alive && m.wounds) {
-      // Ferimentos além da Vida não contam: com a Vida a zero, cada ✷ ainda cura 2
-      m.wounds = Math.min(m.wounds, MONSTERS[m.defId].hp);
-      const x = Math.min(m.wounds, atk.crits * 2);
-      m.wounds -= x;
-      this.emit({ t: 'heal', id: m.id, amount: x, wounds: m.wounds });
     }
   }
 

@@ -754,7 +754,8 @@ export class Controller {
     if (!this.isHumanTurn() || !u || u.kind !== 'hero' || u.guild !== g.currentGuild().id || !u.alive || !u.cell) return false;
     if (g.s.extraTurnOn && u.id === g.s.extraHero && !g.freeMode) return false; // turno adicional: outro Herói, não quem usou a poção
     if (u.id === a?.heroId) return false;
-    if ((g.s.activatedThisTurn ?? []).includes(u.id) && !g.activationFresh()) return g.freeMode;
+    // quem já jogou neste turno não pode ser ativado de novo (a não ser por Grito de Guerra etc.)
+    if ((g.s.activatedThisTurn ?? []).includes(u.id) && !g.canBless(u.id)) return g.freeMode;
     return !a || g.activationFresh() || g.canBless(u.id) || g.freeMode;
   }
 
@@ -1559,7 +1560,10 @@ export class Controller {
       if (e.code === 'Space') e.preventDefault();
       else if (e.code === 'Enter') {
         e.preventDefault();
-        if (this.hud.pendingActivate) this.doActivate(this.hud.pendingActivate);
+        // Enter ativa o Herói escolhido só no começo (ou trocando antes de agir). Com uma ativação em andamento
+        // (ex.: Bênção do Hobsbawm), clicar num Aliado só para ver não pode ativá-lo sem querer: aí Enter encerra o turno
+        const a0 = this.game.s.activation;
+        if (this.hud.pendingActivate && (!a0 || this.game.activationFresh())) this.doActivate(this.hud.pendingActivate);
         else if (this.isHumanTurn() && !this.restDraft) this.tryEndTurn();
       }
       else if (e.code === 'KeyR') { if (this.isHumanTurn()) this.openRest(); }

@@ -314,7 +314,7 @@ export class Hud {
   private canActivate(u: Unit): boolean {
     const g = this.game, a = g.s.activation;
     if (a?.heroId === u.id) return false;
-    if ((g.s.activatedThisTurn ?? []).includes(u.id) && !g.activationFresh()) return g.freeMode;
+    if ((g.s.activatedThisTurn ?? []).includes(u.id) && !g.canBless(u.id)) return g.freeMode;
     return !a || g.activationFresh() || g.canBless(u.id) || g.freeMode;
   }
 
@@ -975,7 +975,8 @@ export class Hud {
     const canAct = !!pa && human && pa.alive && pa.guild === cur.id && act?.heroId !== pa.id && this.canActivate(pa);
     const activeH = act ? g.unit(act.heroId) : null;
     const actBtn = canAct
-      ? `<button id="btn-act" class="primary hb-act">▶ Ativar ${HEROES[pa!.defId].name}<small class="kbd">Enter</small></button>`
+      // com uma ativação em andamento (Bênção, Grito de Guerra), Enter encerra o turno: ativar o Aliado só pelo botão
+      ? `<button id="btn-act" class="primary hb-act">▶ Ativar ${HEROES[pa!.defId].name}${!act || g.activationFresh() ? '<small class="kbd">Enter</small>' : ''}</button>`
       : activeH && human && activeH.guild === cur.id ? `<div class="hb-act hb-active" style="--gc:${g.guild(cur.id).color}"><img src="${this.portrait(activeH.defId, g.guild(cur.id).color)}"/>✔ ${HEROES[activeH.defId].name} ativo</div>` : '';
     const actions = `
       <div class="actions">

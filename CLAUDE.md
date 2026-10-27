@@ -83,6 +83,8 @@ sh tools/tests/run-engine.sh furtivo       # Vapor (Wisp): Furtividade 1 vez por
 sh tools/tests/run-engine.sh irmas         # ordem de entrada sorteada: Irmãs (Alquimista) e dupla Troll + Minotauro (Pátio)
 sh tools/tests/run-engine.sh resthp        # Descanso: não deixa tirar a carta que dá Vida se o Herói ficar com a Vida zerada
 sh tools/tests/run-engine.sh fender        # Fender sempre pergunta (mesmo com 1 Inimigo Perto): usar ou não
+sh tools/tests/run-engine.sh bencao        # Bênção: o Aliado não troca de volta para quem já jogou; troca normal antes de agir continua
+sh tools/tests/run-engine.sh curairma      # Irmã do Prazer/Lorde: ✷ cura 2 antes da retribuição (Espetado/Amuleto); dano além da Vida conta; vive só com Vida >= 1
 sh tools/tests/run-engine.sh aiitems       # IA: poções no fim da ativação e Baús/poções com o Herói mais seguro no Descanso
 sh tools/tests/run-engine.sh duel 6       # IA nova x IA antiga (tools/tests/engine/ai_old.ts = IA do commit anterior), partidas espelhadas; P={...} muda os pesos
 sh tools/tests/run-engine.sh xsim 30 mix   # partidas IA x IA nos mapas Clássicos (mix|core|extra; MAP=id, SEED=n repete uma, BTG=1 inclui Beyond, V=1 detalha) -> 0 travadas/0 erros
@@ -118,6 +120,7 @@ node tools/tests/browser/feralspot.mjs <pasta-prints>               # Viveiro: F
 node tools/tests/browser/bossmark.mjs <pasta-prints>               # círculo de invocação (giz) no chão onde os chefes surgem
 node tools/tests/browser/markvis.mjs <pasta-prints>                # círculo some quando o chefe surge e volta quando ele morre; aura das Irmãs no Alquimista
 node tools/tests/browser/vapordodge.mjs <pasta-prints>              # Vapor perto de 2 Monstros: antes de sair do Espaço pergunta a cada Reação (Esquivar / Não esquivar / Cancelar = parar aqui)
+node tools/tests/browser/blessenter.mjs <pasta-prints>              # Bênção: clicar no Aliado + Enter não ativa (Enter encerra); ativado pelo botão, anda (clicando no Espaço do Hobsbawm)
 node tools/tests/browser/alertwarn.mjs <pasta-prints>               # Templo: aviso de Reação de Alerta (Irmãs) aparece antes de andar
 node tools/tests/browser/rratk.mjs <pasta-prints>                   # online: Rerrolagem do ATAQUE do amigo acompanhada no painel de dados
 ```
