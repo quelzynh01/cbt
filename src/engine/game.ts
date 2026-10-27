@@ -67,6 +67,8 @@ export interface ChoiceRequest {
   no?: string;
   /** o botão "Não" (Manter) é o principal */
   keep?: boolean;
+  /** mostra "Cancelar movimento" (desfaz a jogada inteira, ex.: Furtividade do Vapor) */
+  cancel?: boolean;
   guild: GuildId;
   heroId: string;
   /** Carta/efeito que pede a escolha. */
@@ -872,6 +874,24 @@ export class Game {
     return true;
   }
 
+  /** Furtividade: de qual Monstro esquivar (null = não esquiva, guarda para depois). IA: o que causaria mais dano. */
+  private stealthBest(can: Unit[]): Unit {
+    const dmg = (m: Unit) => { const md = MONSTERS[m.defId]; return md.dice * (md.attackType === 'melee' ? 0.5 : 0.34) + md.dice / 6; };
+    return can.slice().sort((a, b) => dmg(b) - dmg(a))[0];
+  }
+  private stealthPick(h: Unit, can: Unit[]): Unit | null {
+    const best = this.stealthBest(can);
+    if (can.length === 1) {
+      const ok = this.confirm(h, 'Furtividade', `<b>${this.name(h)}</b> vai sair de perto de <b>${this.name(best)}</b> e receber Reação de Alerta. Usar a Furtividade para esquivar? <small>(1 vez por turno)</small>`, true, undefined,
+        { yes: '💨 Esquivar', no: 'Não esquivar (guardar)', cancel: true });
+      return ok ? best : null;
+    }
+    if (!h.guild || !this.choiceHook) return best;
+    const i = this.choiceHook({ choice: 'extra', guild: h.guild, heroId: h.id, source: 'Furtividade', units: can.map(m => m.id), cancel: true,
+      text: `<b>${this.name(h)}</b> vai sair de perto de ${can.length} Monstros e receber ${can.length} Reações de Alerta. A Furtividade esquiva de <b>uma</b> delas (1 vez por turno) — escolha de qual:` });
+    return i === 'auto' ? best : can[i] ?? null;
+  }
+
   /** Chefes que surgem com animação quando todos terminam de posicionar: Lorde Presas; Minotauro na Arena do Sol Brilhante; os de FIRE_BOSSES (com aura de fogo). */
   isBossEntrance(m: Unit): boolean {
     if (m.kind !== 'monster' || !m.alive || !m.cell) return false;
@@ -1036,7 +1056,10 @@ export class Game {
     const a = this.s.activation;
     if (!a || a.moveLocked) return [];
     const h = this.unit(a.heroId);
-    if (!h.cell || (this.ab(h) === 'furtivo' && !(this.s.stealthUsed ?? []).includes(h.id))) return [];
+    if (!h.cell) return [];
+    // Furtividade disponível: esquiva de 1 Monstro no movimento (o mais forte, como a IA; o jogador escolhe na hora)
+    const stealth = this.ab(h) === 'furtivo' && !(this.s.stealthUsed ?? []).includes(h.id);
+    let dodged: string | null = null;
     const nodes = this.reachable(h, a.mp, h.cell, openDoors);
     const node = nodes.get(key(target));
     if (!node || node.prev === null) return [];
@@ -1048,7 +1071,9 @@ export class Game {
       for (const st of steps) {
         if (!st.portal) {
           h.cell = from;
-          for (const m of this.monstersCloseTo(from)) if (this.monsterCanAttack(m, h)) out.push(m);
+          const can = this.monstersCloseTo(from).filter(m => m.id !== dodged && this.monsterCanAttack(m, h));
+          if (stealth && !dodged && can.length) dodged = this.stealthBest(can).id;
+          for (const m of can) if (m.id !== dodged) out.push(m);
         }
         from = st.cell;
       }
@@ -1078,8 +1103,8 @@ export class Game {
     if (this.s.blessing?.heroId === h.id) this.s.blessing = null;
     // último Espaço do caminho onde o Herói podia parar (se o Movimento for interrompido num Espaço cheio, volta para ele)
     let lastOk: Cell = { ...h.cell };
-    // Furtividade (Vapor): 1 vez por turno, o jogador escolhe esquivar das Reações de Alerta deste movimento
-    let stealth: boolean | null = null;
+    // Furtividade: o Monstro escolhido não reage durante este movimento inteiro
+    let dodged: string | null = null;
     for (const st of steps) {
       if (!h.alive || !h.cell) break; // morreu ou foi banido no caminho
       if (st.door) {
@@ -1093,16 +1118,18 @@ export class Game {
         // Reação de Alerta: sair de um Espaço Perto de um Monstro (p.19)
         // Vapor (Passos Silenciosos) não aciona Alerta ao se mover
         const near = this.monstersCloseTo(from);
-        let alerters = near;
-        if (this.ab(h) === 'furtivo' && near.some(m => this.monsterCanAttack(m, h))) {
-          if (stealth === null) {
-            const free = !(this.s.stealthUsed ?? []).includes(h.id);
-            const who = near.filter(m => this.monsterCanAttack(m, h)).map(m => `<b>${this.name(m)}</b>`).join(', ');
-            stealth = free && this.confirm(h, 'Furtividade', `<b>${this.name(h)}</b> vai sair de perto de ${who} e receber Reação de Alerta. Usar a Furtividade para esquivar? <small>(1 vez por turno)</small>`, true, undefined,
-              { yes: '💨 Esquivar', no: 'Não esquivar (guardar)' });
-            if (stealth) this.s.stealthUsed = [...(this.s.stealthUsed ?? []), h.id];
+        let alerters = near.filter(m => m.id !== dodged);
+        // Furtividade (Vapor): 1 vez por turno, esquiva de UMA Reação de Alerta — o jogador escolhe qual (com mais de uma)
+        const can = alerters.filter(m => this.monsterCanAttack(m, h));
+        if (this.ab(h) === 'furtivo' && can.length && !(this.s.stealthUsed ?? []).includes(h.id)) {
+          const dodge = this.stealthPick(h, can);
+          if (dodge) {
+            this.s.stealthUsed = [...(this.s.stealthUsed ?? []), h.id];
+            dodged = dodge.id;
+            alerters = alerters.filter(m => m.id !== dodge.id);
+            this.emit({ t: 'skill', id: h.id, skill: 'furtivo', name: 'Furtividade' });
+            this.log(`Furtividade: ${this.name(h)} esquiva da Reação de ${this.name(dodge)}.`);
           }
-          if (stealth) { alerters = []; this.emit({ t: 'skill', id: h.id, skill: 'furtivo', name: 'Furtividade' }); }
         }
         for (const m of alerters) {
           if (!h.alive || !h.cell) break; // morreu ou foi banido no caminho
@@ -1880,7 +1907,7 @@ export class Game {
   }
 
   /** Pergunta sim/não a quem controla o Herói (Mestre Espadachim, Sorte de Apostador…). `auto`: a resposta da IA. */
-  private confirm(h: Unit, source: string, text: string, auto: boolean, faces?: DieFace[], labels?: { yes: string; no: string; keep?: boolean }): boolean {
+  private confirm(h: Unit, source: string, text: string, auto: boolean, faces?: DieFace[], labels?: { yes: string; no: string; keep?: boolean; cancel?: boolean }): boolean {
     if (!h.guild || !this.choiceHook) return auto;
     const i = this.choiceHook({ choice: 'confirm', guild: h.guild, heroId: h.id, source, text, ...(faces ? { faces: faces.slice() } : {}), ...(labels ?? {}) });
     return i === 'auto' ? auto : i === 0;

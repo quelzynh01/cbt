@@ -24,7 +24,7 @@ export const HEROES: Record<string, HeroDef> = {
   vapor: {
     id: 'vapor', name: 'Vapor', nameEn: 'Wisp', title: 'Ladrão Silencioso',
     defense: 2, hp: 3, ability: 'furtivo', abilityName: 'Furtividade',
-    abilityText: 'Uma vez por turno, ao se mover, pode esquivar da Reação de Alerta (não aciona Alerta naquele movimento).',
+    abilityText: 'Uma vez por turno, ao se mover, pode esquivar de uma Reação de Alerta (com mais de uma, você escolhe de qual).',
   },
   espetado: {
     id: 'espetado', name: 'Espetado', nameEn: 'Spike', title: 'Barbadragão Anão',

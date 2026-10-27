@@ -79,7 +79,7 @@ sh tools/tests/run-engine.sh ordem         # ordem dos jogadores sorteada (avuls
 sh tools/tests/run-engine.sh alertas       # aviso de Reação de Alerta antes de andar: nenhuma Reação sem aviso (mesmo caminho do movimento)
 sh tools/tests/run-engine.sh vdoor2        # Vingança: abrir/fechar portas Perto do Monstro (1 Movimento cada, até o Movimento dele)
 sh tools/tests/run-engine.sh alertas2      # Templo, Grom: todo Espaço x todo destino; nenhuma Reação de Alerta sem aviso
-sh tools/tests/run-engine.sh furtivo       # Vapor (Wisp): Furtividade 1 vez por turno, perguntando "Esquivar?" (IA esquiva)
+sh tools/tests/run-engine.sh furtivo       # Vapor (Wisp): Furtividade 1 vez por turno, esquiva de UMA Reação (com várias, escolhe qual; IA esquiva da mais forte)
 sh tools/tests/run-engine.sh irmas         # ordem de entrada sorteada: Irmãs (Alquimista) e dupla Troll + Minotauro (Pátio)
 sh tools/tests/run-engine.sh xsim 30 mix   # partidas IA x IA nos mapas Clássicos (mix|core|extra; MAP=id, SEED=n repete uma, BTG=1 inclui Beyond, V=1 detalha) -> 0 travadas/0 erros
 ALL=1 sh tools/tests/run-engine.sh reach2  # alcance de todos os mapas       -> "TODOS OS MAPAS OK"
@@ -112,6 +112,7 @@ node tools/tests/browser/trollsounds.mjs                            # Mansão: e
 node tools/tests/browser/feralspot.mjs <pasta-prints>               # Viveiro: Ferais Marteladores na ponta do Espaço (fora do portal); quem chega pelo portal fica de frente para ele
 node tools/tests/browser/bossmark.mjs <pasta-prints>               # círculo de invocação (giz) no chão onde os chefes surgem
 node tools/tests/browser/markvis.mjs <pasta-prints>                # círculo some quando o chefe surge e volta quando ele morre; aura das Irmãs no Alquimista
+node tools/tests/browser/vapordodge.mjs <pasta-prints>              # Vapor perto de 2 Monstros: escolhe de qual Reação esquivar ou cancela o movimento
 node tools/tests/browser/alertwarn.mjs <pasta-prints>               # Templo: aviso de Reação de Alerta (Irmãs) aparece antes de andar
 node tools/tests/browser/rratk.mjs <pasta-prints>                   # online: Rerrolagem do ATAQUE do amigo acompanhada no painel de dados
 ```

@@ -28,6 +28,8 @@ import { NeedDecision, type ChoiceRequest, type DecisionRequest, type RestOption
 
 /** Decisão automática (jogador desconectou, demorou ou deixou a Rerrolagem automática). */
 const AUTO_PICK = -999;
+/** Resposta de escolha: cancelar a jogada inteira (volta ao estado de antes dela). */
+const CANCEL_PICK = -777;
 import { itemCard, itemColor, medal, paintCardArt } from './cardview';
 import { play } from '../audio/sfx';
 
@@ -452,7 +454,7 @@ export class Controller {
         <div class="mc-body">
           <p>${req.text ?? ''}</p>
           ${req.faces ? `<p class="mc-legend">Dados: ${req.faces.map(f => ({ crit: '✷', melee: '⚔', ranged: '➶', shield: '⛨', blank: '–' } as Record<string, string>)[f]).join(' ')}</p>` : ''}
-          <div class="mc-btns">${req.keep ? `<button class="primary" id="ch-none">${req.no ?? 'Não'}</button><button data-i="0">${req.yes ?? 'Sim'}</button>` : `<button class="primary" data-i="0">${req.yes ?? 'Sim'}</button><button id="ch-none">${req.no ?? 'Não'}</button>`}</div>
+          <div class="mc-btns">${req.keep ? `<button class="primary" id="ch-none">${req.no ?? 'Não'}</button><button data-i="0">${req.yes ?? 'Sim'}</button>` : `<button class="primary" data-i="0">${req.yes ?? 'Sim'}</button><button id="ch-none">${req.no ?? 'Não'}</button>`}${req.cancel ? '<button id="ch-cancel">✕ Cancelar movimento</button>' : ''}</div>
         </div>`;
       this.hud.setHint(`${req.source}: ${req.yes ? `${req.yes} ou ${req.no}` : 'escolha Sim ou Não'}`);
     } else if (req.choice === 'reward') {
@@ -524,19 +526,22 @@ export class Controller {
       hl.activeUnit = h.id;
       hl.attackUnits = new Set(req.units);
       const opts = req.units!.map((id, i) => { const u = g.unit(id); return `<button class="primary" data-i="${i}"><img class="cf-face" src="${this.hud.portraitOf(u)}"/> ${g.name(u)}</button>`; }).join('');
-      html = `<div class="panel-h">✷ ${req.source}${req.text ? '' : ' — escolha quem mais é atingido'}</div>
+      const dodge = req.source === 'Furtividade';
+      html = `<div class="panel-h">${dodge ? '💨' : '✷'} ${req.source}${req.text ? '' : ' — escolha quem mais é atingido'}</div>
         <div class="mc-body">
           <p>${req.text ?? `${req.source === 'Fender' ? `<b>${g.name(h)}</b> pode atingir também um Inimigo Perto dele.` : `Você rolou ✷: <b>${req.source}</b> pode atingir também um Inimigo Perto do alvo.`} Escolha qual:`}</p>
-          <div class="mc-btns">${opts}${req.source === 'Reação de Vingança' ? '' : '<button id="ch-none">Ninguém</button>'}</div>
+          <div class="mc-btns">${opts}${req.source === 'Reação de Vingança' ? '' : `<button id="ch-none">${dodge ? 'Não esquivar (guardar)' : 'Ninguém'}</button>`}${req.cancel ? '<button id="ch-cancel">✕ Cancelar movimento</button>' : ''}</div>
           ${this.battle.isOpen ? '' : '<p class="mc-legend">ou clique no Inimigo marcado no mapa</p>'}
         </div>`;
-      this.hud.setHint(`${req.source}: escolha quem mais é atingido`);
+      this.hud.setHint(dodge ? 'Furtividade: escolha de qual Reação esquivar' : `${req.source}: escolha quem mais é atingido`);
     }
     const el = this.hud.monsterPanel(html);
     el.classList.toggle('over', this.battle.isOpen);
     el.querySelectorAll<HTMLElement>('[data-i]').forEach(b => { b.onclick = () => resolve(Number(b.dataset.i)); });
     const none = el.querySelector('#ch-none') as HTMLElement | null;
     if (none) none.onclick = () => resolve(-1);
+    const cancel = el.querySelector('#ch-cancel') as HTMLElement | null;
+    if (cancel) cancel.onclick = () => resolve(CANCEL_PICK);
   }
 
   /** Escolha de vários alvos (Lorde Presas): os marcados até confirmar. */
@@ -647,6 +652,13 @@ export class Controller {
     const decided: number[][] = [];
     // eventos que já foram animados antes de uma decisão (ex.: o ataque, antes de a Vingança pedir a sua Defesa)
     let shown = 0;
+    // "Cancelar movimento" numa escolha: desfaz a jogada inteira (o estado volta a ser o de antes dela)
+    const cancelAll = () => {
+      this.deciding = false;
+      this.restore(snap, '✕ Movimento cancelado');
+      if (this.mode === 'host') (this.net as HostSession).startGame(this.game.s);
+      this.refresh();
+    };
     const attempt = () => {
       // refaz a jogada do começo (o RNG é o mesmo, então os dados também)
       if (decided.length) this.game.s = JSON.parse(snap);
@@ -674,10 +686,10 @@ export class Controller {
           if (owner && this.remoteHuman(owner)) {
             this.hud.setHint(`Aguardando ${this.hud.nameOf(owner) ?? guildShort(owner)} decidir…`);
             if (!('choice' in req)) this.spectateDecision(req, this.hud.nameOf(owner) ?? guildShort(owner));
-            void (this.net as HostSession).askDecision(owner, req).then(pick => { decided.push(pick ?? [AUTO_PICK]); attempt(); });
+            void (this.net as HostSession).askDecision(owner, req).then(pick => { if (pick?.[0] === CANCEL_PICK) { cancelAll(); return; } decided.push(pick ?? [AUTO_PICK]); attempt(); });
             return;
           }
-          if ('choice' in req) { this.askChoice(req).then(i => { decided.push([i]); attempt(); }); return; }
+          if ('choice' in req) { this.askChoice(req).then(i => { if (i === CANCEL_PICK) { cancelAll(); return; } decided.push([i]); attempt(); }); return; }
           this.hud.setHint('Escolha os dados para rerrolar');
           // Rerrolagem na própria tela de batalha (a mesma tela continua com a rolagem); sem tela de batalha, no centro
           this.hud.closePrize();
@@ -1926,7 +1938,9 @@ export class Controller {
         if (!go || this.game !== g) return;
       }
     }
-    const alerts = getSettings().alertConfirm === false ? [] : g.alertPreview(cell, false); // o mesmo caminho do movimento (sem abrir portas)
+    const mover = g.s.activation ? g.unit(g.s.activation.heroId) : null;
+    const stealthFree = !!mover && g.ab(mover) === 'furtivo' && !(g.s.stealthUsed ?? []).includes(mover.id); // a Furtividade pergunta na hora
+    const alerts = getSettings().alertConfirm === false || stealthFree ? [] : g.alertPreview(cell, false); // o mesmo caminho do movimento (sem abrir portas)
     if (alerts.length) {
       const h = g.unit(g.s.activation!.heroId);
       const rows = alerts.map(m => {
