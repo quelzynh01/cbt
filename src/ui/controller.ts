@@ -92,7 +92,7 @@ export class Controller {
         const showBattle = e.t === 'attack' && (bm === 'never' ? false : bm === 'mine' ? minePart : (humanInvolved || this.renderer.speed < 4));
         // online: o que estava só sendo acompanhado (escolha da arma / Rerrolagem do outro) dá lugar ao ataque de verdade
         // a janela da Missão (carta/Título) fecha: a rolagem precisa da tela
-        if (e.t === 'attack') { this.hud.closePrize(); this.hud.endSpectate(); if (!showBattle) this.battle.closeSpectate(); }
+        if (e.t === 'attack') { this.hud.closePrize(); this.hud.endSpectate(e); if (!showBattle) this.battle.closeSpectate(); }
         this.hud.onEvent(e, showBattle);
         // se a rolagem já começou na tela de combate do centro (Rerrolagem), continua nela — sem abrir outra tela
         if (showBattle && e.t === 'attack' && (this.battle.hasCarry || !this.hud.hasCarry)) {
@@ -529,8 +529,8 @@ export class Controller {
       const dodge = req.source === 'Furtividade';
       html = `<div class="panel-h">${dodge ? '💨' : '✷'} ${req.source}${req.text ? '' : ' — escolha quem mais é atingido'}</div>
         <div class="mc-body">
-          <p>${req.text ?? `${req.source === 'Fender' ? `<b>${g.name(h)}</b> pode atingir também um Inimigo Perto dele.` : `Você rolou ✷: <b>${req.source}</b> pode atingir também um Inimigo Perto do alvo.`} Escolha qual:`}</p>
-          <div class="mc-btns">${opts}${req.source === 'Reação de Vingança' ? '' : `<button id="ch-none">${dodge ? 'Não esquivar (guardar)' : 'Ninguém'}</button>`}${req.cancel ? '<button id="ch-cancel">✕ Cancelar movimento</button>' : ''}</div>
+          <p>${req.text ?? `${req.source === 'Fender' ? `Usar o <b>Fender</b>? <b>${g.name(h)}</b> pode atingir também um Inimigo Perto dele (mesmos dados). Escolha quem — ou não use:` : `Você rolou ✷: <b>${req.source}</b> pode atingir também um Inimigo Perto do alvo. Escolha qual:`}`}</p>
+          <div class="mc-btns">${opts}${req.source === 'Reação de Vingança' ? '' : `<button id="ch-none">${dodge ? 'Não esquivar (guardar)' : req.source === 'Fender' ? 'Não usar o Fender' : 'Ninguém'}</button>`}${req.cancel ? '<button id="ch-cancel">✕ Cancelar movimento</button>' : ''}</div>
           ${this.battle.isOpen ? '' : '<p class="mc-legend">ou clique no Inimigo marcado no mapa</p>'}
         </div>`;
       this.hud.setHint(dodge ? 'Furtividade: escolha de qual Reação esquivar' : `${req.source}: escolha quem mais é atingido`);

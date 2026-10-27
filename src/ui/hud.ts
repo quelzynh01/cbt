@@ -1495,6 +1495,7 @@ export class Hud {
     this.centerTimers = [];
     this.spectating = false;
     this.carry = null;
+    this.spec = null;
     this.defShown.clear();
     this.shownAtk = '';
     const box = $('#dicecenter', this.root);
@@ -1691,17 +1692,28 @@ export class Hud {
     const me = g.unit(req.heroId);
     const black = req.kind === 'attack';
     const ok = (f: DieFace) => f === 'crit' || f === req.success;
-    const attacker = g.unit(req.kind === 'attack' ? me.id : req.vs!.id);
+    const attackerId = req.kind === 'attack' ? me.id : req.vs!.id;
+    const attacker = g.unit(attackerId);
     const tgtS = req.kind === 'defense' ? me : (req as { target?: string }).target ? g.unit((req as { target?: string }).target!) : null;
-    box.innerHTML = this.cdBoxHtml(attacker, tgtS ? [tgtS] : [], this.cdHead(attacker.kind === 'hero' ? 'Ataque' : 'Reação', attacker.kind !== 'hero', req.card?.name, req.card?.type, req.card?.dice));
+    const open = !box.classList.contains('hidden') && !!box.querySelector('.cd-row.atk');
+    const prevSpec = open && this.spec && this.spec.attackerId === attackerId ? this.spec : null;
+    // rodada seguinte da mesma decisão (ainda sobrou Rerrolagem): continua nos mesmos dados
+    const cont = prevSpec && prevSpec.heroId === req.heroId && prevSpec.kind === req.kind && (req.round ?? 1) > 1 ? prevSpec : null;
+    // o mesmo ataque já está na tela (outra decisão do mesmo ataque): não rola o ataque de novo
+    const atkKey = req.vs ? `${req.vs.id}:${req.vs.faces.join(',')}` : '';
+    const sameAtk = !!prevSpec && !!req.vs && prevSpec.atkKey === atkKey;
+    if (!cont && !sameAtk) box.innerHTML = this.cdBoxHtml(attacker, tgtS ? [tgtS] : [], this.cdHead(attacker.kind === 'hero' ? 'Ataque' : 'Reação', attacker.kind !== 'hero', req.card?.name, req.card?.type, req.card?.dice));
     box.classList.remove('hidden', 'fade', 'interactive');
-    const settle = (row: Element, faces: DieFace[], b: boolean, s: string) => { row.innerHTML = ''; for (const f of faces) { const d = document.createElement('span'); d.className = `cd-die ${b ? 'black' : 'white'}`; d.innerHTML = dieImg(f, b); d.classList.toggle('hit', f === 'crit' || f === s); d.classList.toggle('crit', f === 'crit'); row.append(d); } };
+    this.spec = null;
     (async () => {
-      if (req.vs) {
-        settle(box.querySelector('.cd-row.atk')!, req.vs.faces, true, req.vs.type);
+      if (req.vs && !cont && !sameAtk) {
+        // o ataque aparece rolando (igual na tela de quem decide), não já pronto
+        await this.rollWaves(box.querySelector('.cd-row.atk')!, req.vs.faces, req.vs.base, true, req.vs.type, false, null, wait);
+        if (token !== this.centerRun) return;
         box.querySelector('.cd-sum.atk')!.innerHTML = `<b>${req.vs.hits}</b> acerto${req.vs.hits === 1 ? '' : 's'}`;
+        await wait(250);
       }
-      const holder = req.kind === 'attack' ? box.querySelector('.cd-box')! : this.cdDef(me.id);
+      const holder = req.kind === 'attack' ? box.querySelector('.cd-box')! : this.focusDef(me.id, attacker);
       holder.classList?.add('show');
       const row = (req.kind === 'attack' ? box.querySelector('.cd-row.atk') : holder.querySelector('.cd-row'))!;
       const btn = (req.kind === 'attack' ? box.querySelector('.cd-btn.atk') : holder.querySelector('.cd-btn'))!;
@@ -1717,22 +1729,54 @@ export class Hud {
         btn.innerHTML = `<span class="cd-wait">⏳ ${who} está decidindo se usa o ${sh === 'knight' ? 'Escudo de Cavaleiro' : 'Escudo do Rei'}…</span>`;
         return;
       }
-      if ((req.round ?? 1) > 1) settle(row, req.faces, black, req.success);
-      else {
+      let dice: HTMLElement[];
+      if (cont) {
+        // os dados que o outro escolheu giram e param no resultado novo (no mesmo painel)
+        const idx = cont.before.map((f, i) => (f !== req.faces[i] ? i : -1)).filter(i => i >= 0);
+        if (idx.length || req.faces.length > cont.before.length) await this.rerollIn(row, cont.dice, cont.before, idx, req.faces, black, req.success, wait);
+        dice = cont.dice;
+      } else {
+        row.innerHTML = '';
         btn.innerHTML = `<span class="cd-wait">⏳ Aguardando ${who} rolar…</span>`;
         await diceSync.wait('roll');
         if (token !== this.centerRun) return;
         btn.innerHTML = '';
-        await this.rollWaves(row, req.faces, req.base ?? (black ? req.card?.dice : undefined), black, req.success, false, btn, wait, true, 'roll');
+        dice = await this.rollWaves(row, req.faces, req.base ?? (black ? req.card?.dice : undefined), black, req.success, false, btn, wait, true, 'roll');
       }
       if (token !== this.centerRun) return;
+      this.spec = { attackerId, atkKey, heroId: req.heroId, kind: req.kind, dice, before: req.faces.slice() };
       const hits = req.faces.filter(ok).length;
       sum.innerHTML = `<b>${hits}</b> ${black ? 'acerto' : 'bloqueio'}${hits === 1 ? '' : 's'}`;
       btn.innerHTML = `<span class="cd-wait">⏳ ${(req as { covered?: boolean }).covered ? `${who} já bloqueou tudo: está escolhendo se mantém ou rola mais…` : `${who} está escolhendo quais dados rerrolar…`}</span>`;
     })();
   }
-  /** Acabou de acompanhar a Rerrolagem do outro (o resultado vem a seguir, normal). */
-  endSpectate() { if (this.spectating) { this.spectating = false; this.resetDice(); } }
+  /** Painel acompanhado (decisão de outro jogador): continua nele quando chega o resultado. */
+  private spec: { attackerId: string; atkKey: string; heroId: string; kind: 'attack' | 'defense'; dice: HTMLElement[]; before: DieFace[] } | null = null;
+  /** Acabou de acompanhar a decisão do outro: se o resultado é deste mesmo ataque, continua no mesmo painel
+   *  (só os dados rerrolados giram); senão, fecha. */
+  endSpectate(e?: Extract<GameEvent, { t: 'attack' }>) {
+    if (!this.spectating) return;
+    this.spectating = false;
+    const sp = this.spec;
+    const box = $('#dicecenter', this.root);
+    if (e && sp && sp.attackerId === e.attackerId && !box.classList.contains('hidden') && sp.dice.length) {
+      const final = sp.kind === 'attack' ? e.dice : e.targets.find(t => t.id === sp.heroId)?.defense;
+      if (final) {
+        for (const k of [...this.diceKeys]) this.diceUnkey(k);
+        for (const t of this.centerTimers) { clearTimeout(t); clearInterval(t); }
+        this.centerTimers = [];
+        ++this.centerRun;
+        const idx = sp.before.map((f, i) => (f !== final[i] ? i : -1)).filter(i => i >= 0);
+        this.carry = { heroId: sp.heroId, kind: sp.kind, attackerId: sp.attackerId, dice: sp.dice, before: sp.before, idx, held: true };
+        this.shownAtk = sp.atkKey;
+        this.spec = null;
+        box.querySelectorAll('.cd-wait').forEach(w => w.remove());
+        return;
+      }
+    }
+    this.spec = null;
+    this.resetDice();
+  }
 
   askDecision(req: { heroId: string; kind: 'attack' | 'defense'; faces: DieFace[]; success: DieFace; rerolls: number; covered?: boolean; held?: number; noHits?: boolean; shield?: 'knight' | 'king'; bonus?: number;
     done?: { id: string; faces: DieFace[]; blocks: number; noHits?: boolean }[]; base?: number; round?: number; vs?: { id: string; faces: DieFace[]; hits: number; type: string; base?: number }; card?: { name: string; type: string; dice: number } }): Promise<number[]> {

@@ -1869,9 +1869,9 @@ export class Game {
   }
 
   /** Alvo adicional escolhido pelo jogador (Raio Nova, Fender). undefined = escolha automática; null = nenhum.
-   *  Com um só Inimigo possível não pergunta. */
+   *  Raio Nova com um só Inimigo possível não pergunta; o Fender sempre pergunta (o jogador decide se usa). */
   private chooseExtra(h: Unit, source: string, extra: Unit[], faces: DieFace[]): Unit | null | undefined {
-    if (extra.length < 2 || !h.guild || !this.choiceHook) return undefined;
+    if ((extra.length < 2 && source !== 'Fender') || !h.guild || !this.choiceHook) return undefined;
     const i = this.choiceHook({ choice: 'extra', guild: h.guild, heroId: h.id, source, units: extra.map(u => u.id), faces: faces.slice() });
     return i === 'auto' ? undefined : extra[i] ?? null;
   }
@@ -2343,6 +2343,14 @@ export class Game {
         const over = h.curse && CURSES[h.curse]?.slot && cards.length ? 1 : 0;
         if (sl.used > sl.max + over) return `${HEROES[h.defId].name}: ${sl.used - over} cartas para ${sl.max} espaços.`;
         if (cards.filter(c => this.cardDef(c).fx.armor).length > 1) return `${HEROES[h.defId].name}: só 1 armadura por Herói.`;
+        // tirar a carta que dá Vida não pode deixar o Herói vivo com a Vida zerada (Ferimentos >= nova Vida máxima)
+        if (h.alive) {
+          const saved = h.cards;
+          h.cards = cards;
+          const mx = this.maxHp(h);
+          h.cards = saved;
+          if (h.wounds >= mx) return `${HEROES[h.defId].name}: ficaria sem Vida (${h.wounds} Ferimento${h.wounds === 1 ? '' : 's'} e Vida máxima ${mx}). Deixe com ele a carta que dá Vida.`;
+        }
       }
     }
     if (o.tokens) {
