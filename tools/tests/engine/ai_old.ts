@@ -34,8 +34,28 @@ export interface AIParams {
   denyW: number;
   /** Só atrapalha quem está a 1 Missão de vencer. */
   denyUrgentOnly: boolean;
+  /** Peso do dano de Reação de Alerta no caminho (Difícil / Normal). */
+  riskW: number;
+  /** Peso do Alerta que vai sofrer no próximo turno por terminar colado em Monstros. */
+  stayW: number;
+  /** Bônus da Missão contra Jogador enquanto a Guilda ainda não tem Missão do mapa. */
+  pvpNeedPve: number;
+  /** Alianças temporárias: peso contra quem está ganhando / quem está atrás. */
+  leaderHi: number;
+  leaderLo: number;
+  /** Ainda sem Missão do mapa: o dano "à toa" em Heróis (sem chance real de matar) vale só essa fração. */
+  pveFirst: number;
+  /** Bônus por uma morte à mão (Herói Inimigo que provavelmente morre neste ataque). */
+  finisher: number;
+  /** Confronto Final (1 Missão decide): bônus pelo golpe que mata o alvo da Missão e vence a partida (× chance de matar). */
+  winKill: number;
+  /** Mapas sem Missão contra Jogador (Templo): quanto vale brigar com Heróis de outras Guildas (1 = como antes). */
+  peace: number;
+  /** Confronto Final com a barreira já aberta: a hesitação acaba mais cedo (turnos parados que a IA tolera a menos). */
+  rush: number;
 }
-export const AI_PARAMS: AIParams = { pvpDoneKill: 1, pvpDoneDmg: 0.7, pvpDoneAttract: false, posW: 0.6, missionTok: 9, idleStart: 0, guardKill: 2, hiddenW: 3, denyW: 1, denyUrgentOnly: false };
+export const AI_PARAMS: AIParams = { pvpDoneKill: 1, pvpDoneDmg: 0.7, pvpDoneAttract: false, posW: 0.6, missionTok: 9, idleStart: 0, guardKill: 2, hiddenW: 3, denyW: 1, denyUrgentOnly: false,
+  riskW: 2.6, stayW: 0.8, pvpNeedPve: 3, leaderHi: 1.4, leaderLo: 0.6, pveFirst: 0.55, finisher: 4, winKill: 25, peace: 0.2, rush: 3 };
 
 export type AIAction =
   | { type: 'activate'; heroId: string }
@@ -97,6 +117,8 @@ const near = (g: Game, c: Cell) => [c, ...g.board.neighbors(c).filter(n => g.boa
 export class OldAI {
   private queue: AIAction[] = [];
   private usedToken = false;
+  /** Já usou uma poção no fim desta ativação (uma por vez; volta aqui depois). */
+  private endTokens = 0;
   /** Herói que já atacou nesta ativação (Caçador pode atacar de novo). */
   private attackedHero: string | null = null;
   /** Turnos seguidos sem progresso (moedas, Missões, Monstros). Quanto mais, mais agressiva a IA fica. */
@@ -104,6 +126,8 @@ export class OldAI {
   private lastScore = -1;
   /** 0 = cautelosa … 1 = tudo ou nada (evita partidas travadas). */
   private aggr = 0;
+  /** Modo do Herói que está sendo planejado: com pouca Vida e sem objetivo perto, procura "?" (cura) ou se sacrifica em Monstros. */
+  private curMode: 'heal' | 'sac' | null = null;
 
   /** Pesos da IA (ajustados por simulação: tools/sim — ver AI_PARAMS). */
   readonly p: AIParams;
@@ -120,6 +144,7 @@ export class OldAI {
     if (!g.s.activation) {
       this.queue = [];
       this.usedToken = false;
+      this.endTokens = 0;
       const plan = this.plan(g);
       if (!plan) return { type: 'rest', opts: this.restOptions(g, g.currentGuild().id) };
       this.queue = plan.steps.slice();
@@ -142,10 +167,17 @@ export class OldAI {
         let best: Plan | null = null;
         for (const ally of g.heroesOf(g.currentGuild().id)) {
           if (!g.canBless(ally.id)) continue;
-          const p = this.planHero(g, ally, this.goalDistances(g, ally.guild!, ally), g.blessKind(ally.id) === 'mind');
+          this.curMode = this.lowHpMode(g, ally);
+          const p = this.planHero(g, ally, this.goalDistances(g, ally.guild!, ally, this.curMode ?? undefined), g.blessKind(ally.id) === 'mind');
           if (p && p.value > 0.5 && (!best || p.value > best.value)) best = p;
         }
+        this.curMode = null;
         if (best) { this.queue = best.steps.slice(); this.usedToken = false; return { type: 'activate', heroId: best.heroId }; }
+      }
+      // fim da ativação: poções que valem agora (ferido -> Cura; cartas gastas -> Revigorante; quase morrendo -> usa antes de perder)
+      if (h?.alive && this.endTokens < 3) {
+        const tok = this.endTokenToUse(g, h);
+        if (tok) { this.endTokens++; return { type: 'token', tokenId: tok.id }; }
       }
       // Caçador (Viktor): matou o alvo e pode atacar de novo — ataca daqui se valer a pena
       const act = g.s.activation;
@@ -209,6 +241,86 @@ export class OldAI {
     return null;
   }
 
+  /** Poções no fim da ativação: a Cura quando o Herói está bem ferido (ou vai morrer se ficar assim),
+   *  a Revigorante quando gastou as cartas de Ataque (magias), e qualquer uma antes de morrer com ela na bolsa. */
+  private endTokenToUse(g: Game, h: Unit): Token | null {
+    if (h.curse === 'aquafobia' || !h.cell) return null;
+    const max = g.maxHp(h), hp = max - h.wounds;
+    const danger = this.heroThreatDmg(g, h, h.cell) + this.alertRisk(g, h, h.cell) * 0.5;
+    const dying = danger >= hp;
+    const attackCards = h.cards.filter(c => g.isAttackCard(c));
+    const exhausted = attackCards.filter(c => c.exhausted).length;
+    for (const t of h.tokens) {
+      if (t.type === 'cura' && h.wounds > 0 && (h.wounds >= 2 || hp <= 2 || dying)) return t;
+      if (t.type === 'revigorante' && exhausted > 0 && (exhausted >= Math.min(2, attackCards.length) || dying || attackCards.some(c => c.exhausted && CARDS[c.defId].magic))) return t;
+    }
+    return null;
+  }
+
+  /** Dano esperado dos Heróis inimigos que alcançam `c` no próximo turno (sem limite de Vida). */
+  private heroThreatDmg(g: Game, h: Unit, c: Cell): number {
+    let worst = 0;
+    for (const e of g.onBoard()) {
+      if (e.kind !== 'hero' || !g.isEnemy(h, e)) continue;
+      const d = Math.abs(e.cell!.c - c.c) + Math.abs(e.cell!.r - c.r);
+      if (d > 5) continue;
+      let dice = 0;
+      for (const card of e.cards) {
+        const def = CARDS[card.defId];
+        if (def.kind !== 'attack' || card.exhausted) continue;
+        if (def.attackType === 'melee' && d > 4) continue;
+        dice = Math.max(dice, def.dice * ATK_EXP(def.attackType!));
+      }
+      worst += Math.max(0, dice - g.defenseDice(h) * DEF_EXP);
+    }
+    return worst;
+  }
+
+  /** Alianças temporárias: o quanto vale atrapalhar esta Guilda (quem está ganhando vale mais; quem está atrás, menos). */
+  private leaderFactor(g: Game, me: GuildId, other: GuildId): number {
+    const score = (id: GuildId) => g.guild(id).missions.length * 10 + g.heroesOf(id).reduce((n, u) => n + u.tokens.filter(t => t.type === 'missao').length, 0) * 3 + g.wealth(id) * 0.2;
+    const others = g.guilds().filter(x => x.id !== me).map(x => ({ id: x.id, s: score(x.id) }));
+    if (others.length < 2) return 1;
+    const top = Math.max(...others.map(o => o.s)), low = Math.min(...others.map(o => o.s));
+    if (top === low) return 1;
+    const s = score(other);
+    if (s === top) return g.guild(other).missions.length >= g.s.missionsToWin - 1 ? this.p.leaderHi + 0.4 : this.p.leaderHi; // quem está ganhando
+    if (s === low) return this.p.leaderLo; // quem está atrás: deixa em paz
+    return 1;
+  }
+
+  /** Há um objetivo de Missão do mapa perto do Herói (marcador desejado, Monstro-alvo)? Quem carrega marcador de Missão também conta. */
+  private objectiveNear(g: Game, h: Unit, r: number): boolean {
+    if (h.tokens.some(t => t.type === 'missao')) return true;
+    const dist = (c: Cell) => Math.abs(h.cell!.c - c.c) + Math.abs(h.cell!.r - c.r);
+    for (const [k, toks] of Object.entries(g.s.floor)) {
+      if (dist(parseKey(k)) > r) continue;
+      if (toks.some(t => t.type === 'missao' && t.faceUp && (g.missionTokenWanted(h.guild!, t) || g.tokenMission(t)?.rule === 'arena'))) return true;
+    }
+    const targets = new Set(g.s.missions.filter(mi => (mi.rule === 'kill_type' || mi.rule === 'summon') && !this.done(g, h.guild!, mi)).flatMap(mi => mi.types ?? []));
+    return g.onBoard().some(u => u.kind === 'monster' && targets.has(u.defId.replace(/\d+$/, '')) && dist(u.cell!) <= r);
+  }
+
+  /** Pouca Vida e nenhum objetivo perto: 'heal' = procurar um marcador "?" (pode ser Cura); 'sac' = sem "?" no mapa e Heróis Inimigos
+   *  por perto: se for morrer, que seja nos Monstros (o Inimigo não ganha a morte). */
+  private lowHpMode(g: Game, h: Unit): 'heal' | 'sac' | null {
+    if (!h.alive || !h.cell || h.wounds <= 0) return null;
+    const hp = g.maxHp(h) - h.wounds;
+    if (hp > 2 || hp > Math.ceil(g.maxHp(h) * 0.5)) return null;
+    if (h.tokens.some(t => t.type === 'cura') || this.objectiveNear(g, h, 6)) return null;
+    const deadly = g.map.deadlyTokens && !(g.map.fireProtectTitle && g.hasTitle(h.guild!, g.map.fireProtectTitle));
+    if (!deadly && Object.values(g.s.floor).some(ts => ts.some(t => !t.faceUp))) return 'heal';
+    const threatened = g.onBoard().some(e => e.kind === 'hero' && g.isEnemy(h, e) && Math.abs(e.cell!.c - h.cell!.c) + Math.abs(e.cell!.r - h.cell!.r) <= 6);
+    return threatened ? 'sac' : null;
+  }
+
+  /** A Guilda ainda precisa de uma Missão do mapa (contra o Jogo): ela vale mais que brigar. */
+  private needPve(g: Game, guild: GuildId): boolean {
+    const gs = g.guild(guild);
+    const pveDone = gs.missions.filter(id => g.s.missions.find(m => m.id === id)?.kind === 'pve').length;
+    return pveDone === 0 && g.s.missions.some(m => m.kind === 'pve' && !this.done(g, guild, m));
+  }
+
   // ------------------------------------------------------------------ plano do turno
   private plan(g: Game): Plan | null {
     const guild = g.currentGuild();
@@ -220,15 +332,18 @@ export class OldAI {
     const carried = heroes.reduce((n, h) => n + h.tokens.filter(t => t.type === 'missao').length, 0);
     const score = (coinsMatter ? g.wealth(guild.id) : 0) + carried * 2 + guild.missions.length * 5 + (g.s.missions.some(m => m.rule === 'kill_count' && !guild.missions.includes(m.id)) ? guild.monsterKills : 0) + villainHits + (g.s.arena?.[guild.id]?.length ?? 0) * 2;
     if (score > this.lastScore) { this.idle = 0; this.lastScore = score; } else this.idle++;
-    this.aggr = Math.min(1, Math.max(0, (this.idle - (this.hard ? 3 : 5) - this.p.idleStart) / 6));
+    const rushed = this.p.rush && g.s.missionsToWin <= 1 && (!g.map.barrier || guild.barrierOpen) ? this.p.rush : 0;
+    this.aggr = Math.min(1, Math.max(0, (this.idle - (this.hard ? 3 : 5) - this.p.idleStart + rushed) / 6));
     const dead = heroes.filter(h => !h.alive).length;
     let best: Plan | null = null;
     for (const h of heroes) {
       if (!h.alive || !h.cell) continue;
-      const p = this.planHero(g, h, this.goalDistances(g, guild.id, h));
+      this.curMode = this.lowHpMode(g, h);
+      const p = this.planHero(g, h, this.goalDistances(g, guild.id, h, this.curMode ?? undefined));
       if (p) p.value += this.noise();
       if (p && (!best || p.value > best.value)) best = p;
     }
+    this.curMode = null;
     const usableAttack = heroes.some(h => h.alive && h.cards.some(c => !c.exhausted && g.isAttackCard(c)));
     const exhaustedCount = heroes.reduce((s, h) => s + h.cards.filter(c => c.exhausted).length, 0);
     if (!best) return null;
@@ -260,19 +375,30 @@ export class OldAI {
       let gain = 0;
       let cur = startCell;
       for (const st of path) {
-        if (!st.portal && HEROES[h.defId].ability !== 'furtivo') risk += this.alertRisk(g, h, cur);
+        // Furtividade (Vapor) só esquiva 1 vez por turno
+        const stealth = g.ab(h) === 'furtivo' && !(g.s.stealthUsed ?? []).includes(h.id);
+        if (!st.portal && !stealth) risk += this.alertRisk(g, h, cur);
         gain += this.pickupValue(g, h, st.cell);
         cur = st.cell;
       }
       const pos = this.positionValue(g, h, n.cell, goals);
       const finish = this.endBonus(g, h, n.cell);
       const moveSteps: AIAction[] = sameCell(n.cell, startCell) ? [] : [{ type: 'move', cell: n.cell }];
-      const riskPenalty = (risk >= hp ? risk * 4 + 6 : risk * (this.hard ? 1.4 : 1.2)) * (1 - 0.5 * this.aggr);
-      const threat = this.hard ? this.heroThreat(g, h, n.cell, hp - Math.min(risk, hp - 0.5)) : 0;
+      // pouca Vida: Heróis Inimigos são o perigo de verdade (a Reação de um Monstro é o "mal menor" no modo de sacrifício)
+      const sac = this.curMode === 'sac';
+      const riskPenalty = (risk >= hp ? risk * 4 + 6 : risk * this.riskW(g) * (this.hard ? 1 : 0.82)) * (1 - 0.75 * this.aggr) * (sac ? 0.35 : 1);
+      const threat = this.hard || this.curMode ? this.heroThreat(g, h, n.cell, hp - Math.min(risk, hp - 0.5)) * (this.curMode ? 1.6 : 1) : 0;
+      // terminar colado em Monstros: no próximo turno, sair dali provoca Reação de Alerta (a não ser que o alvo morra)
+      // partida parada (aggr): a cautela some aos poucos, senão ninguém encara o chefe cercado de Monstros
+      const stay = this.stayRisk(g, h, n.cell) * this.stayW(g) * (this.hard ? 1 : 0.7) * (1 - this.aggr) * (sac ? 0.3 : 1);
       // Mover e depois atacar
       const atk = moveOnly ? null : this.bestAttack(g, h, n.cell);
-      if (atk) consider(gain + atk.value + pos * 0.3 + finish - riskPenalty - threat, [...moveSteps, this.attackStep(g, h, atk)]);
-      consider(gain + pos - startPos + finish - riskPenalty - threat + (moveSteps.length ? 0 : -0.2), moveSteps);
+      if (atk) {
+        const tgt = atk.target.kind === 'monster' && g.board.isClose(atk.target.cell!, n.cell)
+          ? atk.killP * Math.max(0.15, MONSTERS[atk.target.defId].dice * ATK_EXP(MONSTERS[atk.target.defId].attackType) - g.defenseDice(h) * DEF_EXP) * this.stayW(g) * (this.hard ? 1 : 0.7) : 0;
+        consider(gain + atk.value + pos * 0.3 + finish - riskPenalty - threat - Math.max(0, stay - tgt), [...moveSteps, this.attackStep(g, h, atk)]);
+      }
+      consider(gain + pos - startPos + finish - riskPenalty - threat - stay + (moveSteps.length ? 0 : -0.2), moveSteps);
       // Abrir uma porta ao lado e atacar quem está atrás (Monstros numa sala fechada bloqueiam a passagem)
       if (!moveOnly && n.mp < mp0) {
         for (const d of g.s.doors) {
@@ -294,7 +420,11 @@ export class OldAI {
         const pos = this.positionValue(g, h, n.cell, goals) - startPos;
         let gain = 0;
         for (const st of g.pathTo(nodes, n.cell)) gain += this.pickupValue(g, h, st.cell);
-        const v = pos * 0.5 + gain + this.endBonus(g, h, n.cell) - this.alertRisk(g, h, startCell) * 1.5 - (this.hard ? this.heroThreat(g, h, n.cell, hp) : 0);
+        // o Monstro atacado (se morrer) não faz Reação de Alerta na saída
+        const tgtAlert = atk0.target.kind === 'monster' && g.board.isClose(atk0.target.cell!, startCell)
+          ? atk0.killP * Math.max(0.15, MONSTERS[atk0.target.defId].dice * ATK_EXP(MONSTERS[atk0.target.defId].attackType) - g.defenseDice(h) * DEF_EXP) : 0;
+        const risk0 = Math.max(0, this.alertRisk(g, h, startCell) - tgtAlert);
+        const v = pos * 0.5 + gain + this.endBonus(g, h, n.cell) - (risk0 >= hp ? risk0 * 4 + 6 : risk0 * this.riskW(g)) * (this.curMode === 'sac' ? 0.35 : 1) - (this.hard || this.curMode ? this.heroThreat(g, h, n.cell, hp) : 0);
         if (v > bestMove.v) bestMove = { v, cell: n.cell };
       }
       const steps: AIAction[] = [this.attackStep(g, h, atk0)];
@@ -312,7 +442,11 @@ export class OldAI {
   /** Ação de ataque; Kanga usa o Autossacrifício (1 Ferimento em vez de exaustar) quando tem Vida sobrando. */
   private attackStep(g: Game, h: Unit, atk: { card: CardInst; target: Unit; boosts: string[] }): AIAction {
     const hp = g.maxHp(h) - h.wounds;
-    const sacrifice = g.canSacrifice(h) && hp >= (this.hard ? 3 : 4) && !CARDS[atk.card.defId].fx.drain;
+    // Autossacrifício (Kanga): 1 Ferimento para não exaustar a carta — só com a Vida quase cheia, sem perigo por perto
+    // e quando é a última carta de Ataque pronta (senão só se fere à toa)
+    const otherReady = h.cards.filter(c => c.uid !== atk.card.uid && !c.exhausted && g.isAttackCard(c)).length;
+    const safe = !h.cell || this.heroThreatDmg(g, h, h.cell) + this.alertRisk(g, h, h.cell) < hp - 1;
+    const sacrifice = g.canSacrifice(h) && hp >= Math.max(3, g.maxHp(h) - 1) && otherReady === 0 && safe && !CARDS[atk.card.defId].fx.drain;
     return { type: 'attack', cardUid: atk.card.uid, targetId: atk.target.id, boosts: atk.boosts, ...(sacrifice ? { sacrifice: true } : {}) };
   }
 
@@ -382,8 +516,8 @@ export class OldAI {
     return out;
   }
 
-  private bestAttack(g: Game, h: Unit, from: Cell): { card: CardInst; target: Unit; value: number; boosts: string[] } | null {
-    let best: { card: CardInst; target: Unit; value: number; boosts: string[] } | null = null;
+  private bestAttack(g: Game, h: Unit, from: Cell): { card: CardInst; target: Unit; value: number; boosts: string[]; killP: number } | null {
+    let best: { card: CardInst; target: Unit; value: number; boosts: string[]; killP: number } | null = null;
     const saved = h.cell;
     h.cell = from;
     const guild = g.guild(h.guild!);
@@ -393,22 +527,30 @@ export class OldAI {
         if (card.exhausted) continue;
         const def = CARDS[card.defId];
         if (def.kind !== 'attack') continue;
-        const boosts = this.pickBoosts(g, h, card);
-        for (const t of g.attackTargets(h, card, from)) {
+        // ampliações: com as que ferem o próprio Herói e sem elas (escolhe a melhor, pagando o Ferimento)
+        const allBoosts = this.pickBoosts(g, h, card);
+        const woundOf = (ids: string[]) => ids.reduce((s, id) => { const c = h.cards.find(x => x.uid === id); const d = c && CARDS[c.defId]; return s + (d ? (d.fx.selfWound ?? 0) + (d.kind === 'permanent' ? d.fx.grrr ?? 0 : 0) : 0); }, 0);
+        const safeBoosts = allBoosts.filter(id => woundOf([id]) === 0);
+        const boostSets = woundOf(allBoosts) ? [allBoosts, safeBoosts] : [allBoosts];
+        for (const t of g.attackTargets(h, card, from)) for (const boosts of boostSets) {
+          const selfCost = woundOf(boosts) * (1.4 + (g.maxHp(h) - h.wounds <= 3 ? 1 : 0));
           let dice = g.attackDicePreview(h, card, t, boosts).dice;
           if (g.ab(h) === 'maestria_arco' && def.group === 'Arco') dice += 0.2;
           if (def.fx.critExtra) dice += def.fx.critExtra * 0.2;
           if (g.ab(h) === 'mestre_espadachim' && def.group === 'Espada' && !h.spent) dice += 2;
           const pierce = g.piercing(h, card);
           const rem = g.maxHp(t) - t.wounds;
-          const tdef = g.defenseDice(t, h, def.attackType);
+          // Rerrolagens: cada uma troca um dado ruim por outro (vale para quem ataca e para o Herói que defende)
+          dice += g.rerollsOf(h) * 0.3;
+          const tdef = g.defenseDice(t, h, def.attackType) + (t.kind === 'hero' ? g.rerollsOf(t) * 0.3 : 0);
           let exp = Math.max(0, dice * ATK_EXP(def.attackType!) - (pierce ? 0 : tdef * DEF_EXP));
           let killP = Math.max(0, Math.min(1, (exp - rem + 1.2) / 2));
-          if (this.hard) ({ killP, exp } = exactAttack(dice, def.attackType!, pierce ? 0 : tdef, rem));
+          if (this.hard) ({ killP, exp } = exactAttack(dice, def.attackType!, pierce ? 0 : Math.round(tdef), rem));
           let killBonus = 0;
           let pvpDone = false;
           let retaliation = 0;
           let progress = 0;
+          let winP = 0;
           if (t.kind === 'monster') {
             const md = MONSTERS[t.defId];
             const base = t.defId.replace(/\d+$/, '');
@@ -417,6 +559,8 @@ export class OldAI {
             // Templo: moedas abrem a barreira mágica
             const coinNeed = barrierClosed ? 1.5 : 1;
             killBonus = md.reward * 1.5 * coinNeed + (wantKills ? 1.5 + guild.monsterKills : 0) + (wantType ? 8 : 0);
+            // ainda sem Missão do mapa: os Monstros dela valem mais (Missão + item/Título)
+            if (this.needPve(g, guild.id) && (wantType || wantKills)) killBonus += 4;
             // Vilões: quem fere também ganha a recompensa
             if (md.category.startsWith('Vilão')) killBonus += Math.min(exp, rem) * 0.4;
             // Monstro em cima de um marcador de Missão que a Guilda quer: matá-lo libera o caminho
@@ -425,16 +569,27 @@ export class OldAI {
             else if (this.p.guardKill && near(g, t.cell!).some(c => g.floorAt(c).some(x => x.type === 'missao' && x.faceUp && g.missionTokenWanted(guild.id, x)))) killBonus += this.p.guardKill;
             // ferir o Monstro-alvo da Missão já é progresso (Lorde Presas tem muita Vida)
             if (wantType) progress = Math.min(exp, rem) * (rem > 6 ? 2.2 : 1.2);
+            // o golpe que mata o alvo da última Missão vence a partida: vale mais que qualquer Ferimento que o Herói leve em troca
+            if (wantType && this.p.winKill && guild.missions.length + 1 >= g.s.missionsToWin) { killBonus += this.p.winKill * killP; winP = killP; }
             if (exp < md.exterm) retaliation += Math.max(0, md.dice * ATK_EXP(md.attackType) - g.defenseDice(h) * DEF_EXP) * 0.8;
           } else {
             const pvp = `matar_${t.guild}`;
             const pvpOpen = g.s.missions.some(m => m.id === pvp) && !guild.missions.includes(pvp);
-            killBonus = (g.map.pvp === false ? 1 : 2) + (pvpOpen ? 5 : 0);
+            // ainda sem Missão do mapa: brigar vale menos que correr atrás dela
+            // (+1.5: a moeda da morte e o adversário perdendo o turno para descansar — só onde há Missão contra Jogador:
+            // no Templo brigar entre Guildas só gasta Heróis, a corrida é pelo Lorde Presas)
+            const noPvp = g.map.pvp === false;
+            killBonus = (noPvp ? this.p.peace : 3.5) + (pvpOpen ? (this.needPve(g, guild.id) ? this.p.pvpNeedPve : 5) : 0);
+            // alianças temporárias: derrubar quem está ganhando vale mais; quem está atrás, menos — mas uma morte quase certa não se deixa passar
+            const lf = this.leaderFactor(g, guild.id, t.guild!);
+            killBonus *= killP >= 0.6 && !noPvp ? Math.max(lf, 1) : lf;
             // quem carrega marcador de Missão: matá-lo atrapalha o adversário (e rouba o marcador)
             const carrier = t.tokens.some(x => x.type === 'missao');
             if (this.hard && carrier) killBonus += 4;
             // Missão contra essa Guilda já cumprida: matar de novo vale pouco
-            if (!pvpOpen && !carrier) { pvpDone = true; killBonus = Math.min(killBonus, this.p.pvpDoneKill); }
+            if (!pvpOpen && !carrier) { pvpDone = true; killBonus = Math.min(killBonus, this.p.pvpDoneKill + (killP >= 0.5 && !noPvp ? 1.8 : 0)); }
+            // morte à mão (Herói com pouca Vida e boa chance de cair neste ataque): é o momento de tentar, a chance já conta Defesa e Rerrolagens
+            if (killP >= 0.4 && !noPvp) killBonus += this.p.finisher * killP * (rem <= 2 ? 1.25 : 1);
             // está quase cumprindo uma Missão (Arena, escolta, Tomos, marcador): derrubá-lo atrapalha
             const thr = this.denyW() * (this.threats(g, h.guild!).heroes.get(t.id) ?? 0);
             if (thr) { killBonus += thr; progress += Math.min(exp, rem) * thr * 0.25; }
@@ -442,22 +597,48 @@ export class OldAI {
           const targetsCloseMonster = t.kind === 'monster' && g.board.isClose(t.cell!, from);
           if (!targetsCloseMonster) retaliation += this.alertRisk(g, h, from);
           const hp = g.maxHp(h) - h.wounds;
-          const deathRisk = retaliation >= hp ? 5 * (1 - 0.6 * this.aggr) : 0;
-          retaliation *= 1 - 0.5 * this.aggr;
+          // pouca Vida e sem cura à vista: morrer para um Monstro é melhor que entregar a morte a um Herói Inimigo
+          const sacMonster = this.curMode === 'sac' && t.kind === 'monster';
+          const deathRisk = retaliation >= hp && !sacMonster ? 5 * (1 - 0.6 * this.aggr) * (1 - winP) : 0;
+          retaliation *= (1 - 0.5 * this.aggr) * (sacMonster ? 0.3 : 1) * (1 - 0.8 * winP);
           killBonus *= 1 + this.aggr;
           // sem Missões contra Jogador (Templo): brigar com Heróis só vale para abrir caminho
-          const dmgWeight = (t.kind === 'hero' && g.map.pvp === false ? 0.3 : 1) * (pvpDone ? this.p.pvpDoneDmg : 1);
+          // ainda sem Missão do mapa: ferir Herói sem chance real de matar vale pouco (primeiro as Missões do mapa)
+          const speculative = t.kind === 'hero' && killP < 0.4 && !t.tokens.some(x => x.type === 'missao') && this.needPve(g, guild.id);
+          const dmgWeight = (t.kind === 'hero' && g.map.pvp === false ? 0.3 * this.p.peace : 1) * (pvpDone ? this.p.pvpDoneDmg : 1) * (speculative ? this.p.pveFirst : 1);
           const ab = g.ab(h);
           const selfHeal = def.fx.drain || (ab === 'ritual_sangue' && def.magic) || (ab === 'lamina_sugadora' && ['Espada', 'Machado', 'Lança'].includes(def.group))
             || (ab === 'devorar' && killP > 0.3);
-          const value = Math.min(exp, rem) * (1 + this.aggr) * dmgWeight + progress + killP * killBonus - retaliation - deathRisk + (selfHeal ? Math.min(exp, h.wounds) * 0.6 : 0);
-          if (!best || value > best.value) best = { card, target: t, value, boosts };
+          const lfDmg = t.kind === 'hero' ? this.leaderFactor(g, guild.id, t.guild!) : 1;
+          const value = Math.min(exp, rem) * (1 + this.aggr) * dmgWeight * lfDmg + progress + killP * killBonus - retaliation - deathRisk + (selfHeal ? Math.min(exp, h.wounds) * 0.6 : 0) - selfCost;
+          if (!best || value > best.value) best = { card, target: t, value, boosts, killP };
         }
       }
     } finally {
       h.cell = saved;
     }
     return best;
+  }
+
+  /** Cautela com Reações de Alerta. No Confronto Final (1 Missão decide: matar o chefe cercado de Monstros)
+   *  a cautela atrapalha — ninguém encara o chefe e a partida trava —, então fica bem menor. */
+  private riskW(g: Game) { return g.s.missionsToWin <= 1 ? Math.min(this.p.riskW, 1.4) : this.p.riskW; }
+  private stayW(g: Game) { return g.s.missionsToWin <= 1 ? 0 : this.p.stayW; }
+
+  /** Alerta de terminar em `c` (para o próximo turno): o Monstro-alvo de uma Missão não conta (ficar colado nele é o objetivo)
+   *  e, se houver um alvo de Missão ali, os outros pesam menos (ex.: Lorde Presas cercado pelas Irmãs no Templo). */
+  private stayRisk(g: Game, h: Unit, c: Cell): number {
+    const guild = h.guild!;
+    const targets = new Set(g.s.missions.filter(mi => (mi.rule === 'kill_type' || mi.rule === 'summon') && !this.done(g, guild, mi)).flatMap(mi => mi.types ?? []));
+    const near = g.monstersCloseTo(c);
+    const hasTarget = near.some(m => targets.has(m.defId.replace(/\d+$/, '')));
+    let r = 0;
+    for (const m of near) {
+      if (targets.has(m.defId.replace(/\d+$/, ''))) continue;
+      const md = MONSTERS[m.defId];
+      r += Math.max(0.15, md.dice * ATK_EXP(md.attackType) - g.defenseDice(h) * DEF_EXP);
+    }
+    return hasTarget ? r * 0.4 : r;
   }
 
   /** Dano esperado das Reações de Alerta ao sair de `c`. */
@@ -483,9 +664,9 @@ export class OldAI {
         if (!g.missionTokenWanted(h.guild!, t)) continue;
         const m = g.tokenMission(t);
         if (m?.rule === 'summon') { v += g.maxHp(h) - h.wounds >= 3 ? 5 : 1; continue; }
-        v += this.p.missionTok;
+        v += this.p.missionTok + (this.needPve(g, h.guild!) ? 4 : 0);
       } else if (!t.faceUp && deadly) v -= this.hard ? 8 : 2; // Templo: Armadilha mata
-      else v += 1.3 + (t.faceUp ? 0 : this.hiddenChance(g) * this.p.missionTok * this.p.hiddenW);
+      else v += 1.3 + (t.faceUp ? 0 : this.hiddenChance(g) * this.p.missionTok * this.p.hiddenW + (this.curMode === 'heal' ? 3.5 : 0));
     }
     return v;
   }
@@ -600,7 +781,7 @@ export class OldAI {
   }
 
   /** Mapa de distâncias até os objetivos da Guilda (Missões, marcadores, Monstros-alvo). `hero`: objetivos de quem carrega escolta. */
-  goalDistances(g: Game, guildId: GuildId, hero?: Unit): Map<string, number> {
+  goalDistances(g: Game, guildId: GuildId, hero?: Unit, mode?: 'heal' | 'sac'): Map<string, number> {
     const dist = new Map<string, number>();
     const q: { c: Cell; d: number }[] = [];
     const push = (c: Cell, d: number) => {
@@ -615,6 +796,12 @@ export class OldAI {
     const esc = hero?.tokens.find(t => t.type === 'missao' && g.tokenMission(t)?.rule === 'escort');
     if (esc) {
       for (const c of g.escortTargets(g.tokenMission(esc)!, guildId)) push(c, -10);
+    } else if (mode === 'heal') {
+      // pouca Vida e sem objetivo perto: os marcadores virados ("?") podem ser Cura
+      for (const [k, toks] of Object.entries(g.s.floor)) if (toks.some(t => !t.faceUp)) push(parseKey(k), -4);
+    } else if (mode === 'sac') {
+      // sem "?" no mapa: se for cair, que seja nos Monstros
+      for (const u of g.onBoard()) if (u.kind === 'monster') for (const n of near(g, u.cell!)) push(n, -3);
     } else {
       for (const [k, toks] of Object.entries(g.s.floor)) {
         const [c, r] = k.split(',').map(Number);
@@ -633,7 +820,7 @@ export class OldAI {
               if (!on && !this.done(g, guildId, m)) push({ c, r }, -2);
               continue;
             }
-            push({ c, r }, -3);
+            push({ c, r }, this.needPve(g, guildId) ? -5 : -3);
             continue;
           }
           const deadly = g.map.deadlyTokens && !(g.map.fireProtectTitle && g.hasTitle(guildId, g.map.fireProtectTitle));
@@ -648,7 +835,7 @@ export class OldAI {
       if (g.map.hideout && g.map.lockTitle && !g.s.hideoutTaken && g.hasTitle(guildId, g.map.lockTitle)) for (const c of g.map.hideout.cells) push(c, -3);
       // Monstros-alvo de Missão puxam a Guilda com força
       const collectPending = g.s.missions.some(mi => ['collect_any', 'collect_own', 'escort', 'arena'].includes(mi.rule ?? '') && !this.done(g, guildId, mi));
-      const pull = collectPending ? -1 : -6;
+      const pull = collectPending ? (this.needPve(g, guildId) ? -2.5 : -1) : -6;
       const targets = new Set(g.s.missions.filter(mi => (mi.rule === 'kill_type' || mi.rule === 'summon') && !this.done(g, guildId, mi)).flatMap(mi => mi.types ?? []));
       const barrierClosed = !!g.map.barrier && !!someone && !g.passesBarrier(someone);
       for (const u of g.onBoard()) {
@@ -656,11 +843,17 @@ export class OldAI {
         // Templo com a barreira fechada: Monstros = moedas
         if (u.kind === 'monster') for (const n of near(g, u.cell!)) push(n, barrierClosed ? -1.5 : 0.5);
         if (u.kind === 'hero' && u.guild !== guildId) {
-          const weak = g.maxHp(u) - u.wounds <= 2 || u.tokens.some(t => t.type === 'missao');
-          // Missão contra essa Guilda já cumprida: os Heróis dela só atraem se carregam marcador de Missão
+          const dying = g.maxHp(u) - u.wounds <= 2;
+          const carrier = u.tokens.some(t => t.type === 'missao');
+          const weak = dying || carrier;
+          // Missão contra essa Guilda já cumprida: os Heróis dela só atraem se carregam marcador de Missão (ou estão quase morrendo: kill à mão)
           const pvpOpen = g.s.missions.some(m => m.id === `matar_${u.guild}`) && !g.guild(guildId).missions.includes(`matar_${u.guild}`);
-          if (!pvpOpen && !u.tokens.some(t => t.type === 'missao') && !this.p.pvpDoneAttract) continue;
-          for (const n of near(g, u.cell!)) push(n, this.hard && weak ? -1 : 0.3);
+          // ainda sem Missão do mapa: só atraem os feridos e quem carrega marcador — o resto é perder movimento
+          if (!weak && this.needPve(g, guildId)) continue;
+          if (!pvpOpen && !carrier && !(dying && g.map.pvp !== false) && !this.p.pvpDoneAttract) continue;
+          // alianças temporárias: os Heróis de quem está ganhando atraem; os de quem está atrás, não
+          const lead = this.leaderFactor(g, guildId, u.guild!);
+          for (const n of near(g, u.cell!)) push(n, dying && g.map.pvp !== false ? -2.2 : lead >= 1.4 ? (weak ? -2 : -0.5) : this.hard && weak ? -1 : 0.3);
         }
       }
     }
@@ -706,7 +899,8 @@ export class OldAI {
   /** Descanso: onde cada morto ressuscita — sempre até 2 no Espaço da porta; o Difícil também usa Aliados à frente. */
   restOptions(g: Game, guild: GuildId): RestOptions | undefined {
     const dead = g.heroesOf(guild).filter(h => !h.alive);
-    if (!dead.length) return undefined;
+    const tokens = this.restTokens(g, guild);
+    if (!dead.length) return tokens ? { tokens } : undefined;
     const goals = this.goalDistances(g, guild);
     const load = new Map<string, number>();
     const count = (c: Cell) => g.unitsAt(c).length + (load.get(key(c)) ?? 0);
@@ -723,7 +917,30 @@ export class OldAI {
       out[h.id] = { ...pick };
       load.set(key(pick), (load.get(key(pick)) ?? 0) + 1);
     }
-    return { resurrect: out };
+    return { resurrect: out, ...(tokens ? { tokens } : {}) };
+  }
+
+  /** Descanso: reorganiza os marcadores (não de Missão) — Baús de Tesouro e Revigorante com o Herói mais seguro
+   *  (mais Vida, longe dos Inimigos), a Cura com o mais ferido. Assim não se perde nada se alguém morrer. */
+  private restTokens(g: Game, guild: GuildId): Record<string, string[]> | undefined {
+    const heroes = g.heroesOf(guild);
+    const all = heroes.flatMap(h => h.tokens.filter(t => t.type !== 'missao'));
+    if (all.length < 1 || heroes.length < 2) return undefined;
+    const canHold = heroes.filter(h => h.alive || g.resurrectCells(h).length);
+    if (!canHold.length) return undefined;
+    // morto ressuscita com a Vida cheia (Descanso); vivo fica com os Ferimentos
+    const hpAfter = (h: Unit) => h.alive ? g.maxHp(h) - h.wounds : g.maxHp(h);
+    const safety = (h: Unit) => hpAfter(h) + g.defenseDice(h) * 0.5 - (h.alive && h.cell ? this.heroThreatDmg(g, h, h.cell) * 0.7 : 0);
+    const safest = canHold.slice().sort((a, b) => safety(b) - safety(a))[0];
+    const wounded = canHold.filter(h => h.alive && h.wounds > 0).sort((a, b) => b.wounds - a.wounds)[0];
+    const out: Record<string, string[]> = Object.fromEntries(heroes.map(h => [h.id, [] as string[]]));
+    for (const t of all) {
+      const to = t.type === 'cura' && wounded ? wounded : safest;
+      out[to.id].push(t.id);
+    }
+    // nada mudou: não precisa reorganizar
+    const same = heroes.every(h => JSON.stringify(h.tokens.filter(t => t.type !== 'missao').map(t => t.id).sort()) === JSON.stringify(out[h.id].slice().sort()));
+    return same ? undefined : out;
   }
 }
 
@@ -753,7 +970,7 @@ export function pickHero(hand: string[], have: string[], level: AILevel, rnd: ()
     if (!have.some(x => RANGED.has(x)) && RANGED.has(h)) s += level === 'hard' ? 1.5 : 0.8;
     if (!have.some(x => TANK.has(x)) && TANK.has(h)) s += level === 'hard' ? 1.2 : 0.6;
     if (have.filter(x => RANGED.has(x)).length >= 2 && RANGED.has(h)) s -= 1;
-    return s + (rnd() - 0.5) * (level === 'hard' ? 0.4 : 2.5);
+    return s + (rnd() - 0.5) * (level === 'hard' ? 0.3 : 0.9);
   };
   return hand.slice().sort((a, b) => score(b) - score(a))[0];
 }

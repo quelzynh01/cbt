@@ -87,6 +87,7 @@ sh tools/tests/run-engine.sh bencao        # Bênção: o Aliado não troca de v
 sh tools/tests/run-engine.sh curairma      # Irmã do Prazer/Lorde: ✷ cura 2 antes da retribuição (Espetado/Amuleto); dano além da Vida conta; vive só com Vida >= 1
 sh tools/tests/run-engine.sh aiitems       # IA: poções no fim da ativação e Baús/poções com o Herói mais seguro no Descanso
 sh tools/tests/run-engine.sh duel 6       # IA nova x IA antiga (tools/tests/engine/ai_old.ts = IA do commit anterior), partidas espelhadas; P={...} muda os pesos
+sh tools/tests/run-engine.sh diag 4        # IA x IA nos mapas Clássicos com PvP: Ferimentos por origem (Vingança/Alerta/Heróis), ataques em Herói antes da 1ª Missão PvE, turno da 1ª PvE, ataques em Monstro que não matam; por mapa (P={...}, MAP=id)
 sh tools/tests/run-engine.sh xsim 30 mix   # partidas IA x IA nos mapas Clássicos (mix|core|extra; MAP=id, SEED=n repete uma, BTG=1 inclui Beyond, V=1 detalha) -> 0 travadas/0 erros
 sh tools/tests/run-engine.sh camp 20       # CAMPANHA INTEIRA só de IAs (6 cenários + Fase de Melhorias): estatísticas do Templo (barreira, mortes por causa, kit). Duelo A x B: PA/PB={params da IA}, OLDB=buy (B compra do jeito antigo), SEEDOFF=n, TR=1 (linha do tempo do Templo); some os "DUELO" de vários processos com sh tools/tests/ab_merge.sh .out/ab/x_*.txt (precisa de ~480 campanhas por lado para ±2%)
 ALL=1 sh tools/tests/run-engine.sh reach2  # alcance de todos os mapas       -> "TODOS OS MAPAS OK"
