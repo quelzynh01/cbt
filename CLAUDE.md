@@ -112,7 +112,7 @@ node tools/tests/browser/trollsounds.mjs                            # Mansão: e
 node tools/tests/browser/feralspot.mjs <pasta-prints>               # Viveiro: Ferais Marteladores na ponta do Espaço (fora do portal); quem chega pelo portal fica de frente para ele
 node tools/tests/browser/bossmark.mjs <pasta-prints>               # círculo de invocação (giz) no chão onde os chefes surgem
 node tools/tests/browser/markvis.mjs <pasta-prints>                # círculo some quando o chefe surge e volta quando ele morre; aura das Irmãs no Alquimista
-node tools/tests/browser/vapordodge.mjs <pasta-prints>              # Vapor perto de 2 Monstros: pergunta a cada Reação (Esquivar / Não esquivar / Cancelar movimento)
+node tools/tests/browser/vapordodge.mjs <pasta-prints>              # Vapor perto de 2 Monstros: antes de sair do Espaço pergunta a cada Reação (Esquivar / Não esquivar / Cancelar = parar aqui)
 node tools/tests/browser/alertwarn.mjs <pasta-prints>               # Templo: aviso de Reação de Alerta (Irmãs) aparece antes de andar
 node tools/tests/browser/rratk.mjs <pasta-prints>                   # online: Rerrolagem do ATAQUE do amigo acompanhada no painel de dados
 ```

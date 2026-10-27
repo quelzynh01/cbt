@@ -454,7 +454,7 @@ export class Controller {
         <div class="mc-body">
           <p>${req.text ?? ''}</p>
           ${req.faces ? `<p class="mc-legend">Dados: ${req.faces.map(f => ({ crit: '✷', melee: '⚔', ranged: '➶', shield: '⛨', blank: '–' } as Record<string, string>)[f]).join(' ')}</p>` : ''}
-          <div class="mc-btns">${req.keep ? `<button class="primary" id="ch-none">${req.no ?? 'Não'}</button><button data-i="0">${req.yes ?? 'Sim'}</button>` : `<button class="primary" data-i="0">${req.yes ?? 'Sim'}</button><button id="ch-none">${req.no ?? 'Não'}</button>`}${req.cancel ? '<button id="ch-cancel">✕ Cancelar movimento</button>' : ''}</div>
+          <div class="mc-btns">${req.keep ? `<button class="primary" id="ch-none">${req.no ?? 'Não'}</button><button data-i="0">${req.yes ?? 'Sim'}</button>` : `<button class="primary" data-i="0">${req.yes ?? 'Sim'}</button><button id="ch-none">${req.no ?? 'Não'}</button>`}${req.cancel ? '<button data-i="1" id="ch-stop">✕ Cancelar (parar aqui)</button>' : ''}</div>
         </div>`;
       this.hud.setHint(`${req.source}: ${req.yes ? `${req.yes} ou ${req.no}` : 'escolha Sim ou Não'}`);
     } else if (req.choice === 'reward') {

@@ -81,4 +81,39 @@ const sameStep = (n: number) => {
   const second = reacted(g).length;
   check(first === 1 && second === 2 && (g.s.stealthUsed ?? []).includes(v.id), `IA: esquivou da 1ª de 2 (${first} veio); depois sem esquiva (${second})`);
 }
+{
+  // Parar aqui: no 1º aviso não sai do lugar (o movimento nem conta); no meio do caminho fica onde está, com o que já tomou
+  const mkPath = () => {
+    const { g, v, mons } = base();
+    let plan: { A: { c: number; r: number }; B: { c: number; r: number }; C: { c: number; r: number } } | null = null;
+    for (const A of g.board.allCells().filter(c => free(g, c) && !g.board.portalAt(c))) {
+      for (const B of g.board.neighbors(A).filter(x => g.board.isClose(A, x) && free(g, x) && !g.board.portalAt(x))) {
+        const C = g.board.neighbors(B).find(x => g.board.isClose(B, x) && free(g, x) && !g.board.portalAt(x) && !(x.c === A.c && x.r === A.r));
+        if (C) { plan = { A, B, C }; break; }
+      }
+      if (plan) break;
+    }
+    const m = mons[0]; m.cell = { ...plan!.B }; m.alive = true;
+    v.cell = { ...plan!.A };
+    g.activate(v.id); g.s.activation!.mp = 2;
+    return { g, v, plan: plan! };
+  };
+  {
+    const { g, v, plan } = mkPath();
+    g.choiceHook = r => r.source === 'Furtividade' ? 1 : 'auto';
+    g.drain(); g.moveTo(plan.C, false);
+    const got = reacted(g);
+    check(v.cell!.c === plan.A.c && v.cell!.r === plan.A.r && got.length === 0 && !g.s.activation!.moved && g.s.activation!.mp === 2 && !(g.s.stealthUsed ?? []).includes(v.id),
+      'parar no 1º aviso: não saiu do lugar, sem Reação, movimento não conta');
+  }
+  {
+    const { g, v, plan } = mkPath();
+    let asks = 0;
+    g.choiceHook = r => { if (r.source === 'Furtividade') { asks++; return asks === 1 ? -1 : 1; } return 'auto'; };
+    g.drain(); g.moveTo(plan.C, false);
+    const got = reacted(g);
+    check(v.cell!.c === plan.B.c && v.cell!.r === plan.B.r && got.length === 1 && g.s.activation!.mp === 1 && !(g.s.stealthUsed ?? []).includes(v.id),
+      `não esquivou a 1ª (tomou), parou na 2ª: ficou no meio do caminho com a Reação que já tomou (${got.length})`);
+  }
+}
 console.log(ok ? 'FURTIVIDADE 1X POR TURNO OK' : 'FALHOU');

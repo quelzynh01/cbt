@@ -67,7 +67,7 @@ export interface ChoiceRequest {
   no?: string;
   /** o botão "Não" (Manter) é o principal */
   keep?: boolean;
-  /** mostra "Cancelar movimento" (desfaz a jogada inteira, ex.: Furtividade do Vapor) */
+  /** mostra "Parar aqui" (resposta 1: não dá os próximos passos; o que já aconteceu fica — Furtividade do Vapor) */
   cancel?: boolean;
   guild: GuildId;
   heroId: string;
@@ -875,10 +875,13 @@ export class Game {
   }
 
   /** Furtividade: de qual Monstro esquivar (null = não esquiva, guarda para depois). IA: o que causaria mais dano. */
-  /** Furtividade: esquivar desta Reação de Alerta? (a IA esquiva da primeira) */
-  private stealthAsk(h: Unit, m: Unit): boolean {
-    return this.confirm(h, 'Furtividade', `<b>${this.name(m)}</b> vai fazer uma Reação de Alerta contra <b>${this.name(h)}</b>. Usar a Furtividade para esquivar desta Reação? <small>(1 vez por turno; se não usar agora, pergunta de novo na próxima)</small>`, true, undefined,
-      { yes: '💨 Esquivar', no: 'Não esquivar (guardar)', cancel: true });
+  /** Furtividade, antes de sair do Espaço: esquivar desta Reação, não esquivar ou parar aqui. A IA esquiva da primeira. */
+  private stealthAsk(h: Unit, m: Unit): 'dodge' | 'take' | 'stop' {
+    if (!h.guild || !this.choiceHook) return 'dodge';
+    const i = this.choiceHook({ choice: 'confirm', guild: h.guild, heroId: h.id, source: 'Furtividade',
+      text: `Se <b>${this.name(h)}</b> sair deste Espaço, <b>${this.name(m)}</b> faz uma Reação de Alerta. Usar a Furtividade para esquivar desta Reação? <small>(1 vez por turno; se não usar agora, pergunta de novo na próxima)</small>`,
+      yes: '💨 Esquivar', no: 'Não esquivar (guardar)', cancel: true });
+    return i === 'auto' || i === 0 ? 'dodge' : i === 1 ? 'stop' : 'take';
   }
 
   /** Chefes que surgem com animação quando todos terminam de posicionar: Lorde Presas; Minotauro na Arena do Sol Brilhante; os de FIRE_BOSSES (com aura de fogo). */
@@ -1091,6 +1094,8 @@ export class Game {
     const node = nodes.get(key(target));
     if (!node || !node.canEnd || node.prev === null) return false;
     const steps = this.pathTo(nodes, target);
+    const movedBefore = a.moved, blessBefore = this.s.blessing;
+    let stepped = 0;
     a.moved = true;
     if (this.s.blessing?.heroId === h.id) this.s.blessing = null;
     // último Espaço do caminho onde o Herói podia parar (se o Movimento for interrompido num Espaço cheio, volta para ele)
@@ -1109,23 +1114,36 @@ export class Game {
         // Vapor (Passos Silenciosos) não aciona Alerta ao se mover
         const near = this.monstersCloseTo(from);
         const alerters = near;
+        let stop = false;
         for (const m of alerters) {
           if (!h.alive || !h.cell) break; // morreu ou foi banido no caminho
-          // Furtividade (Vapor): a cada Reação pergunta se esquiva desta (até usar; depois, só no próximo turno)
-          if (this.ab(h) === 'furtivo' && !(this.s.stealthUsed ?? []).includes(h.id) && this.monsterCanAttack(m, h) && this.stealthAsk(h, m)) {
-            this.s.stealthUsed = [...(this.s.stealthUsed ?? []), h.id];
-            this.emit({ t: 'skill', id: h.id, skill: 'furtivo', name: 'Furtividade' });
-            this.log(`Furtividade: ${this.name(h)} esquiva da Reação de ${this.name(m)}.`);
-            continue;
+          // Furtividade (Vapor): antes de sair do Espaço, a cada Reação pergunta se esquiva desta (até usar),
+          // ou se para aqui (não dá os próximos passos; o que já aconteceu fica)
+          if (this.ab(h) === 'furtivo' && !(this.s.stealthUsed ?? []).includes(h.id) && this.monsterCanAttack(m, h)) {
+            const ans = this.stealthAsk(h, m);
+            if (ans === 'stop') { stop = true; break; }
+            if (ans === 'dodge') {
+              this.s.stealthUsed = [...(this.s.stealthUsed ?? []), h.id];
+              this.emit({ t: 'skill', id: h.id, skill: 'furtivo', name: 'Furtividade' });
+              this.log(`Furtividade: ${this.name(h)} esquiva da Reação de ${this.name(m)}.`);
+              continue;
+            }
           }
           this.emit({ t: 'reaction', monsterId: m.id, kind: 'alerta' });
           this.monsterAttack(m, h, 'alerta');
         }
         if (!h.alive || !h.cell) break; // morreu ou foi banido no caminho
+        if (stop) {
+          this.log(`${this.name(h)} parou antes de sair do Espaço.`);
+          // nem saiu do lugar: o movimento não conta (pode usar Botas/Bênção como antes)
+          if (!stepped) { a.moved = movedBefore; this.s.blessing = blessBefore; }
+          break;
+        }
       }
       // algo apareceu no caminho durante uma Reação (ex.: Necromante ergueu um Monstro): o Movimento para aqui
       if (this.status(h, st.cell) === 'blocked' || (st === steps[steps.length - 1] && this.cellLoad(st.cell, h) + this.weight(h) > 2)) break;
       a.mp -= 1;
+      stepped++;
       const fits = this.cellLoad(st.cell, h) + this.weight(h) <= 2;
       h.cell = { ...st.cell };
       if (fits) lastOk = { ...st.cell };

@@ -1,4 +1,4 @@
-// Vapor perto de 2 Monstros: a cada Reação pergunta se esquiva desta (até usar) e pode cancelar o movimento
+// Vapor perto de 2 Monstros: antes de sair do Espaço, a cada Reação pergunta Esquivar / Não esquivar / Cancelar (parar aqui)
 import puppeteer from 'puppeteer-core';
 const OUT = process.argv[2] ?? '.';
 const browser = await puppeteer.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true });
@@ -39,27 +39,32 @@ const setup = () => page.evaluate(() => {
 await setup();
 await wait(1200);
 const panel = await page.evaluate(() => [...document.querySelectorAll('.mc-btns button')].map(b => b.textContent.trim()));
+// na hora da pergunta o Vapor ainda está no Espaço de saída (também na tela)
+const atAsk = await page.evaluate(() => { const c = window.cbt, v = c.game.unit(window.__v.id), rv = c.renderer.units.get(v.id); return { cell: v.cell, view: rv.cell, start: window.__v.start }; });
 await page.screenshot({ path: `${OUT}/vapor-pergunta.png` });
-console.log('1ª Reação:', JSON.stringify(panel));
-// cancelar: volta tudo
-await page.evaluate(() => document.getElementById('ch-cancel')?.click());
+console.log('1ª Reação:', JSON.stringify(panel), 'na pergunta:', JSON.stringify(atAsk));
+// parar aqui: não sai do lugar
+await page.evaluate(() => document.getElementById('ch-stop')?.click());
 await wait(1500);
-const after = await page.evaluate(() => { const g = window.cbt.game, v = g.unit(window.__v.id); return { at: v.cell, start: window.__v.start, used: (g.s.stealthUsed ?? []).includes(v.id), wounds: v.wounds }; });
-console.log('depois de cancelar:', JSON.stringify(after));
-const okCancel = panel.some(t => /Esquivar/.test(t)) && panel.some(t => /Não esquivar/.test(t)) && panel.some(t => /Cancelar movimento/.test(t)) && after.at.c === after.start.c && after.at.r === after.start.r && !after.used && after.wounds === 0;
-// de novo: não esquiva da 1ª (toma), a 2ª pergunta de novo -> esquiva
+const after = await page.evaluate(() => { const g = window.cbt.game, v = g.unit(window.__v.id); return { at: v.cell, start: window.__v.start, used: (g.s.stealthUsed ?? []).includes(v.id), wounds: v.wounds, moved: g.s.activation?.moved }; });
+console.log('depois de parar:', JSON.stringify(after));
+const same = (a, b) => a && b && a.c === b.c && a.r === b.r;
+const okStop = panel.some(t => /Esquivar/.test(t)) && panel.some(t => /Não esquivar/.test(t)) && panel.some(t => /parar aqui/.test(t))
+  && same(atAsk.cell, atAsk.start) && same(atAsk.view, atAsk.start) && same(after.at, after.start) && !after.used && !after.moved;
+// de novo: não esquiva da 1ª (toma), na 2ª pergunta para aqui -> fica onde está, com a 1ª Reação já tomada
 await setup();
 await wait(1200);
 await page.evaluate(() => document.getElementById('ch-none')?.click());
 let asked2 = false;
 for (let i = 0; i < 60 && !asked2; i++) {
   await wait(300);
-  asked2 = await page.evaluate(() => [...document.querySelectorAll('.mc-btns button')].some(b => /Esquivar/.test(b.textContent)) && !!document.getElementById('ch-cancel'));
+  asked2 = await page.evaluate(() => !!document.getElementById('ch-stop'));
   if (!asked2) await page.evaluate(() => { const b = [...document.querySelectorAll('#dicecenter button')].find(x => /Rolar defesa|Manter|Crítico|Não usar/i.test(x.textContent)); b?.click(); });
 }
-if (asked2) await page.evaluate(() => document.querySelector('.mc-btns [data-i="0"]')?.click());
-for (let i = 0; i < 30; i++) { await wait(300); await page.evaluate(() => { const b = [...document.querySelectorAll('#dicecenter button')].find(x => /Rolar defesa|Manter|Crítico|Não usar/i.test(x.textContent)); b?.click(); }); }
-const end = await page.evaluate(() => { const g = window.cbt.game, v = g.unit(window.__v.id); return { used: (g.s.stealthUsed ?? []).includes(v.id), alive: v.alive, moved: !!v.cell && !(v.cell.c === window.__v.start.c && v.cell.r === window.__v.start.r) }; });
-console.log('2ª pergunta veio?', asked2, JSON.stringify(end));
-console.log(okCancel && asked2 && end.used && end.moved ? 'ESQUIVA E CANCELAR OK' : 'FALHOU');
+if (asked2) await page.evaluate(() => document.getElementById('ch-stop')?.click());
+for (let i = 0; i < 15; i++) { await wait(300); await page.evaluate(() => { const b = [...document.querySelectorAll('#dicecenter button')].find(x => /Rolar defesa|Manter|Crítico|Não usar/i.test(x.textContent)); b?.click(); }); }
+const end = await page.evaluate(() => { const g = window.cbt.game, v = g.unit(window.__v.id); return { at: v.cell, start: window.__v.start, used: (g.s.stealthUsed ?? []).includes(v.id), log: [...document.querySelectorAll('#log > *')].slice(0, 8).map(e => e.textContent.slice(0, 60)) }; });
+const tookOne = end.log.some(t => /Reação de Alerta|Alerta/.test(t));
+console.log('2ª pergunta veio?', asked2, JSON.stringify({ at: end.at, used: end.used, tookOne }));
+console.log(okStop && asked2 && same(end.at, end.start) && !end.used ? 'ESQUIVA E PARAR OK' : 'FALHOU');
 await browser.close();
