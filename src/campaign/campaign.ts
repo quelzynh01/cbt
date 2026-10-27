@@ -422,8 +422,8 @@ export function aiBuy(c: CampaignState, g: CGuild) {
   let coins = up.coins[g.id] ?? 0;
   const picked = up.picked[g.id]!.slice();
   let buy: string[] = [];
-  if (c.aiLevel === 'hard') {
-    // Difícil: a melhor combinação de até 3 cartas que cabe nas moedas
+  {
+    // a melhor combinação de até 3 cartas que cabe nas moedas (valor da carta × o quanto combina com os Heróis)
     const val = (id: string) => cardValue(id) * Math.max(1, ...g.heroes.map(h => cardFit(h, id)));
     let best = -1;
     const n = picked.length;
@@ -435,10 +435,8 @@ export function aiBuy(c: CampaignState, g: CGuild) {
       const v = ids.reduce((s, id) => s + val(id), 0) + (coins - cost >= 1 ? 0.3 : 0);
       if (v > best) { best = v; buy = ids; }
     }
-  } else {
-    const opts = picked.sort((a, b) => cardValue(b) / Math.max(1, CARDS[b].cost) - cardValue(a) / Math.max(1, CARDS[a].cost));
-    for (const id of opts) if (buy.length < 3 && CARDS[id].cost <= coins && cardValue(id) > 1) { buy.push(id); coins -= CARDS[id].cost; }
   }
+  void coins;
   finishBuy(c, g, buy);
   aiArrange(c, g);
 }
@@ -490,14 +488,8 @@ export function validateInventory(c: CampaignState, g: CGuild, inv: Record<strin
 function aiArrange(c: CampaignState, g: CGuild) {
   const up = c.upgrade!;
   const inv: Record<string, string[]> = Object.fromEntries(g.heroes.map(h => [h, (g.inventory[h] ?? []).slice()]));
-  const fits = (h: string, id: string) => {
-    const d = CARDS[id];
-    const ab = HEROES[h].ability;
-    if (d.magic) return ab === 'dominio_magia' || ab === 'bencao' || ab === 'magia_perfurante' ? 2 : 0;
-    if (d.group === 'Arco') return ab === 'maestria_arco' ? 2 : 0.5;
-    if (d.group === 'Espada') return ab === 'arremesso' ? 2 : 1;
-    return 1;
-  };
+  // cada carta com o Herói que melhor a aproveita (Mágica com magos, Arco com o arqueiro…)
+  const fits = (h: string, id: string) => cardFit(h, id);
   for (const id of (up.bought[g.id] ?? []).slice().sort((a, b) => cardValue(b) - cardValue(a))) {
     const heroes = g.heroes.slice().sort((a, b) => fits(b, id) - fits(a, id) || inv[a].length - inv[b].length);
     let placed = false;

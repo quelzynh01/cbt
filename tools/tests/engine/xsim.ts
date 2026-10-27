@@ -46,7 +46,7 @@ for (let r = 0; r < N; r++) for (const map of maps) {
     for (; step < 4000 && !g.s.winner; step++) {
       if (g.s.pending) { g.autoResolvePending(); continue; }
       const cur = g.currentGuild().id;
-      const ai = (ais[cur] ??= new SimpleAI(process.env.LVL === 'hard' ? 'hard' : process.env.LVL === 'normal' ? 'normal' : rnd() < 0.5 ? 'hard' : 'normal', rnd));
+      const ai = (ais[cur] ??= new SimpleAI(process.env.LVL === 'hard' ? 'hard' : process.env.LVL === 'normal' ? 'normal' : rnd() < 0.5 ? 'hard' : 'normal', rnd, JSON.parse(process.env.P ?? '{}')));
       const ta = performance.now();
       const a = ai.next(g);
       const dt = performance.now() - ta; aiMs += dt; aiCalls++; if (dt > aiMax) aiMax = dt;

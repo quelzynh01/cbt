@@ -81,6 +81,8 @@ sh tools/tests/run-engine.sh vdoor2        # Vingança: abrir/fechar portas Pert
 sh tools/tests/run-engine.sh alertas2      # Templo, Grom: todo Espaço x todo destino; nenhuma Reação de Alerta sem aviso
 sh tools/tests/run-engine.sh furtivo       # Vapor (Wisp): Furtividade 1 vez por turno, pergunta a cada Reação de Alerta se esquiva dela (até usar); IA esquiva da 1ª
 sh tools/tests/run-engine.sh irmas         # ordem de entrada sorteada: Irmãs (Alquimista) e dupla Troll + Minotauro (Pátio)
+sh tools/tests/run-engine.sh aiitems       # IA: poções no fim da ativação e Baús/poções com o Herói mais seguro no Descanso
+sh tools/tests/run-engine.sh duel 6       # IA nova x IA antiga (tools/tests/engine/ai_old.ts = IA do commit anterior), partidas espelhadas; P={...} muda os pesos
 sh tools/tests/run-engine.sh xsim 30 mix   # partidas IA x IA nos mapas Clássicos (mix|core|extra; MAP=id, SEED=n repete uma, BTG=1 inclui Beyond, V=1 detalha) -> 0 travadas/0 erros
 ALL=1 sh tools/tests/run-engine.sh reach2  # alcance de todos os mapas       -> "TODOS OS MAPAS OK"
 ```
