@@ -875,21 +875,10 @@ export class Game {
   }
 
   /** Furtividade: de qual Monstro esquivar (null = não esquiva, guarda para depois). IA: o que causaria mais dano. */
-  private stealthBest(can: Unit[]): Unit {
-    const dmg = (m: Unit) => { const md = MONSTERS[m.defId]; return md.dice * (md.attackType === 'melee' ? 0.5 : 0.34) + md.dice / 6; };
-    return can.slice().sort((a, b) => dmg(b) - dmg(a))[0];
-  }
-  private stealthPick(h: Unit, can: Unit[]): Unit | null {
-    const best = this.stealthBest(can);
-    if (can.length === 1) {
-      const ok = this.confirm(h, 'Furtividade', `<b>${this.name(h)}</b> vai sair de perto de <b>${this.name(best)}</b> e receber Reação de Alerta. Usar a Furtividade para esquivar? <small>(1 vez por turno)</small>`, true, undefined,
-        { yes: '💨 Esquivar', no: 'Não esquivar (guardar)', cancel: true });
-      return ok ? best : null;
-    }
-    if (!h.guild || !this.choiceHook) return best;
-    const i = this.choiceHook({ choice: 'extra', guild: h.guild, heroId: h.id, source: 'Furtividade', units: can.map(m => m.id), cancel: true,
-      text: `<b>${this.name(h)}</b> vai sair de perto de ${can.length} Monstros e receber ${can.length} Reações de Alerta. A Furtividade esquiva de <b>uma</b> delas (1 vez por turno) — escolha de qual:` });
-    return i === 'auto' ? best : can[i] ?? null;
+  /** Furtividade: esquivar desta Reação de Alerta? (a IA esquiva da primeira) */
+  private stealthAsk(h: Unit, m: Unit): boolean {
+    return this.confirm(h, 'Furtividade', `<b>${this.name(m)}</b> vai fazer uma Reação de Alerta contra <b>${this.name(h)}</b>. Usar a Furtividade para esquivar desta Reação? <small>(1 vez por turno; se não usar agora, pergunta de novo na próxima)</small>`, true, undefined,
+      { yes: '💨 Esquivar', no: 'Não esquivar (guardar)', cancel: true });
   }
 
   /** Chefes que surgem com animação quando todos terminam de posicionar: Lorde Presas; Minotauro na Arena do Sol Brilhante; os de FIRE_BOSSES (com aura de fogo). */
@@ -1071,15 +1060,18 @@ export class Game {
       for (const st of steps) {
         if (!st.portal) {
           h.cell = from;
-          const can = this.monstersCloseTo(from).filter(m => m.id !== dodged && this.monsterCanAttack(m, h));
-          if (stealth && !dodged && can.length) dodged = this.stealthBest(can).id;
-          for (const m of can) if (m.id !== dodged) out.push(m);
+          for (const m of this.monstersCloseTo(from)) {
+            if (!this.monsterCanAttack(m, h)) continue;
+            if (stealth && !dodged) { dodged = m.id; continue; } // a primeira Reação é esquivada
+            out.push(m);
+          }
         }
         from = st.cell;
       }
     } finally { h.cell = start; }
     return out;
   }
+
 
   /** Prévia do ataque: Monstros Perto que farão Reação de Alerta (o alvo não é um Monstro Perto). */
   attackAlertPreview(heroId: string, targetId: string, cardUid: string): Unit[] {
@@ -1103,8 +1095,6 @@ export class Game {
     if (this.s.blessing?.heroId === h.id) this.s.blessing = null;
     // último Espaço do caminho onde o Herói podia parar (se o Movimento for interrompido num Espaço cheio, volta para ele)
     let lastOk: Cell = { ...h.cell };
-    // Furtividade: o Monstro escolhido não reage durante este movimento inteiro
-    let dodged: string | null = null;
     for (const st of steps) {
       if (!h.alive || !h.cell) break; // morreu ou foi banido no caminho
       if (st.door) {
@@ -1118,21 +1108,16 @@ export class Game {
         // Reação de Alerta: sair de um Espaço Perto de um Monstro (p.19)
         // Vapor (Passos Silenciosos) não aciona Alerta ao se mover
         const near = this.monstersCloseTo(from);
-        let alerters = near.filter(m => m.id !== dodged);
-        // Furtividade (Vapor): 1 vez por turno, esquiva de UMA Reação de Alerta — o jogador escolhe qual (com mais de uma)
-        const can = alerters.filter(m => this.monsterCanAttack(m, h));
-        if (this.ab(h) === 'furtivo' && can.length && !(this.s.stealthUsed ?? []).includes(h.id)) {
-          const dodge = this.stealthPick(h, can);
-          if (dodge) {
-            this.s.stealthUsed = [...(this.s.stealthUsed ?? []), h.id];
-            dodged = dodge.id;
-            alerters = alerters.filter(m => m.id !== dodge.id);
-            this.emit({ t: 'skill', id: h.id, skill: 'furtivo', name: 'Furtividade' });
-            this.log(`Furtividade: ${this.name(h)} esquiva da Reação de ${this.name(dodge)}.`);
-          }
-        }
+        const alerters = near;
         for (const m of alerters) {
           if (!h.alive || !h.cell) break; // morreu ou foi banido no caminho
+          // Furtividade (Vapor): a cada Reação pergunta se esquiva desta (até usar; depois, só no próximo turno)
+          if (this.ab(h) === 'furtivo' && !(this.s.stealthUsed ?? []).includes(h.id) && this.monsterCanAttack(m, h) && this.stealthAsk(h, m)) {
+            this.s.stealthUsed = [...(this.s.stealthUsed ?? []), h.id];
+            this.emit({ t: 'skill', id: h.id, skill: 'furtivo', name: 'Furtividade' });
+            this.log(`Furtividade: ${this.name(h)} esquiva da Reação de ${this.name(m)}.`);
+            continue;
+          }
           this.emit({ t: 'reaction', monsterId: m.id, kind: 'alerta' });
           this.monsterAttack(m, h, 'alerta');
         }
