@@ -355,18 +355,59 @@ function startUpgrade(c: CampaignState, res: ScenarioResult) {
 /** Valor de uma carta para a IA (dados, defesa e vida por moeda). */
 export function cardValue(id: string): number {
   const d = CARDS[id];
-  return d.dice * 1.2 + (d.defBonus ?? 0) * 1.1 + (d.hpBonus ?? 0) * 1.2 + (d.rerolls ?? 0) * 0.6
-    + (d.fx.boostDice ?? 0) * 0.9 + (d.fx.critExtra ?? 0) * 0.8 + (d.fx.rawr ?? 0) + (d.fx.genesis ?? 0) * 1.5
-    + (d.fx.allClose || d.fx.extraOnCrit ? 1 : 0) + (d.partial ? -1.5 : 0);
+  const fx = d.fx;
+  // habilidades que mudam a partida (Grito de Guerra, retribuição, Escudos…) valiam 0 e a IA deixava passar
+  const skills = (fx.warCry ? 3 : 0) + (fx.retribution ? 2.5 : 0) + (fx.moonShield ? 3 : 0) + (fx.angelHeart ? 2.5 : 0) + (fx.lastStand ? 1.5 : 0)
+    + (fx.dragonHeart ? 1.5 : 0) + (fx.kingShield ? 1 + fx.kingShield * 0.5 : 0) + (fx.knightShield ? 2 : 0) + (fx.soulShield ? 2 : 0)
+    + (fx.apocalypse ? 2 : 0) + (fx.celerity ? 1 : 0) + (fx.lifesteal || fx.drain ? 1.5 : 0) + (fx.sackBones ? 1 : 0) + (fx.cleave ? 1.5 : 0)
+    + (fx.bloodCrown ? 1.5 : 0) + (fx.assassinCloak ? 1.5 : 0) + (fx.bootMove ? 1.5 : 0) + (fx.hate ? 1 : 0) + (fx.critNoDefense ? 1.5 : 0)
+    + (fx.soulseeker ? 1 : 0) + (fx.rage ? 1 : 0) + (fx.bookDead ? 1 : 0);
+  return d.dice * 1.2 + (d.defBonus ?? 0) * 1.1 + (d.hpBonus ?? 0) * 1.2 + (d.rerolls ?? 0) * 1.4
+    + (fx.boostDice ?? 0) * 0.9 + (fx.critExtra ?? 0) * 0.8 + (fx.rawr ?? 0) + (fx.genesis ?? 0) * 1.5
+    + (fx.allClose || fx.extraOnCrit ? 1 : 0) + skills + (d.partial ? -1.5 : 0);
+}
+
+/** Só para testes A/B (tools/tests/engine/camp.ts): Guildas da IA que ainda compram do jeito antigo. */
+export const AI_LAB = { oldBuy: new Set<GuildId>() };
+
+/** Dados que valem na rolagem: com o Limite de dados (8 de ataque, 6 de Defesa) o que passa disso não rende. */
+const ATK_CAP = 8, DEF_CAP = 6;
+
+/** Valor de uma carta para um Herói da Guilda, sabendo o que ele já tem e em que ponto da campanha estamos.
+ *  Os cenários ficam mais difíceis (Monstros mais fortes, Templo no fim): Vida, Defesa e Rerrolagens pesam cada vez mais;
+ *  com o Limite de dados, Defesa acima de 6 e dados de ataque acima de ~6 quase não rendem (então equilibra, não empilha). */
+function heroCardValue(c: CampaignState, g: CGuild, hero: string, id: string): number {
+  const d = CARDS[id];
+  const inv = (g.inventory[hero] ?? []).map(x => CARDS[x]).filter(Boolean);
+  const defNow = HEROES[hero].defense + inv.reduce((s, x) => s + (x.defBonus ?? 0), 0);
+  const rrNow = inv.reduce((s, x) => s + (x.rerolls ?? 0), 0);
+  const stage = Math.min(5, c.played.length);
+  const grow = 1 + 0.1 * stage;
+  const cap = !!c.diceCap;
+  const def = d.defBonus ?? 0;
+  const defEff = cap ? Math.min(def, Math.max(0, DEF_CAP - defNow)) + 0.2 * Math.max(0, def - Math.max(0, DEF_CAP - defNow)) : def;
+  const dice = d.dice;
+  const diceEff = cap ? Math.min(dice, 6) + 0.5 * Math.max(0, dice - 6) : dice;
+  // cada Rerrolagem a mais vale um pouco menos (quem já tem 3+ ganha menos com a 4ª)
+  const rrEff = (d.rerolls ?? 0) * (rrNow >= 3 ? 0.6 : 1);
+  // o que o cardValue base já contava para estes quatro itens sai, e entra a versão com contexto
+  const base = cardValue(id) - dice * 1.2 - def * 1.1 - (d.hpBonus ?? 0) * 1.2 - (d.rerolls ?? 0) * 1.4;
+  return base + diceEff * 1.2 + defEff * 1.1 * grow + (d.hpBonus ?? 0) * 1.2 * grow + rrEff * 1.4 * grow;
+}
+
+/** Quanto uma carta vale para a Guilda: o melhor Herói para ela (valor com contexto × o quanto combina; `soft` = só 40% do ajuste, IA Normal). */
+function guildBest(c: CampaignState, g: CGuild, id: string, soft = false): number {
+  const fitOf = (h: string) => { const f = Math.max(1, cardFit(h, id)); return soft ? 1 + (f - 1) * 0.4 : f; };
+  if (AI_LAB.oldBuy.has(g.id)) return cardValue(id) * Math.max(...g.heroes.map(fitOf));
+  return Math.max(...g.heroes.map(h => heroCardValue(c, g, h, id) * fitOf(h)));
 }
 
 /** Valor de uma carta para esta Guilda: força × quanto combina com o melhor Herói dela (Difícil) ou só força com acaso (Normal). */
 function guildCardValue(c: CampaignState, g: CGuild, id: string): number {
   const hard = c.aiLevel === 'hard';
-  const fit = Math.max(1, ...g.heroes.map(h => cardFit(h, id)));
   const coins = c.upgrade?.coins[g.id] ?? 0;
   const afford = CARDS[id].cost <= coins + 1 ? 1 : hard ? 0.6 : 0.9;
-  return cardValue(id) * (hard ? fit : 1 + (fit - 1) * 0.4) * afford + (hard ? 0 : (rnd(c) - 0.5) * 2.5);
+  return guildBest(c, g, id, !hard) * afford + (hard ? 0 : (rnd(c) - 0.5) * 2.5);
 }
 
 /** Cartas escolhidas por rodada na Fase de Melhorias (2, ou 1 com a regra "pegar 1") e quantas rodadas (sempre 6 cartas no fim). */
@@ -424,7 +465,7 @@ export function aiBuy(c: CampaignState, g: CGuild) {
   let buy: string[] = [];
   {
     // a melhor combinação de até 3 cartas que cabe nas moedas (valor da carta × o quanto combina com os Heróis)
-    const val = (id: string) => cardValue(id) * Math.max(1, ...g.heroes.map(h => cardFit(h, id)));
+    const val = (id: string) => guildBest(c, g, id);
     let best = -1;
     const n = picked.length;
     for (let mask = 1; mask < 1 << n; mask++) {
