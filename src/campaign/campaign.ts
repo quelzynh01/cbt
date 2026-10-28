@@ -131,7 +131,7 @@ function shuffled<T>(c: CampaignState, a: T[]): T[] {
 }
 
 // ------------------------------------------------------------------ criação
-export function newCampaign(opponents: number, name?: string, aiLevel: AILevel = 'normal', diceCap = true, pickOne = true, heroSet: HeroSet | boolean = 'core', edition: Edition = 'classic', pickMode: PickMode = 'draft'): CampaignState {
+export function newCampaign(opponents: number, name?: string, aiLevel: AILevel = 'hard', diceCap = true, pickOne = true, heroSet: HeroSet | boolean = 'core', edition: Edition = 'classic', pickMode: PickMode = 'draft'): CampaignState {
   const hs: HeroSet = heroSet === true ? 'all' : heroSet === false ? 'core' : heroSet;
   const ids: GuildId[] = ['azul', 'vermelho', 'verde', 'laranja'];
   const c: CampaignState = { version: 1, guilds: [], played: [], chooser: 'azul', phase: 'setup', seed: (Date.now() ^ (Math.random() * 1e9)) | 0, elapsed: 0, aiLevel, diceCap, ...(pickOne ? { pickOne } : {}), ...(hs !== 'core' ? { heroSet: hs } : {}), ...(edition !== 'classic' ? { edition } : {}) };
@@ -178,7 +178,7 @@ export function allPickHeroes(c: CampaignState, ids: string[]): boolean {
     g.heroes = [];
     for (let k = 0; k < 3; k++) {
       const left = shuffled(c, pool.filter(h => !taken.has(h)));
-      const h = pickHero(left, g.heroes, c.aiLevel ?? 'normal', () => rnd(c));
+      const h = pickHero(left, g.heroes, c.aiLevel ?? 'hard', () => rnd(c));
       if (!h) break;
       g.heroes.push(h);
       taken.add(h);
@@ -194,7 +194,7 @@ export function draftHero(c: CampaignState, heroId: string) {
   const st = c.setup!;
   for (const g of c.guilds) {
     const hand = st.hands[g.id]!;
-    const pick = g.controller === 'human' ? heroId : pickHero(hand, g.heroes, c.aiLevel ?? 'normal', () => rnd(c));
+    const pick = g.controller === 'human' ? heroId : pickHero(hand, g.heroes, c.aiLevel ?? 'hard', () => rnd(c));
     const i = hand.indexOf(pick);
     if (i < 0) continue;
     hand.splice(i, 1);
@@ -402,12 +402,11 @@ function guildBest(c: CampaignState, g: CGuild, id: string, soft = false): numbe
   return Math.max(...g.heroes.map(h => heroCardValue(c, g, h, id) * fitOf(h)));
 }
 
-/** Valor de uma carta para esta Guilda: força × quanto combina com o melhor Herói dela (Difícil) ou só força com acaso (Normal). */
+/** Valor de uma carta para esta Guilda: força × quanto combina com o melhor Herói dela (IA Difícil, a única). */
 function guildCardValue(c: CampaignState, g: CGuild, id: string): number {
-  const hard = c.aiLevel === 'hard';
   const coins = c.upgrade?.coins[g.id] ?? 0;
-  const afford = CARDS[id].cost <= coins + 1 ? 1 : hard ? 0.6 : 0.9;
-  return guildBest(c, g, id, !hard) * afford + (hard ? 0 : (rnd(c) - 0.5) * 2.5);
+  const afford = CARDS[id].cost <= coins + 1 ? 1 : 0.6;
+  return guildBest(c, g, id) * afford;
 }
 
 /** Cartas escolhidas por rodada na Fase de Melhorias (2, ou 1 com a regra "pegar 1") e quantas rodadas (sempre 6 cartas no fim). */

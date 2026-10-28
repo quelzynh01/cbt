@@ -214,6 +214,8 @@ export interface GameState {
   rewardDeck: string[];
   /** Baralho de Maldições Mortais da partida (Confronto Final: Maldição a cada morte). */
   curseDeck?: string[];
+  /** Mortes de cada Herói nesta partida (Confronto Final: a N-ésima morte compra N Maldições). */
+  curseDeaths?: Record<string, number>;
   missionsToWin: number;
   winner: GuildId | null;
   turn: number;
@@ -322,7 +324,8 @@ export type GameEvent =
   | { t: 'title'; guild: GuildId; title: string; name: string }
   /** Carta de Recompensa recebida (mostrada para todos). */
   /** Confronto Final: o Herói que morreu comprou uma Maldição; `kept` é a que ficou com ele. */
-  | { t: 'curseDraw'; heroId: string; card: string; old?: string; kept: string }
+  /** card = a maior das compradas; drawn = todas (a N-ésima morte no mapa compra N). */
+  | { t: 'curseDraw'; heroId: string; card: string; drawn?: string[]; old?: string; kept: string }
   | { t: 'reward'; heroId: string; cardId: string; /** ficou com as cartas sem Herói (inventário cheio) */ spare?: boolean; /** de onde veio (padrão: Carta de Recompensa) */ source?: string }
   /** Habilidade Natural ativada (Furtividade do Vapor, Vingança do Espetado…). */
   | { t: 'skill'; id: string; skill: string; name: string }

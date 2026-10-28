@@ -4,11 +4,10 @@ import type { Game, RestOptions } from '../engine/game';
 import type { CardInst, Cell, GuildId, MissionDef, Token, Unit } from '../engine/types';
 
 // IA das Guildas. Decide uma ação por vez (o controlador anima entre elas).
-// Dois níveis:
-//  - NORMAL: heurística direta, com um pouco de acaso nas escolhas (dá para vencer aprendendo o jogo).
-//  - DIFÍCIL: sem acaso, lê as ameaças dos Heróis inimigos, usa poções na hora certa, caça quem carrega
-//    marcadores de Missão, evita Armadilhas mortais e escolhe melhor onde ressuscitar.
+// Um nível só (Difícil): sem acaso, lê as ameaças dos Heróis inimigos, usa poções na hora certa, caça quem carrega
+// marcadores de Missão, evita Armadilhas mortais e escolhe melhor onde ressuscitar.
 
+/** 'normal' só existe em campanhas/configurações salvas antes: hoje toda IA joga no Difícil. */
 export type AILevel = 'normal' | 'hard';
 
 /** Pesos da IA. Os valores padrão vêm de simulações (IA x IA em todos os mapas): menos rodadas por partida
@@ -57,9 +56,15 @@ export interface AIParams {
   chip: number;
   /** Vingança só de quem alcança o Herói (Monstro corpo a corpo longe demais não se vinga). */
   reach: boolean;
+  /** Sem Missão do mapa: chance de matar a partir da qual atacar Herói é "boa oportunidade". */
+  goodKill: number;
+  /** Sem Missão do mapa: fração do bônus de matar Herói fora de uma boa oportunidade. */
+  pvpEarly: number;
+  /** Sem Missão do mapa: até que distância um Herói Inimigo ferido atrai a IA. */
+  chaseDist: number;
 }
 export const AI_PARAMS: AIParams = { pvpDoneKill: 1, pvpDoneDmg: 0.7, pvpDoneAttract: false, posW: 0.6, missionTok: 9, idleStart: 0, guardKill: 2, hiddenW: 3, denyW: 1, denyUrgentOnly: false,
-  riskW: 2.6, stayW: 0.8, pvpNeedPve: 1, leaderHi: 1.4, leaderLo: 0.6, pveFirst: 0.3, finisher: 4, winKill: 25, peace: 0.2, rush: 3, chip: 1, reach: true };
+  riskW: 2.6, stayW: 0.8, pvpNeedPve: 1, leaderHi: 1.4, leaderLo: 0.6, pveFirst: 0.3, finisher: 4, winKill: 25, peace: 0.2, rush: 3, chip: 1, reach: true, goodKill: 0.5, pvpEarly: 0.3, chaseDist: 5 };
 
 export type AIAction =
   | { type: 'activate'; heroId: string }
@@ -135,13 +140,16 @@ export class SimpleAI {
 
   /** Pesos da IA (ajustados por simulação: tools/sim — ver AI_PARAMS). */
   readonly p: AIParams;
-  constructor(readonly level: AILevel = 'normal', private rnd: () => number = Math.random, params: Partial<AIParams> = {}) {
+  /** Sempre Difícil (o nível recebido é ignorado: o Normal saiu do jogo). */
+  readonly level: AILevel = 'hard';
+  constructor(_level: AILevel = 'hard', private rnd: () => number = Math.random, params: Partial<AIParams> = {}) {
     this.p = { ...AI_PARAMS, ...params };
   }
 
   private get hard() { return this.level === 'hard'; }
-  /** Acaso do nível Normal (o Difícil sempre escolhe o melhor). */
-  private noise(scale = 1) { return this.hard ? 0 : (this.rnd() - 0.5) * 1.4 * scale; }
+  /** Acaso nas escolhas: só numa partida travada (muitos turnos sem progresso, ex.: o Lorde Presas cercado e todos fracos demais),
+   *  para não repetir o mesmo vai e volta para sempre. Fora disso escolhe sempre o melhor. */
+  private noise(scale = 1) { return this.hard && this.idle < 20 ? 0 : (this.rnd() - 0.5) * 1.4 * scale; }
 
   next(g: Game): AIAction {
     if (g.s.puppet) return this.puppet(g);
@@ -151,7 +159,8 @@ export class SimpleAI {
       this.usedToken = false;
       this.endTokens = 0;
       const plan = this.plan(g);
-      if (!plan) return { type: 'rest', opts: this.restOptions(g, g.currentGuild().id) };
+      // turno adicional (Poção): não dá para Descansar
+      if (!plan) return g.s.extraTurnOn ? { type: 'end' } : { type: 'rest', opts: this.restOptions(g, g.currentGuild().id) };
       this.queue = plan.steps.slice();
       return { type: 'activate', heroId: plan.heroId };
     }
@@ -241,7 +250,6 @@ export class SimpleAI {
     for (const t of h.tokens) {
       if (t.type === 'cura' && h.wounds > 0 && (this.hard ? h.wounds >= 2 || hp <= 2 : hp <= 1)) return t;
       if (t.type === 'revigorante' && attackCards.length && (this.hard ? exhausted >= Math.min(2, attackCards.length) : exhausted === attackCards.length)) return t;
-      if (t.type === 'turno' && !g.s.extraTurn && !g.s.extraTurnOn && (this.hard ? hp >= 2 : true)) return t;
     }
     return null;
   }
@@ -259,6 +267,9 @@ export class SimpleAI {
       if (t.type === 'cura' && h.wounds > 0 && (h.wounds >= 2 || hp <= 2 || dying)) return t;
       if (t.type === 'revigorante' && exhausted > 0 && (exhausted >= Math.min(2, attackCards.length) || dying || attackCards.some(c => c.exhausted && CARDS[c.defId].magic))) return t;
     }
+    // Turno Adicional: depois que este Herói já jogou (bebida no começo, ele perderia a própria ativação), outro Herói joga
+    const turno = h.tokens.find(t => t.type === 'turno');
+    if (turno && !g.s.extraTurn && !g.s.extraTurnOn && g.heroesOf(h.guild!).some(x => x.id !== h.id && x.alive && x.cell)) return turno;
     return null;
   }
 
@@ -319,11 +330,22 @@ export class SimpleAI {
     return threatened ? 'sac' : null;
   }
 
-  /** A Guilda ainda precisa de uma Missão do mapa (contra o Jogo): ela vale mais que brigar. */
+  /** Foco nas Missões do mapa (contra o Jogo): valem mais que brigar enquanto a Guilda não tem nenhuma, ou enquanto
+   *  há uma aberta que ainda dá prêmio (Recompensa ou Título: ajudam o resto da campanha e os jogadores correm atrás).
+   *  A 1 Missão da vitória (e já com uma do mapa), qualquer Missão serve: vale a mais rápida, até a kill. */
   private needPve(g: Game, guild: GuildId): boolean {
     const gs = g.guild(guild);
+    const open = g.s.missions.filter(m => m.kind === 'pve' && !this.done(g, guild, m));
+    if (!open.length) return false;
     const pveDone = gs.missions.filter(id => g.s.missions.find(m => m.id === id)?.kind === 'pve').length;
-    return pveDone === 0 && g.s.missions.some(m => m.kind === 'pve' && !this.done(g, guild, m));
+    if (pveDone === 0) return true;
+    if (gs.missions.length + 1 >= g.s.missionsToWin) return false;
+    return open.some(m => this.pvePrize(g, m));
+  }
+
+  /** A Missão do mapa ainda dá prêmio: carta de Recompensa no baralho ou Título que ainda não saiu. */
+  private pvePrize(g: Game, m: MissionDef): boolean {
+    return (!!m.reward && g.s.rewardDeck.length > 0) || (!!m.title && (!m.titleFirstOnly || !(g.s.missionDone[m.id]?.length)));
   }
 
   // ------------------------------------------------------------------ plano do turno
@@ -343,6 +365,8 @@ export class SimpleAI {
     let best: Plan | null = null;
     for (const h of heroes) {
       if (!h.alive || !h.cell) continue;
+      // turno adicional: quem usou a Poção não joga nele
+      if (g.s.extraTurnOn && h.id === g.s.extraHero) continue;
       this.curMode = this.lowHpMode(g, h);
       const p = this.planHero(g, h, this.goalDistances(g, guild.id, h, this.curMode ?? undefined));
       if (p) p.value += this.noise();
@@ -352,6 +376,7 @@ export class SimpleAI {
     const usableAttack = heroes.some(h => h.alive && h.cards.some(c => !c.exhausted && g.isAttackCard(c)));
     const exhaustedCount = heroes.reduce((s, h) => s + h.cards.filter(c => c.exhausted).length, 0);
     if (!best) return null;
+    if (g.s.extraTurnOn) return best; // sem Descanso no turno adicional: joga o melhor Herói que sobrou
     // Descansar: ressuscita os mortos e restaura as cartas
     const restBias = (this.hard ? 0.5 : 0) - this.aggr;
     if (dead > 0 && best.value < 2.5 + restBias + dead * (this.hard ? 0.8 : 0)) return null;
@@ -368,6 +393,7 @@ export class SimpleAI {
     const hp = g.maxHp(h) - h.wounds;
     let best: Plan | null = null;
     const consider = (value: number, steps: AIAction[]) => {
+      value += this.noise(); // partida travada: varia o caminho
       if (!best || value > best.value) best = { heroId: h.id, value, steps };
     };
     const startCell = h.cell!;
@@ -538,6 +564,7 @@ export class SimpleAI {
     h.cell = from;
     const guild = g.guild(h.guild!);
     const barrierClosed = !!g.map.barrier && !g.passesBarrier(h);
+    const needPve = this.needPve(g, guild.id);
     try {
       for (const card of g.usableCards(h)) {
         if (card.exhausted) continue;
@@ -567,6 +594,7 @@ export class SimpleAI {
           let retaliation = 0;
           let progress = 0;
           let winP = 0;
+          let earlyPvp = false;
           if (t.kind === 'monster') {
             const md = MONSTERS[t.defId];
             const base = t.defId.replace(/\d+$/, '');
@@ -595,7 +623,7 @@ export class SimpleAI {
             // (+1.5: a moeda da morte e o adversário perdendo o turno para descansar — só onde há Missão contra Jogador:
             // no Templo brigar entre Guildas só gasta Heróis, a corrida é pelo Lorde Presas)
             const noPvp = g.map.pvp === false;
-            killBonus = (noPvp ? this.p.peace : 3.5) + (pvpOpen ? (this.needPve(g, guild.id) ? this.p.pvpNeedPve : 5) : 0);
+            killBonus = (noPvp ? this.p.peace : 3.5) + (pvpOpen ? (needPve ? this.p.pvpNeedPve : 5) : 0);
             // alianças temporárias: derrubar quem está ganhando vale mais; quem está atrás, menos — mas uma morte quase certa não se deixa passar
             const lf = this.leaderFactor(g, guild.id, t.guild!);
             killBonus *= killP >= 0.6 && !noPvp ? Math.max(lf, 1) : lf;
@@ -609,6 +637,8 @@ export class SimpleAI {
             // está quase cumprindo uma Missão (Arena, escolta, Tomos, marcador): derrubá-lo atrapalha
             const thr = this.denyW() * (this.threats(g, h.guild!).heroes.get(t.id) ?? 0);
             if (thr) { killBonus += thr; progress += Math.min(exp, rem) * thr * 0.25; }
+            // ainda sem Missão do mapa: PvP só numa boa oportunidade (morte provável, quem carrega marcador, quem está quase cumprindo)
+            if (needPve && !noPvp && killP < this.p.goodKill && !carrier && !thr) { earlyPvp = true; killBonus *= this.p.pvpEarly; }
           }
           const targetsCloseMonster = t.kind === 'monster' && g.board.isClose(t.cell!, from);
           if (!targetsCloseMonster) retaliation += this.alertRisk(g, h, from);
@@ -617,10 +647,11 @@ export class SimpleAI {
           const sacMonster = this.curMode === 'sac' && t.kind === 'monster';
           const deathRisk = retaliation >= hp && !sacMonster ? 5 * (1 - 0.6 * this.aggr) * (1 - winP) : 0;
           retaliation *= (1 - 0.5 * this.aggr) * (sacMonster ? 0.3 : 1) * (1 - 0.8 * winP);
-          killBonus *= 1 + this.aggr;
+          // partida parada: arrisca mais — mas sem Missão do mapa a saída é a Missão, não correr atrás de kill
+          killBonus *= 1 + (t.kind === 'hero' && needPve && g.map.pvp !== false ? 0 : this.aggr);
           // sem Missões contra Jogador (Templo): brigar com Heróis só vale para abrir caminho
           // ainda sem Missão do mapa: ferir Herói sem chance real de matar vale pouco (primeiro as Missões do mapa)
-          const speculative = t.kind === 'hero' && killP < 0.4 && !t.tokens.some(x => x.type === 'missao') && this.needPve(g, guild.id);
+          const speculative = earlyPvp || (t.kind === 'hero' && killP < 0.4 && !t.tokens.some(x => x.type === 'missao') && needPve);
           const dmgWeight = (t.kind === 'hero' && g.map.pvp === false ? 0.3 * this.p.peace : 1) * (pvpDone ? this.p.pvpDoneDmg : 1) * (speculative ? this.p.pveFirst : 1);
           const ab = g.ab(h);
           const selfHeal = def.fx.drain || (ab === 'ritual_sangue' && def.magic) || (ab === 'lamina_sugadora' && ['Espada', 'Machado', 'Lança'].includes(def.group))
@@ -884,6 +915,8 @@ export class SimpleAI {
           const pvpOpen = g.s.missions.some(m => m.id === `matar_${u.guild}`) && !g.guild(guildId).missions.includes(`matar_${u.guild}`);
           // ainda sem Missão do mapa: só atraem os feridos e quem carrega marcador — o resto é perder movimento
           if (!weak && this.needPve(g, guildId)) continue;
+          // e o ferido só atrai se estiver perto: atravessar o mapa atrás de kill é perder turnos da Missão
+          if (!carrier && this.needPve(g, guildId) && hero?.cell && Math.abs(hero.cell.c - u.cell!.c) + Math.abs(hero.cell.r - u.cell!.r) > this.p.chaseDist) continue;
           if (!pvpOpen && !carrier && !(dying && g.map.pvp !== false) && !this.p.pvpDoneAttract) continue;
           // alianças temporárias: os Heróis de quem está ganhando atraem; os de quem está atrás, não
           const lead = this.leaderFactor(g, guildId, u.guild!);
@@ -997,7 +1030,8 @@ const RANGED = new Set(['maya', 'seth', 'casacaverde', 'hobsbawm', 'johan', 'x_b
 const TANK = new Set(['diva', 'grom', 'espetado', 'johan', 'escarlate', 'x_aeric', 'x_haldor', 'x_mchammer', 'x_nibbles', 'x_sting', 'x_montoya', 'x_the_nameless', 'x_tiaret']);
 
 /** Escolha de Herói no recrutamento: força + equilíbrio da Guilda (alcance e resistência). */
-export function pickHero(hand: string[], have: string[], level: AILevel, rnd: () => number): string {
+export function pickHero(hand: string[], have: string[], _level: AILevel, rnd: () => number): string {
+  const level: AILevel = 'hard'; // só existe o Difícil
   const score = (h: string) => {
     // força: o rating da comunidade (ref/wiki/rating-heroes.csv), ou a estimativa da IA
     let s = (HEROES[h].rating ?? HERO_TIER[h] ?? 6) + (HEROES[h].implemented === false ? -3 : 0);

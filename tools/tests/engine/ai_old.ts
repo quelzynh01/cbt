@@ -53,9 +53,13 @@ export interface AIParams {
   peace: number;
   /** Confronto Final com a barreira já aberta: a hesitação acaba mais cedo (turnos parados que a IA tolera a menos). */
   rush: number;
+  /** Valor de cada Ferimento num Monstro comum que não é alvo de Missão (a morte já conta à parte). */
+  chip: number;
+  /** Vingança só de quem alcança o Herói (Monstro corpo a corpo longe demais não se vinga). */
+  reach: boolean;
 }
 export const AI_PARAMS: AIParams = { pvpDoneKill: 1, pvpDoneDmg: 0.7, pvpDoneAttract: false, posW: 0.6, missionTok: 9, idleStart: 0, guardKill: 2, hiddenW: 3, denyW: 1, denyUrgentOnly: false,
-  riskW: 2.6, stayW: 0.8, pvpNeedPve: 3, leaderHi: 1.4, leaderLo: 0.6, pveFirst: 0.55, finisher: 4, winKill: 25, peace: 0.2, rush: 3 };
+  riskW: 2.6, stayW: 0.8, pvpNeedPve: 1, leaderHi: 1.4, leaderLo: 0.6, pveFirst: 0.3, finisher: 4, winKill: 25, peace: 0.2, rush: 3, chip: 1, reach: true };
 
 export type AIAction =
   | { type: 'activate'; heroId: string }
@@ -141,6 +145,7 @@ export class OldAI {
 
   next(g: Game): AIAction {
     if (g.s.puppet) return this.puppet(g);
+    this.avengeCache.clear();
     if (!g.s.activation) {
       this.queue = [];
       this.usedToken = false;
@@ -414,17 +419,28 @@ export class OldAI {
     // Atacar primeiro e depois mover
     const atk0 = moveOnly ? null : this.bestAttack(g, h, startCell);
     if (atk0) {
-      let bestMove: { v: number; cell: Cell | null } = { v: this.endBonus(g, h, startCell), cell: null };
+      // terminar colado em Monstros (o alvo, se morrer, não conta)
+      const stayCost = (c: Cell, minus: number) => Math.max(0, this.stayRisk(g, h, c) - minus) * this.stayW(g) * (this.hard ? 1 : 0.7) * (1 - this.aggr) * (this.curMode === 'sac' ? 0.3 : 1);
+      const tgtStay = atk0.target.kind === 'monster' && g.board.isClose(atk0.target.cell!, startCell)
+        ? atk0.killP * Math.max(0.15, MONSTERS[atk0.target.defId].dice * ATK_EXP(MONSTERS[atk0.target.defId].attackType) - g.defenseDice(h) * DEF_EXP) : 0;
+      let bestMove: { v: number; cell: Cell | null } = { v: this.endBonus(g, h, startCell) - stayCost(startCell, tgtStay), cell: null };
       for (const n of nodes.values()) {
         if (!n.canEnd || sameCell(n.cell, startCell)) continue;
         const pos = this.positionValue(g, h, n.cell, goals) - startPos;
         let gain = 0;
-        for (const st of g.pathTo(nodes, n.cell)) gain += this.pickupValue(g, h, st.cell);
         // o Monstro atacado (se morrer) não faz Reação de Alerta na saída
         const tgtAlert = atk0.target.kind === 'monster' && g.board.isClose(atk0.target.cell!, startCell)
           ? atk0.killP * Math.max(0.15, MONSTERS[atk0.target.defId].dice * ATK_EXP(MONSTERS[atk0.target.defId].attackType) - g.defenseDice(h) * DEF_EXP) : 0;
-        const risk0 = Math.max(0, this.alertRisk(g, h, startCell) - tgtAlert);
-        const v = pos * 0.5 + gain + this.endBonus(g, h, n.cell) - (risk0 >= hp ? risk0 * 4 + 6 : risk0 * this.riskW(g)) * (this.curMode === 'sac' ? 0.35 : 1) - (this.hard || this.curMode ? this.heroThreat(g, h, n.cell, hp) : 0);
+        // Alerta de todo o caminho (não só do Espaço de saída)
+        let risk0 = 0, cur = startCell;
+        for (const st of g.pathTo(nodes, n.cell)) {
+          gain += this.pickupValue(g, h, st.cell);
+          const stealth = g.ab(h) === 'furtivo' && !(g.s.stealthUsed ?? []).includes(h.id);
+          if (!st.portal && !stealth) risk0 += sameCell(cur, startCell) ? Math.max(0, this.alertRisk(g, h, cur) - tgtAlert) : this.alertRisk(g, h, cur);
+          cur = st.cell;
+        }
+        const v = pos * 0.5 + gain + this.endBonus(g, h, n.cell) - (risk0 >= hp ? risk0 * 4 + 6 : risk0 * this.riskW(g)) * (this.curMode === 'sac' ? 0.35 : 1) - (this.hard || this.curMode ? this.heroThreat(g, h, n.cell, hp) : 0)
+          - stayCost(n.cell, 0);
         if (v > bestMove.v) bestMove = { v, cell: n.cell };
       }
       const steps: AIAction[] = [this.attackStep(g, h, atk0)];
@@ -571,7 +587,7 @@ export class OldAI {
             if (wantType) progress = Math.min(exp, rem) * (rem > 6 ? 2.2 : 1.2);
             // o golpe que mata o alvo da última Missão vence a partida: vale mais que qualquer Ferimento que o Herói leve em troca
             if (wantType && this.p.winKill && guild.missions.length + 1 >= g.s.missionsToWin) { killBonus += this.p.winKill * killP; winP = killP; }
-            if (exp < md.exterm) retaliation += Math.max(0, md.dice * ATK_EXP(md.attackType) - g.defenseDice(h) * DEF_EXP) * 0.8;
+            if (exp < md.exterm && (!this.p.reach || this.canAvenge(g, t, h))) retaliation += Math.max(0, md.dice * ATK_EXP(md.attackType) - g.defenseDice(h) * DEF_EXP) * 0.8;
           } else {
             const pvp = `matar_${t.guild}`;
             const pvpOpen = g.s.missions.some(m => m.id === pvp) && !guild.missions.includes(pvp);
@@ -610,7 +626,10 @@ export class OldAI {
           const selfHeal = def.fx.drain || (ab === 'ritual_sangue' && def.magic) || (ab === 'lamina_sugadora' && ['Espada', 'Machado', 'Lança'].includes(def.group))
             || (ab === 'devorar' && killP > 0.3);
           const lfDmg = t.kind === 'hero' ? this.leaderFactor(g, guild.id, t.guild!) : 1;
-          const value = Math.min(exp, rem) * (1 + this.aggr) * dmgWeight * lfDmg + progress + killP * killBonus - retaliation - deathRisk + (selfHeal ? Math.min(exp, h.wounds) * 0.6 : 0) - selfCost;
+          // Monstro comum que sobrevive: o Ferimento fica nele, mas a Vingança vem agora e outra Guilda pode roubar a morte
+          // (o modo agressivo não infla esse "raspão": ele serve para buscar progresso, não para trocar Vida por nada)
+          const chip = t.kind === 'monster' && !progress && !MONSTERS[t.defId].category.startsWith('Vilão');
+          const value = Math.min(exp, rem) * (chip ? this.p.chip : (1 + this.aggr) * dmgWeight * lfDmg) + progress + killP * killBonus - retaliation - deathRisk + (selfHeal ? Math.min(exp, h.wounds) * 0.6 : 0) - selfCost;
           if (!best || value > best.value) best = { card, target: t, value, boosts, killP };
         }
       }
@@ -619,6 +638,21 @@ export class OldAI {
     }
     return best;
   }
+
+  /** A Vingança do Monstro `m` alcança `h` (já no Espaço de onde ataca)? Ele anda até o Movimento dele e ataca:
+   *  um Monstro corpo a corpo longe demais não se vinga (atacar de longe sai de graça). */
+  private canAvenge(g: Game, m: Unit, h: Unit): boolean {
+    if (g.monsterCanAttack(m, h)) return true;
+    const k = `${m.id}|${key(m.cell!)}|${key(h.cell!)}`;
+    let v = this.avengeCache.get(k);
+    if (v === undefined) {
+      v = false;
+      for (const n of g.reachable(m, g.monMove(m)).values()) if (n.canEnd && n.prev !== null && g.monsterCanAttack(m, h, n.cell)) { v = true; break; }
+      this.avengeCache.set(k, v);
+    }
+    return v;
+  }
+  private avengeCache = new Map<string, boolean>();
 
   /** Cautela com Reações de Alerta. No Confronto Final (1 Missão decide: matar o chefe cercado de Monstros)
    *  a cautela atrapalha — ninguém encara o chefe e a partida trava —, então fica bem menor. */

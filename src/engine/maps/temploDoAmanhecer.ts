@@ -110,6 +110,6 @@ export const TEMPLO_DO_AMANHECER: MapDef = {
     'Armadilhas matam o Herói na hora. Baús causam Ferimentos iguais ao seu valor quando revelados.',
     'Sem Entrada de Monstros: quem morre sai da partida.',
     'Única Missão: matar o Lorde Presas termina a partida.',
-    'Maldição na morte: a cada morte o Herói compra 1 Maldição Mortal; se valer mais que a dele, troca (a outra volta ao baralho).',
+    'Maldição na morte: na 1ª morte o Herói compra 1 Maldição Mortal, na 2ª compra 2, na 3ª compra 3… e fica com a de maior valor entre as compradas e a que já tem (as outras voltam ao baralho).',
   ],
 };

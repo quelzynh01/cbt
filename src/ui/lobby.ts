@@ -302,7 +302,7 @@ export class OnlineLobby {
           <button id="lb-copy">📋 Copiar link</button><small>${esc(link)}</small></div>
         <div class="lb-seats">${slots}</div>
         <div class="lb-actions">
-          ${host ? `<span class="lb-sum">${this.mode === 'campaign' ? `🏰 Campanha ${this.edition === 'btg' ? 'Beyond the Grave' : 'CBT Clássico'} (6 cenários)` : '⚔ Partida única'} · IA ${getSettings().ai === 'hard' ? 'Difícil' : 'Normal'}${this.diceCap ? ' · Limite de dados' : ''}${this.mode === 'campaign' && this.pickOne ? ' · Pegar 1 carta' : ''} · ${heroSetName(this.heroSet)} · ${this.pickMode === 'allpick' ? 'All Pick' : 'Draft'}</span>
+          ${host ? `<span class="lb-sum">${this.mode === 'campaign' ? `🏰 Campanha ${this.edition === 'btg' ? 'Beyond the Grave' : 'CBT Clássico'} (6 cenários)` : '⚔ Partida única'}${this.diceCap ? ' · Limite de dados' : ''}${this.mode === 'campaign' && this.pickOne ? ' · Pegar 1 carta' : ''} · ${heroSetName(this.heroSet)} · ${this.pickMode === 'allpick' ? 'All Pick' : 'Draft'}</span>
             <button id="lb-cfg">⚙️ Configurações da partida</button>
             <button class="primary" id="lb-start" ${canStart ? '' : 'disabled'}>▶ Ir para a mesa</button>` : '<span class="lb-wait">Aguardando o anfitrião levar todos para a mesa…</span>'}
         </div>
@@ -335,13 +335,11 @@ export class OnlineLobby {
         ${this.mode === 'campaign' ? `<label class="mcf-row">Campanha <select id="mc-ed">${EDITIONS.map(e => `<option value="${e.id}" ${this.edition === e.id ? 'selected' : ''}>${e.id === 'btg' ? '💀 CBT Beyond the Grave' : '⚔️ CBT Clássico'}</option>`).join('')}</select></label>` : ''}
         <label class="mcf-row">Heróis <select id="mc-heroes">${HERO_SETS.map(([v, n]) => `<option value="${v}" ${this.heroSet === v ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
         <label class="mcf-row">Recrutamento <select id="mc-pick"><option value="draft">🃏 Draft — mãos que passam para a esquerda</option><option value="allpick" ${this.pickMode === 'allpick' ? 'selected' : ''}>🌟 All Pick — cada um escolhe 3 de todos os Heróis</option></select></label>
-        <label class="mcf-row">Dificuldade da IA <select id="mc-ai"><option value="normal">Normal</option><option value="hard" ${getSettings().ai === 'hard' ? 'selected' : ''}>Difícil</option></select></label>
         <label class="set-opt"><input type="checkbox" id="mc-cap" ${this.diceCap ? 'checked' : ''}/> <b>Limite de dados</b> — no máximo 8 dados de ataque e 6 de defesa por rolagem. Sem marcar, ilimitado.</label>
         ${this.mode === 'campaign' ? `<label class="set-opt"><input type="checkbox" id="mc-one" ${this.pickOne ? 'checked' : ''}/> <b>Pegar 1 carta</b> — na Fase de Melhorias cada um pega 1 carta por rodada e passa o resto (em vez de 2).</label>` : ''}
         <div class="gd-btns"><button class="primary" id="mc-ok">✔ Pronto</button></div>
       </div>`;
       (el.querySelector('#mc-mode') as HTMLSelectElement).onchange = e => { this.mode = (e.target as HTMLSelectElement).value as 'single' | 'campaign'; draw(); };
-      (el.querySelector('#mc-ai') as HTMLSelectElement).onchange = e => saveSettings({ ...getSettings(), ai: (e.target as HTMLSelectElement).value as 'normal' | 'hard' });
       (el.querySelector('#mc-cap') as HTMLInputElement).onchange = e => { this.diceCap = (e.target as HTMLInputElement).checked; };
       (el.querySelector('#mc-pick') as HTMLSelectElement).onchange = e => { this.pickMode = (e.target as HTMLSelectElement).value as 'draft' | 'allpick'; };
       (el.querySelector('#mc-heroes') as HTMLSelectElement).onchange = e => { this.heroSet = (e.target as HTMLSelectElement).value as HeroSet; };

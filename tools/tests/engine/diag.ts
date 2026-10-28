@@ -7,7 +7,7 @@ import { ALL_HEROES, distributeStartingGear } from '../../../src/engine/data';
 
 // Diagnóstico da IA nos mapas Clássicos: de onde vêm os Ferimentos (Vingança, Alerta, Heróis),
 // quanto ela briga com Heróis antes de ter uma Missão do mapa e em que turno sai a 1ª Missão PvE.
-// sh tools/tests/run-engine.sh diag 20   (P={...} muda os pesos da IA; LVL=normal)
+// sh tools/tests/run-engine.sh diag 20   (P={...} muda os pesos da IA)
 const N = Number(process.argv[2] ?? 10);
 const btgIds = new Set(BTG_MAPS.map(m => m.id));
 const maps = Object.values(MAPS).filter(m => process.env.MAP ? m.id === process.env.MAP : !btgIds.has(m.id) && m.pvp !== false);

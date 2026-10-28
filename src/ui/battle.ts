@@ -467,7 +467,7 @@ export class BattlePanel {
   }
 
   /** Rerrolagem NESTA tela: rola os dados na bandeja e deixa escolher quais rolar de novo. */
-  async decide(req: { heroId: string; target?: string; kind: 'attack' | 'defense'; faces: DieFace[]; success: DieFace; rerolls: number; base?: number; round?: number; vs?: { id: string; faces: DieFace[]; hits: number; type: string; base?: number }; card?: { name: string; type: string; dice: number } }): Promise<number[]> {
+  async decide(req: { heroId: string; target?: string; kind: 'attack' | 'defense'; faces: DieFace[]; success: DieFace; rerolls: number; base?: number; round?: number; vs?: { id: string; faces: DieFace[]; hits: number; type: string; base?: number }; card?: { name: string; type: string; dice: number; critPlus?: number } }): Promise<number[]> {
     const g = this.deps.game();
     const me = g.unit(req.heroId);
     const sp = Math.max(1, this.deps.speed());
@@ -543,7 +543,7 @@ export class BattlePanel {
 
   /** Online (quem assiste com a tela de combate): outro jogador decide uma Rerrolagem. Os dados aparecem nesta tela junto com o
    *  clique dele (nada antes), e a tela espera a escolha; o ataque continua aqui, girando de novo só os dados escolhidos. */
-  async spectateDecision(req: { heroId: string; target?: string; kind: 'attack' | 'defense'; faces: DieFace[]; success: DieFace; rerolls: number; base?: number; round?: number; vs?: { id: string; faces: DieFace[]; hits: number; type: string; base?: number }; card?: { name: string; type: string; dice: number } }, who: string) {
+  async spectateDecision(req: { heroId: string; target?: string; kind: 'attack' | 'defense'; faces: DieFace[]; success: DieFace; rerolls: number; base?: number; round?: number; vs?: { id: string; faces: DieFace[]; hits: number; type: string; base?: number }; card?: { name: string; type: string; dice: number; critPlus?: number } }, who: string) {
     const g = this.deps.game();
     const me = g.unit(req.heroId);
     const sp = Math.max(1, this.deps.speed());

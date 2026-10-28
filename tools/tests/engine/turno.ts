@@ -1,5 +1,7 @@
 import { Game } from '../../../src/engine/game';
 import { MAPS } from '../../../src/engine/maps';
+import { SimpleAI } from '../../../src/ai/ai';
+import { applyAction } from '../../../src/engine/actions';
 
 // Grito de Guerra também ativa quem só andou com as Botas; Poção de Turno Adicional começa na hora (sem Entrada de Monstros);
 // a Rerrolagem do ataque do Herói leva o alvo (o painel mostra os dois lutadores).
@@ -53,5 +55,28 @@ const mk = (cards: Record<string, string[]>) => {
   const c = grom.cards.find(x => x.defId === 'espada_capitao')!;
   g.attack(c.uid, m.id);
   check(target === m.id || target === undefined && g.rerollsOf(grom) === 0, `a Rerrolagem do ataque leva o alvo (${target})`);
+}
+{
+  // IA com a Poção de Turno Adicional: o Herói joga, bebe no fim e OUTRO Herói joga o turno adicional (não passa a vez)
+  const g = Game.create(MAPS['distrito-dos-martelos'], { seed: 4, fixedOrder: true, players: [
+    { guild: 'azul', controller: 'ai', heroes: ['grom', 'maya', 'zazu'] }, { guild: 'vermelho', controller: 'ai' }] });
+  g.s.deploying = [];
+  for (const h of g.heroesOf('azul')) h.tokens.push({ id: 'tt_' + h.id, type: 'turno' } as never);
+  const ai = new SimpleAI('hard', () => 0.5);
+  const played: string[] = [];
+  let drank = false;
+  for (let i = 0; i < 60 && g.currentGuild().id === 'azul'; i++) {
+    if (g.s.pending) { g.autoResolvePending(); continue; }
+    const a = ai.next(g);
+    if (a.type === 'activate') played.push(a.heroId);
+    if (a.type === 'token' && g.activeHero()?.tokens.find(t => t.id === a.tokenId)?.type === 'turno') drank = true;
+    if (a.type === 'rest') played.push('descanso');
+    const act = a.type === 'move' ? { type: 'move' as const, cell: a.cell, openDoors: true } : a;
+    if (!applyAction(g, 'azul', act as never)) { played.push('falhou:' + a.type); applyAction(g, 'azul', { type: 'end' }); }
+    g.drain();
+  }
+  const heroes = played.filter(x => !x.startsWith('falhou') && x !== 'descanso');
+  check(drank && heroes.length >= 2 && new Set(heroes).size === heroes.length, `IA bebeu a Poção e jogou outro Herói no turno adicional (${played.join(', ')})`);
+  check(!played.some(x => x.startsWith('falhou')), 'nenhuma ação da IA recusada');
 }
 console.log(ok ? 'TURNO ADICIONAL, BOTAS E GRITO OK' : 'FALHOU');

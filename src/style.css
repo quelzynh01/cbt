@@ -1475,6 +1475,9 @@ html.touch :is(.cd-roll, .bt-act, #rr-roll, #rr-go, #cd-rr, #bt-rr)::after { con
 #restbox .rw-body .inv-pool { order: -1; }
 /* Confronto Final: Maldição comprada na morte (todos veem) */
 .cdw-row { display: flex; gap: 18px; align-items: flex-end; justify-content: center; }
+/* várias Maldições compradas (2ª morte em diante): cartas menores e quebrando linha */
+.cdw-row.many { flex-wrap: wrap; gap: 10px; max-width: min(92vw, 760px); }
+.cdw-row.many .acard { zoom: .5; }
 .cdw-slot { display: grid; justify-items: center; gap: 4px; transition: opacity .35s, transform .35s, filter .35s; }
 .cdw-slot small { color: #e8d8c0; font-weight: 800; font-size: 12px; text-transform: uppercase; }
 .cdw-slot .acard { zoom: .62; }

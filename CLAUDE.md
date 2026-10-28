@@ -67,7 +67,9 @@ sh tools/tests/run-engine.sh rules         # Core
 sh tools/tests/run-engine.sh vdoor         # monstros abrindo/fechando portas na Vingança
 sh tools/tests/run-engine.sh boots         # Botas usadas aos poucos (Die Booten: 1 passo + 1 passo)
 sh tools/tests/run-engine.sh pushportal    # empurrão (Rajada de Vento, Tiro Explosivo) não atravessa portal -> "EMPURRÃO SEM PORTAL OK"
-sh tools/tests/run-engine.sh deathcurse    # Templo: Maldição a cada morte (troca se maior, carta coberta) e Grito de Guerra depois da morte
+sh tools/tests/run-engine.sh deathcurse    # Templo: a N-ésima morte compra N Maldições e fica a maior (com a que já tem), carta coberta, Grito de Guerra depois da morte
+sh tools/tests/run-engine.sh pilao         # Pilão: alvo ferido (mesmo morrendo) -> ele e os Inimigos Perto ficam Atordoados
+sh tools/tests/run-engine.sh critextra     # ✷ que vale mais (Minotauro, Sangradora…): os acertos que o defensor vê e o painel da Rerrolagem já contam o extra
 sh tools/tests/run-engine.sh presas        # Descanso sem ressuscitar; Lorde Presas se cura na Vingança e sobrevive; escolha de quem mais é atingido
 sh tools/tests/run-engine.sh reacoes       # vários Monstros atacados: quem controla escolhe qual faz a Vingança; Esconderijo do Troll com inventário cheio
 sh tools/tests/run-engine.sh sombra        # Praça da Aurora: marcador Vermelho/Verde invoca a Sombra do Lorde Presas (entra ou fica fora)

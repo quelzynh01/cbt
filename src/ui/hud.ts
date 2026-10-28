@@ -64,6 +64,10 @@ const DOCK: [string, string, string][] = [['hero', '🛡️', 'Status'], ['bag',
 const lupa = (id: string) => `<button class="cd-lupa" data-lupa="${id}" title="Ver status">🔍</button>`;
 
 /** Embaixo do nome da carta na tela de combate: medalhão do tipo de ataque com o número de dados. */
+/** Ataque: acertos a mais pelos ✷ (Minotauro, armas com acerto extra) — o total mostrado já conta com eles. */
+function critBonus(req: { kind: string; faces: DieFace[]; card?: { critPlus?: number } }): number {
+  return req.kind === 'attack' ? req.faces.filter(f => f === 'crit').length * (req.card?.critPlus ?? 0) : 0;
+}
 function atkInfo(type: string, n: number): string {
   const melee = type === 'melee';
   return `<div class="cd-atkinfo">${medal(melee ? 'melee' : 'ranged', n, `${n} dados de ataque`)}<span>${melee ? 'Ataque Próximo' : 'Ataque a Distância'} · <b>${n}</b> dado${n === 1 ? '' : 's'}</span></div>`;
@@ -813,7 +817,7 @@ export class Hud {
     setTimeout(() => { box.classList.add('hidden'); done?.(); }, 3200 / Math.max(1, this.speed));
   }
 
-  /** Confronto Final: o Herói que morreu compra uma Maldição Mortal — todos veem a carta virar e com qual ele fica. */
+  /** Confronto Final: o Herói que morreu compra Maldições Mortais (a N-ésima morte compra N) — todos veem as cartas virarem e com qual ele fica. */
   showCurseDraw(e: Extract<GameEvent, { t: 'curseDraw' }>, done?: () => void) {
     const g = this.game;
     const box = $('#awardbox', this.root);
@@ -822,8 +826,12 @@ export class Hud {
     const name = u ? g.name(u) : '';
     const swapped = e.kept === e.card && e.card !== 'sem_maldicao';
     const cur = e.old ? `<div class="cdw-slot ${swapped ? 'out' : 'keep'}"><small>Atual</small>${curseCard(e.old, 'small')}</div>` : '';
-    box.innerHTML = `<div class="aw-box cdw-box"><div class="aw-kind">☠ Maldição Mortal · ${name} morreu</div>
-      <div class="cdw-row">${cur}<div class="cdw-slot new ${swapped ? 'keep' : 'out'}"><small>Comprou</small><div class="cdw-flip">${curseCard(e.card, 'small')}</div></div></div>
+    const drawn = e.drawn ?? [e.card];
+    const best = drawn.indexOf(e.card);
+    const many = drawn.length > 1;
+    const bought = drawn.map((c, i) => `<div class="cdw-slot new ${swapped && i === best ? 'keep' : 'out'}"><small>${many && i === best ? 'A maior' : 'Comprou'}</small><div class="cdw-flip">${curseCard(c, 'small')}</div></div>`).join('');
+    box.innerHTML = `<div class="aw-box cdw-box"><div class="aw-kind">☠ Maldição Mortal · ${name} morreu${many ? ` (${drawn.length}ª vez: compra ${drawn.length})` : ''}</div>
+      <div class="cdw-row ${many ? 'many' : ''}">${cur}${bought}</div>
       <div class="aw-who cdw-res" style="color:${color}"></div></div>`;
     box.classList.remove('hidden');
     play('pick-item');
@@ -834,7 +842,7 @@ export class Hud {
       box.querySelector('.cdw-box')?.classList.add('done');
       const res = box.querySelector('.cdw-res');
       if (res) res.innerHTML = swapped ? `${name} fica com <b>${CURSES[e.card]?.name}</b>${e.old ? ` — ${CURSES[e.old]?.name} volta ao baralho` : ''}`
-        : e.card === 'sem_maldicao' && !e.old ? `${name} escapou: Sem Maldição!` : `${name} continua com <b>${e.old ? CURSES[e.old]?.name : 'nenhuma Maldição'}</b> — a comprada volta ao baralho`;
+        : e.card === 'sem_maldicao' && !e.old ? `${name} escapou: Sem Maldição!` : `${name} continua com <b>${e.old ? CURSES[e.old]?.name : 'nenhuma Maldição'}</b> — ${many ? 'as compradas voltam' : 'a comprada volta'} ao baralho`;
     }, 1100 / sp);
     setTimeout(() => { box.classList.add('hidden'); done?.(); }, 4200 / sp);
   }
@@ -1679,7 +1687,7 @@ export class Hud {
    *  Na Defesa, primeiro aparece o ataque de quem atacou. O painel continua aberto e a rolagem segue nele. */
   /** Online: outro jogador está decidindo uma Rerrolagem — mostra a rolagem dele (junto com o clique dele) e espera a escolha. */
   private spectating = false;
-  spectateDecision(req: { heroId: string; kind: 'attack' | 'defense'; faces: DieFace[]; success: DieFace; rerolls: number; base?: number; round?: number; vs?: { id: string; faces: DieFace[]; hits: number; type: string; base?: number }; card?: { name: string; type: string; dice: number } }, who: string) {
+  spectateDecision(req: { heroId: string; kind: 'attack' | 'defense'; faces: DieFace[]; success: DieFace; rerolls: number; base?: number; round?: number; vs?: { id: string; faces: DieFace[]; hits: number; type: string; base?: number }; card?: { name: string; type: string; dice: number; critPlus?: number } }, who: string) {
     const g = this.game;
     const box = $('#dicecenter', this.root);
     for (const t of this.centerTimers) clearTimeout(t);
@@ -1746,7 +1754,7 @@ export class Hud {
       }
       if (token !== this.centerRun) return;
       this.spec = { attackerId, atkKey, heroId: req.heroId, kind: req.kind, dice, before: req.faces.slice() };
-      const hits = req.faces.filter(ok).length;
+      const hits = req.faces.filter(ok).length + critBonus(req);
       sum.innerHTML = `<b>${hits}</b> ${black ? 'acerto' : 'bloqueio'}${hits === 1 ? '' : 's'}`;
       btn.innerHTML = `<span class="cd-wait">⏳ ${(req as { covered?: boolean }).covered ? `${who} já bloqueou tudo: está escolhendo se mantém ou rola mais…` : `${who} está escolhendo quais dados rerrolar…`}</span>`;
     })();
@@ -1780,7 +1788,7 @@ export class Hud {
   }
 
   askDecision(req: { heroId: string; kind: 'attack' | 'defense'; faces: DieFace[]; success: DieFace; rerolls: number; covered?: boolean; held?: number; noHits?: boolean; shield?: 'knight' | 'king'; bonus?: number;
-    done?: { id: string; faces: DieFace[]; blocks: number; noHits?: boolean }[]; base?: number; round?: number; vs?: { id: string; faces: DieFace[]; hits: number; type: string; base?: number }; card?: { name: string; type: string; dice: number } }): Promise<number[]> {
+    done?: { id: string; faces: DieFace[]; blocks: number; noHits?: boolean }[]; base?: number; round?: number; vs?: { id: string; faces: DieFace[]; hits: number; type: string; base?: number }; card?: { name: string; type: string; dice: number; critPlus?: number } }): Promise<number[]> {
     this.closePrize();
     const g = this.game;
     const box = $('#dicecenter', this.root);
@@ -1955,7 +1963,7 @@ export class Hud {
             return;
           }
           dice.forEach((d, i) => d.classList.toggle('pick', sel.has(i)));
-          const hits = req.faces.filter(f => ok(f, req.success)).length;
+          const hits = req.faces.filter(f => ok(f, req.success)).length + critBonus(req);
           sum.innerHTML = `<b>${hits}</b> ${black ? 'acerto' : 'bloqueio'}${hits === 1 ? '' : 's'} · ↻ ${(req.round ?? 1) > 1 ? `Ainda tem ${req.rerolls} Rerrolagem` : `Rerrolagem ${req.rerolls}`}: clique nos dados para rolar de novo (${sel.size}/${req.rerolls})${[...sel].some(i => ok(req.faces[i], req.success)) ? `<div class="rr-warn">⚠ Rerrolar um dado que já acertou pode fazer você perder esse ${req.kind === 'attack' ? 'acerto' : 'bloqueio'} — mas pode sair ✷ (crítico)!</div>` : ''}`;
           btn.innerHTML = `<button id="cd-keep">Manter</button><button class="primary" id="cd-rr" ${sel.size ? '' : 'disabled'}>↻ Rerrolar ${sel.size || ''}</button>`;
           (btn.querySelector('#cd-keep') as HTMLElement).onclick = () => finish([]);

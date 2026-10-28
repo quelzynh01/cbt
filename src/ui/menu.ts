@@ -202,7 +202,6 @@ export class MenuPages {
           <span class="dot" style="background:${GUILDS[t.guild].color}"></span><b>Time ${i + 1}</b>
           <input class="ts-name" data-tn="${i}" maxlength="20" placeholder="${GUILDS[t.guild].name.split(' (')[0].replace('Guilda ', '')} (nome opcional)" value="${(t.name ?? '').replace(/"/g, '&quot;')}" title="${i === 0 ? 'Seus Heróis' : 'Heróis sorteados'} — deixe vazio para usar a cor"/>
           <select data-ctl="${i}"><option value="human" ${t.controller === 'human' ? 'selected' : ''}>👤 Você</option><option value="ai" ${t.controller === 'ai' ? 'selected' : ''}>🤖 IA</option></select></div>`).join('')}</div>
-        <label class="ts-diff">Dificuldade da IA <select id="ts-ai"><option value="normal" ${getSettings().ai === 'normal' ? 'selected' : ''}>Normal</option><option value="hard" ${getSettings().ai === 'hard' ? 'selected' : ''}>Difícil</option></select></label>
         <p class="muted">${humans === 0 ? 'Todos os times são IA: você assiste à partida.' : humans > 1 ? 'Vários times "Você": jogam neste computador, revezando.' : 'Times "Você" são controlados por você; os outros pela IA.'} Nenhum Herói se repete entre os times.</p></section>
       <section class="ts-sec ts-wide"><h3>3. Seus Heróis <small>(Time 1)</small></h3>
         <div class="ts-slots">${[0, 1, 2].map(i => { const h = c.heroes[i]; const d = HEROES[h]; return `<button class="ts-slot ${i === this.tsSlot ? 'sel' : ''}" data-tslot="${i}" title="Escolher quem vai no espaço ${i + 1}">
@@ -242,7 +241,6 @@ export class MenuPages {
     const save = () => { this.test = normalizeTestConfig(c); saveTestConfig(this.test); saveMapId(this.test.mapId); this.onMapChange(); this.showTestSetup(onStart); };
     (this.page.querySelector('#ts-cap') as HTMLInputElement).onchange = e => { c.diceCap = (e.target as HTMLInputElement).checked; save(); };
     this.page.querySelectorAll<HTMLElement>('[data-tset]').forEach(b => { b.onclick = () => { this.tsSet = b.dataset.tset as 'core' | 'btg' | 'extra'; this.showTestSetup(onStart); }; });
-    (this.page.querySelector('#ts-ai') as HTMLSelectElement).onchange = e => saveSettings({ ...getSettings(), ai: (e.target as HTMLSelectElement).value as 'normal' | 'hard' });
     (this.page.querySelector('#ts-map') as HTMLSelectElement).onchange = e => { c.mapId = (e.target as HTMLSelectElement).value; save(); };
     this.page.querySelectorAll<HTMLElement>('[data-n]').forEach(b => { b.onclick = () => {
       const n = Number(b.dataset.n);
@@ -395,9 +393,6 @@ export class MenuPages {
       <h3>Rerrolagem</h3>
       ${opt('reroll', 'choose', '<b>Escolher os dados</b> — quando um Herói seu tem Rerrolagem (↻), você escolhe quais dados rolar de novo', st.reroll)}
       ${opt('reroll', 'auto', '<b>Automática</b> — rerrola sozinho os dados que falharam', st.reroll)}
-      <h3>Dificuldade da IA</h3>
-      ${opt('ai', 'normal', '<b>Normal</b> — joga bem, mas comete erros e às vezes arrisca à toa', st.ai)}
-      ${opt('ai', 'hard', '<b>Difícil</b> — calcula as chances dos dados, usa poções, caça quem carrega Missões e se protege', st.ai)}
       <h3>Sinalização de ajuda</h3>
       <label class="set-opt"><input type="checkbox" id="set-hints" ${st.hints !== false ? 'checked' : ''}/> Mostrar os <b>Espaços azuis</b> (onde dá para andar) e os <b>vermelhos</b> (quem dá para atacar) no tabuleiro</label>
       <h3>Reação de Alerta</h3>
@@ -433,7 +428,6 @@ export class MenuPages {
       const clock = (this.page.querySelector('#set-clock') as HTMLInputElement).checked;
       const reroll = (this.page.querySelector('input[name=reroll]:checked') as HTMLInputElement).value as 'choose';
       const view = (this.page.querySelector('input[name=view]:checked') as HTMLInputElement).value as 'free';
-      const ai = (this.page.querySelector('input[name=ai]:checked') as HTMLInputElement).value as 'normal';
       const sound = (this.page.querySelector('#set-sound') as HTMLInputElement).checked;
       const volume = Number((this.page.querySelector('#set-volume') as HTMLInputElement).value) / 100;
       (this.page.querySelector('#set-volv') as HTMLElement).textContent = `${Math.round(volume * 100)}%`;
@@ -447,7 +441,7 @@ export class MenuPages {
       const endConfirm = (this.page.querySelector('#set-endc') as HTMLInputElement).checked;
       const hints = (this.page.querySelector('#set-hints') as HTMLInputElement).checked;
       const gfx = ((this.page.querySelector('input[name=gfx]:checked') as HTMLInputElement | null)?.value ?? 'high') as 'high' | 'normal';
-      saveSettings({ ...getSettings(), gfx, battle, speed, clock, reroll, view, ai, sound, volume, master, hints, music, musicVolume, muted, alertConfirm, endConfirm });
+      saveSettings({ ...getSettings(), gfx, battle, speed, clock, reroll, view, sound, volume, master, hints, music, musicVolume, muted, alertConfirm, endConfirm });
     };
     this.page.querySelectorAll<HTMLInputElement>('input').forEach(i => { i.onchange = upd; });
     this.page.querySelectorAll<HTMLElement>('[data-stab]').forEach(b => { b.onclick = () => {

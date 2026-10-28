@@ -33,7 +33,7 @@ export interface RerollRequest { heroId: string; kind: 'attack' | 'defense'; fac
   /** Rodada da Rerrolagem: 1 = primeira escolha; 2+ = ainda sobrou Rerrolagem depois da anterior. */
   round?: number;
   /** Ataque: carta usada, tipo e dados rolados (antes dos extras de ✷). */
-  card?: { name: string; type: string; dice: number };
+  card?: { name: string; type: string; dice: number; critPlus?: number };
   /** Defesa: quem atacou e os dados do ataque (mostrados antes). */
   vs?: { id: string; faces: DieFace[]; hits: number; type: string; base?: number };
   /** Defesa que já bloqueou todos os acertos: Manter é o padrão (rolar os ✷ extras / Rerrolar só se quiser). */
@@ -134,7 +134,7 @@ export class Game {
   rerollHook: ((req: RerollRequest) => number[] | 'auto') | null = null;
   /** Ataque sendo resolvido (para mostrar os dados do atacante na Rerrolagem da Defesa). */
   private curAttack: RerollRequest['vs'] | null = null;
-  private curCard: { name: string; type: string } | null = null;
+  private curCard: { name: string; type: string; critPlus?: number } | null = null;
 
   constructor(map: MapDef, state: GameState) {
     this.map = map;
@@ -1308,7 +1308,9 @@ export class Game {
       this.emit({ t: 'skill', id: h.id, skill: 'mestre_espadachim', name: 'Mestre Espadachim' });
     }
     const targetHurt = target.wounds > 0;
-    this.curCard = { name: CARDS[card.defId]?.name ?? '', type: CARDS[card.defId]?.attackType ?? 'melee' };
+    // acertos a mais por ✷ (o painel da Rerrolagem já mostra o total com eles)
+    const critPlus = (ab === 'maestria_arco' && def.group === 'Arco' ? 1 : 0) + (def.fx.critExtra ?? 0) + (this.hasPerm(h, 'soulseeker') && def.group === 'Arco' ? 1 : 0);
+    this.curCard = { name: CARDS[card.defId]?.name ?? '', type: CARDS[card.defId]?.attackType ?? 'melee', ...(critPlus ? { critPlus } : {}) };
 
     // custos: Sacrifício (Kanga), Ampliações que ferem, Grrrr!
     const sacrificed = sacrifice && this.canSacrifice(h);
@@ -1359,12 +1361,13 @@ export class Game {
       notes.push('Sorte de Apostador: um dado vira ✷');
       this.emit({ t: 'skill', id: h.id, skill: 'sorte_apostador', name: 'Sorte de Apostador' });
     }
-    this.curAttack = { id: h.id, faces: atk.faces.slice(), hits: atk.successes, type: def.attackType!, base: n };
-    this.curDefsDone = [];
     if (atk.rerolled) notes.push(`↻ ${atk.rerolled} dado${atk.rerolled > 1 ? 's' : ''} rerrolado${atk.rerolled > 1 ? 's' : ''}`);
+    // ✷ que vale mais (Maestria com Arco, armas com acerto extra, Caça-Almas): já entra nos acertos que todos veem na Defesa
     if (ab === 'maestria_arco' && def.group === 'Arco' && atk.crits) { atk.successes += atk.crits; notes.push(`Maestria com Arco: +${atk.crits}`); }
     if (fx.critExtra && atk.crits) { atk.successes += atk.crits * fx.critExtra; notes.push(`${def.name}: +${atk.crits * fx.critExtra} acerto(s) por ✷`); }
     if (this.hasPerm(h, 'soulseeker') && def.group === 'Arco' && atk.crits) { atk.successes += atk.crits; notes.push(`Caça-Almas: +${atk.crits}`); }
+    this.curAttack = { id: h.id, faces: atk.faces.slice(), hits: atk.successes, type: def.attackType!, base: n };
+    this.curDefsDone = [];
 
     // alvos: o principal e os que não dependem de escolha (Incinerar, Fender II). Os adicionais escolhidos
     // (Raio Nova, Fender) vêm depois que a Defesa do alvo principal aparece, num segundo ataque com os mesmos dados.
@@ -1462,8 +1465,10 @@ export class Game {
       }
     }
     // atordoar (Esmaga-Cara, Enxofre, Pilão, Quebra-Crânio)
-    if (dazeList.length && fx.daze) {
-      const extra = fx.daze === 'plus1' ? enemiesCloseTo(targetCells.get(target.id)!, targets).slice(0, 1) : fx.daze === 'all' ? enemiesCloseTo(targetCells.get(target.id)!, targets) : [];
+    // os Inimigos Perto do alvo ficam Atordoados se o alvo levou Ferimento — mesmo que ele tenha morrido com o golpe
+    const mainHurt = results.some(r => r.t === target && r.wounds > 0);
+    if ((dazeList.length || mainHurt) && fx.daze) {
+      const extra = !mainHurt ? [] : fx.daze === 'plus1' ? enemiesCloseTo(targetCells.get(target.id)!, targets).slice(0, 1) : fx.daze === 'all' ? enemiesCloseTo(targetCells.get(target.id)!, targets) : [];
       for (const u of [...dazeList, ...extra]) if (u.alive && !u.stunned) this.setStun(u, true);
     }
     if (fx.bomb && atk.successes > 0) {
@@ -2847,13 +2852,19 @@ export class Game {
    *  senão continua com a mesma e a comprada volta. Maldição que ocupa espaço com o inventário cheio: o dono escolhe a carta coberta. */
   private deathCurse(h: Unit) {
     const deck = this.s.curseDeck ??= shuffle(this.s, curseDeck());
-    const card = deck.shift();
-    if (!card) return;
+    // a N-ésima morte do Herói neste mapa compra N Maldições: fica com a maior (entre elas e a que já tem)
+    const deaths = ((this.s.curseDeaths ??= {})[h.id] ?? 0) + 1;
+    this.s.curseDeaths[h.id] = deaths;
+    const drawn = deck.splice(0, Math.min(deaths, deck.length));
+    if (!drawn.length) return;
+    const val = (c: string) => CURSES[c]?.value ?? 0;
+    const bi = drawn.reduce((b, c, i) => (val(c) > val(drawn[b]) ? i : b), 0);
+    const card = drawn[bi];
     const old = h.curse;
-    const better = (CURSES[card]?.value ?? 0) > (old ? CURSES[old]?.value ?? 0 : 0);
-    const back = better ? old : card;
-    // a que não ficou volta para o baralho, embaralhado de novo
-    if (back) this.s.curseDeck = shuffle(this.s, [...deck, back]);
+    const better = val(card) > (old ? val(old) : 0);
+    const back = [...drawn.filter((_, i) => i !== bi), ...(better ? (old ? [old] : []) : [card])];
+    // as que não ficaram voltam para o baralho, embaralhado de novo
+    if (back.length) this.s.curseDeck = shuffle(this.s, [...deck, ...back]);
     if (better) {
       h.curse = card;
       // a antiga ocupava espaço e a nova não: a carta que estava debaixo dela volta
@@ -2870,9 +2881,10 @@ export class Game {
         }
       }
     }
-    this.emit({ t: 'curseDraw', heroId: h.id, card, ...(old ? { old } : {}), kept: h.curse ?? 'sem_maldicao' });
-    this.log(better ? `${this.name(h)} comprou ${CURSES[card].name}: fica com ela${old ? ` (${CURSES[old].name} volta ao baralho)` : ''}.`
-      : `${this.name(h)} comprou ${CURSES[card].name}: continua com ${old ? CURSES[old].name : 'nenhuma Maldição'}.`);
+    this.emit({ t: 'curseDraw', heroId: h.id, card, ...(drawn.length > 1 ? { drawn } : {}), ...(old ? { old } : {}), kept: h.curse ?? 'sem_maldicao' });
+    const bought = drawn.length > 1 ? `${drawn.length} Maldições (${deaths}ª morte: ${drawn.map(c => CURSES[c].name).join(', ')}) — a maior é ${CURSES[card].name}` : CURSES[card].name;
+    this.log(better ? `${this.name(h)} comprou ${bought}: fica com ela${old ? ` (${CURSES[old].name} volta ao baralho)` : ''}.`
+      : `${this.name(h)} comprou ${bought}: continua com ${old ? CURSES[old].name : 'nenhuma Maldição'}.`);
   }
 
   private monsterDies(m: Unit, killer: Unit, exterminated: boolean) {
@@ -3130,7 +3142,7 @@ export class Game {
     const canRr = (fs: DieFace[]) => rerolls > 0 && fs.some(f => f !== 'crit');
     // Monstro: quem decide é o jogador que controla os Monstros agora
     const mon = who?.kind === 'monster';
-    const card = mon ? { name: MONSTERS[who!.defId].attackName, type: success, dice: n } : kind === 'attack' && this.curCard ? { ...this.curCard, dice: n } : undefined;
+    const card = mon ? { name: MONSTERS[who!.defId].attackName, type: success, dice: n, ...(MONSTERS[who!.defId].abilities?.includes('critExtra') ? { critPlus: 1 } : {}) } : kind === 'attack' && this.curCard ? { ...this.curCard, dice: n } : undefined;
     const ask = (faces: DieFace[], left: number, round: number, more?: { covered: true; held?: number }) => this.rerollHook!({ heroId: who!.id, kind, faces: faces.slice(), success, rerolls: left, base: n, round,
       guild: mon ? this.monsterControllerGuild() : who!.guild ?? undefined, target: target?.id,
       vs: kind === 'defense' ? this.curAttack ?? undefined : undefined, card, ...(more ?? {}),
@@ -3381,10 +3393,11 @@ export class Game {
     const mrr = this.ab(h) === 'encantado' ? 0 : md.rerolls;
     let atk = this.rollRerolls(dice, ATTACK_DIE, md.attackType, mrr, m, 'attack', h);
     if (this.knightShield(h, { id: m.id, faces: atk.faces.slice(), hits: atk.successes, type: md.attackType, base: dice })) { atk = this.rollRerolls(dice, ATTACK_DIE, md.attackType, mrr, m, 'attack', h); notes.push('Escudo de Cavaleiro: ataque rolado de novo'); }
+    if (md.rerolls) notes.push(`Rerrolagem ${md.rerolls}`);
+    // Minotauro: cada ✷ é 1 acerto a mais — já conta nos acertos que o defensor vê
+    if (ab.includes('critExtra') && atk.crits) { atk.successes += atk.crits; notes.push(`+${atk.crits} acerto(s) por ✷`); }
     this.curAttack = { id: m.id, faces: atk.faces.slice(), hits: atk.successes, type: md.attackType, base: dice };
     this.curDefsDone = [];
-    if (md.rerolls) notes.push(`Rerrolagem ${md.rerolls}`);
-    if (ab.includes('critExtra') && atk.crits) { atk.successes += atk.crits; notes.push(`+${atk.crits} acerto(s) por ✷`); }
     // Troll: atinge todos os Heróis Perto; Lorde Presas: também os Inimigos Perto do alvo
     let targets = [h];
     if (md.hitsAll) targets = [h, ...this.onBoard().filter(u => u.kind === 'hero' && u.id !== h.id && this.board.isClose(m.cell!, u.cell!))];

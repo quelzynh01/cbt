@@ -105,7 +105,7 @@ export class CampaignUI {
     const cfg = this.cfg;
     const sum = () => {
       (this.page.querySelector('#cp-cfgsum') as HTMLElement).textContent = [cfg.edition === 'btg' ? '💀 CBT Beyond the Grave' : '⚔️ CBT Clássico', heroSetName(cfg.heroSet),
-        cfg.pickMode === 'allpick' ? 'All Pick' : 'Draft', `IA ${cfg.ai === 'hard' ? 'Difícil' : 'Normal'}`, `${cfg.opp} adversário${cfg.opp > 1 ? 's' : ''}`, cfg.diceCap ? 'Limite de dados' : 'Dados ilimitados', cfg.pickOne ? 'Pegar 1 carta' : 'Pegar 2 cartas'].join(' · ');
+        cfg.pickMode === 'allpick' ? 'All Pick' : 'Draft', `${cfg.opp} adversário${cfg.opp > 1 ? 's' : ''}`, cfg.diceCap ? 'Limite de dados' : 'Dados ilimitados', cfg.pickOne ? 'Pegar 1 carta' : 'Pegar 2 cartas'].join(' · ');
     };
     sum();
     (this.page.querySelector('#cp-cfg') as HTMLElement).onclick = () => this.matchSettings(sum);
@@ -119,7 +119,7 @@ export class CampaignUI {
 
   /** Configurações da partida da nova campanha (padrão: Limite de dados, Pegar 1 carta e Apenas Core Heroes). */
   private cfg: { edition: Edition; heroSet: HeroSet; ai: 'normal' | 'hard'; opp: number; diceCap: boolean; pickOne: boolean; pickMode: PickMode } =
-    { edition: 'classic', heroSet: 'core', ai: getSettings().ai === 'hard' ? 'hard' : 'normal', opp: 3, diceCap: true, pickOne: true, pickMode: 'draft' };
+    { edition: 'classic', heroSet: 'core', ai: 'hard', opp: 3, diceCap: true, pickOne: true, pickMode: 'draft' };
 
   /** Janela "Configurações da partida" (igual à da sala online). */
   private matchSettings(done: () => void) {
@@ -132,7 +132,6 @@ export class CampaignUI {
         <label class="mcf-row">Campanha <select id="mc-ed"><option value="classic">⚔️ CBT Clássico</option><option value="btg" ${cfg.edition === 'btg' ? 'selected' : ''}>💀 CBT Beyond the Grave</option></select></label>
         <label class="mcf-row">Heróis <select id="mc-heroes">${HERO_SETS.map(([v, n]) => `<option value="${v}" ${cfg.heroSet === v ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
         <label class="mcf-row">Recrutamento <select id="mc-pick"><option value="draft">🃏 Draft — mãos que passam para a esquerda</option><option value="allpick" ${cfg.pickMode === 'allpick' ? 'selected' : ''}>🌟 All Pick — escolha 3 de todos os Heróis</option></select></label>
-        <label class="mcf-row">Dificuldade da IA <select id="mc-ai"><option value="normal">Normal</option><option value="hard" ${cfg.ai === 'hard' ? 'selected' : ''}>Difícil</option></select></label>
         <label class="mcf-row">Adversários (IA) <select id="mc-opp">${[1, 2, 3].map(n => `<option value="${n}" ${cfg.opp === n ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
         <label class="set-opt"><input type="checkbox" id="mc-cap" ${cfg.diceCap ? 'checked' : ''}/> <b>Limite de dados</b> — no máximo 8 dados de ataque e 6 de defesa por rolagem (contando críticos e rerrolagens), como os dados físicos da caixa. Sem marcar, ilimitado.</label>
         <label class="set-opt"><input type="checkbox" id="mc-one" ${cfg.pickOne ? 'checked' : ''}/> <b>Pegar 1 carta</b> — na Fase de Melhorias cada um pega <b>1 carta</b> e passa o resto (6 rodadas), em vez de 2 cartas (3 rodadas).</label>
@@ -145,7 +144,6 @@ export class CampaignUI {
       cfg.edition = (e.target as HTMLSelectElement).value as Edition;
       if (cfg.heroSet !== 'all') heroes.value = cfg.heroSet = cfg.edition === 'btg' ? 'btg' : 'core';
     };
-    (el.querySelector('#mc-ai') as HTMLSelectElement).onchange = e => { cfg.ai = (e.target as HTMLSelectElement).value as 'normal' | 'hard'; };
     (el.querySelector('#mc-pick') as HTMLSelectElement).onchange = e => { cfg.pickMode = (e.target as HTMLSelectElement).value as PickMode; };
     (el.querySelector('#mc-opp') as HTMLSelectElement).onchange = e => { cfg.opp = Number((e.target as HTMLSelectElement).value); };
     (el.querySelector('#mc-cap') as HTMLInputElement).onchange = e => { cfg.diceCap = (e.target as HTMLInputElement).checked; };

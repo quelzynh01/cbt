@@ -114,7 +114,7 @@ camp.onPlay = async mapId => {
     recordResult(camp.c!, game);
     backToCampaign();
   }, {
-    baseMs: c.elapsed ?? 0, onExit: backToCampaign, aiLevel: c.aiLevel ?? 'normal', roulette: c.played.length === 0, scenario: c.played.length + 1, resume,
+    baseMs: c.elapsed ?? 0, onExit: backToCampaign, aiLevel: c.aiLevel ?? 'hard', roulette: c.played.length === 0, scenario: c.played.length + 1, resume,
     autosave: (s, json) => {
       const cc = camp.c;
       if (!cc || s.winner || s.mapId !== mapId) return;
