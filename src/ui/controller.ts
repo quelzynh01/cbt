@@ -1,4 +1,5 @@
-import { SimpleAI, type AILevel } from '../ai/ai';
+import { SimpleAI, type AIAction, type AILevel } from '../ai/ai';
+import { AIBrain } from '../ai/brain';
 import { CARD_ART } from './cardArt';
 import { gameConfirm } from './dialog';
 import { bindInvEditor, invEditorHtml, type BagTok, type InvItem, type InvOptions } from './inventoryEditor';
@@ -226,6 +227,17 @@ export class Controller {
   private campaignEnd: ((g: Game) => void) | null = null;
   /** Nível da IA na campanha (fora dela vale a Configuração). */
   private campaignAI: AILevel | null = null;
+  /** IA com busca (Web Worker): decide as jogadas das Guildas da IA. `aiFor` fica para o posicionamento. */
+  private brain: AIBrain | null = null;
+  /** Muda a cada partida/estado novo: resposta da IA pedida antes disso é descartada. */
+  private aiGen = 0;
+  private aiThinking = false;
+  private resetAIs() {
+    this.ais = {};
+    this.aiGen++;
+    this.aiThinking = false;
+    this.brain?.reset();
+  }
   private aiFor(g: GuildId): SimpleAI { return (this.ais[g] ??= new SimpleAI(this.campaignEnd && this.campaignAI ? this.campaignAI : getSettings().ai)); }
 
   /** Salvamento automático da partida (campanha local; anfitrião online): recebe o estado a cada poucos segundos e ao sair. */
@@ -261,7 +273,7 @@ export class Controller {
     this.stopped = false;
     // partida salva: continua de onde parou
     this.game = info.resume ? new Game(getMap(mapId), info.resume) : Game.create(getMap(mapId), { ...opts, deploy: true });
-    this.ais = {};
+    this.resetAIs();
     this.bindHud();
     this.applySettings();
     this.renderer.setGame(this.game);
@@ -373,7 +385,7 @@ export class Controller {
       allHeroes: !!cfg.allHeroes,
     });
     if (debug) this.game.s.debug = { ...debug };
-    this.ais = {};
+    this.resetAIs();
     this.bindHud();
     this.renderer.setGame(this.game);
     this.loadAssets();
@@ -820,8 +832,24 @@ export class Controller {
     if (this.stopped || this.renderer.busy || this.game.s.winner || this.game.s.pending || this.deploying || this.deciding) return;
     const gs = this.game.currentGuild();
     if (gs.controller !== 'ai') return;
-    const ai = this.aiFor(gs.id);
-    const a = ai.next(this.game);
+    if (this.aiThinking) return;
+    this.aiThinking = true;
+    // o relógio (`elapsed`) anda enquanto a IA pensa: fica fora da comparação
+    const snap = (st: typeof game.s) => JSON.stringify({ ...st, elapsed: 0 });
+    const gen = this.aiGen, game = this.game, before = snap(game.s);
+    (this.brain ??= new AIBrain()).next(gs.id, game.s).then(a => {
+      if (gen !== this.aiGen) return;
+      this.aiThinking = false;
+      // o estado mudou enquanto a IA pensava (voltou a jogada, saiu da partida): pensa de novo
+      if (this.stopped) return;
+      if (game !== this.game || snap(game.s) !== before) { this.onIdle(); return; }
+      this.aiAct(gs.id, a);
+    });
+  }
+
+  private aiAct(guild: GuildId, a: AIAction) {
+    if (this.stopped || this.game.s.winner || this.game.s.pending || this.deciding) return;
+    const gs = this.game.guild(guild);
     const action: Action = a.type === 'move' ? { type: 'move', cell: a.cell, openDoors: true } : a;
     this.withDecisions(() => {
       if (!applyAction(this.game, gs.id, action)) applyAction(this.game, gs.id, { type: 'end' });
@@ -859,7 +887,7 @@ export class Controller {
     this.hud.resetDice();
     this.deciding = false;
     this.game = new Game(getMap(state.mapId), state);
-    this.ais = {};
+    this.resetAIs();
     this.history = [];
     this.turnStart = null;
     this.battle.close();
@@ -2806,7 +2834,7 @@ export class Controller {
     this.game.drain();
     this.deciding = false;
     if (this.choicePick) { this.choicePick = null; this.hud.monsterPanel(null).classList.remove('over'); this.closeReward(); }
-    this.ais = {};
+    this.resetAIs();
     document.getElementById('gameover')?.remove();
     this.hud.inspected = null;
     this.hud.selectedCard = null;

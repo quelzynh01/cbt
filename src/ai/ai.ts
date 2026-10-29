@@ -82,7 +82,10 @@ export type AIAction =
   | { type: 'rest'; opts?: RestOptions }
   | { type: 'end' };
 
-interface Plan { heroId: string; value: number; steps: AIAction[] }
+export interface Plan { heroId: string; value: number; steps: AIAction[] }
+
+/** Memória da IA entre turnos (copiada para as simulações da busca). */
+export interface AIMemory { idle: number; lastScore: number }
 
 // acertos esperados por dado (dados de 6 faces: 3 espadas, 2 arcos, 1 crítico que explode)
 const ATK_EXP = (t: string) => (t === 'melee' ? 0.8 : 0.6);
@@ -137,6 +140,10 @@ export class SimpleAI {
   private aggr = 0;
   /** Modo do Herói que está sendo planejado: com pouca Vida e sem objetivo perto, procura "?" (cura) ou se sacrifica em Monstros. */
   private curMode: 'heal' | 'sac' | null = null;
+  /** Plano escolhido de fora (busca): usado no lugar do `plan()` na próxima ativação. */
+  private forced: { plan: Plan | null } | null = null;
+  /** Coletando todos os planos considerados (candidatos da busca). */
+  private collect: Plan[] | null = null;
 
   /** Pesos da IA (ajustados por simulação: tools/sim — ver AI_PARAMS). */
   readonly p: AIParams;
@@ -158,7 +165,8 @@ export class SimpleAI {
       this.queue = [];
       this.usedToken = false;
       this.endTokens = 0;
-      const plan = this.plan(g);
+      const plan = this.forced ? this.forced.plan : this.plan(g);
+      this.forced = null;
       // turno adicional (Poção): não dá para Descansar
       if (!plan) return g.s.extraTurnOn ? { type: 'end' } : { type: 'rest', opts: this.restOptions(g, g.currentGuild().id) };
       this.queue = plan.steps.slice();
@@ -218,6 +226,38 @@ export class SimpleAI {
       this.attackedHero = h.id;
     }
     return a;
+  }
+
+  /** Para a busca: o plano que a IA escolheria (null = Descansar) e os melhores planos de cada Herói.
+   *  Atualiza a memória (turnos sem progresso) como o `plan()` normal. */
+  planCandidates(g: Game, perHero = 3, total = 7): { chosen: Plan | null; cands: Plan[] } {
+    this.collect = [];
+    let chosen: Plan | null, all: Plan[];
+    try { chosen = this.plan(g); all = this.collect; } finally { this.collect = null; }
+    all.sort((a, b) => b.value - a.value);
+    const seen = new Set<string>(), per = new Map<string, number>(), cands: Plan[] = [];
+    for (const p of all) {
+      const k = p.heroId + JSON.stringify(p.steps);
+      if (seen.has(k) || (per.get(p.heroId) ?? 0) >= perHero) continue;
+      seen.add(k); per.set(p.heroId, (per.get(p.heroId) ?? 0) + 1);
+      cands.push(p);
+    }
+    // o melhor de cada Herói sempre entra; o resto pela nota
+    const firsts = cands.filter((p, i) => cands.findIndex(x => x.heroId === p.heroId) === i);
+    const out = [...firsts, ...cands.filter(p => !firsts.includes(p))].slice(0, Math.max(total, firsts.length));
+    return { chosen, cands: out };
+  }
+
+  /** Usa este plano (null = Descansar) na próxima vez que a IA for escolher uma ativação. */
+  force(plan: Plan | null) { this.forced = { plan }; }
+
+  memory(): AIMemory { return { idle: this.idle, lastScore: this.lastScore }; }
+  setMemory(m: AIMemory) { this.idle = m.idle; this.lastScore = m.lastScore; }
+
+  /** Valor da posição do Herói (distância até os objetivos e perigo), para avaliar o tabuleiro. */
+  positionOf(g: Game, h: Unit): number {
+    if (!h.alive || !h.cell) return 0;
+    return this.positionValue(g, h, h.cell, this.goalDistances(g, h.guild!, h));
   }
 
   /** Habilidades usadas como ação: Relâmpago (Brenna) e Ataque Mental (Chooloo). */
@@ -394,6 +434,7 @@ export class SimpleAI {
     let best: Plan | null = null;
     const consider = (value: number, steps: AIAction[]) => {
       value += this.noise(); // partida travada: varia o caminho
+      if (this.collect) this.collect.push({ heroId: h.id, value, steps });
       if (!best || value > best.value) best = { heroId: h.id, value, steps };
     };
     const startCell = h.cell!;
