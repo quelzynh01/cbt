@@ -88,6 +88,7 @@ sh tools/tests/run-engine.sh fender        # Fender sempre pergunta (mesmo com 1
 sh tools/tests/run-engine.sh bencao        # Bênção: o Aliado não troca de volta para quem já jogou; troca normal antes de agir continua
 sh tools/tests/run-engine.sh curairma      # Irmã do Prazer/Lorde: ✷ cura 2 antes da retribuição (Espetado/Amuleto); dano além da Vida conta; vive só com Vida >= 1
 sh tools/tests/run-engine.sh aiitems       # IA: poções no fim da ativação e Baús/poções com o Herói mais seguro no Descanso
+sh tools/tests/run-engine.sh bauativo      # só o Herói ativado pega o que está no chão (Templo: o outro Herói num Baú amaldiçoado não abre sozinho)
 sh tools/tests/run-engine.sh duel 6       # IA nova x IA antiga (tools/tests/engine/ai_old.ts = IA do commit anterior), partidas espelhadas; P={...} muda os pesos
 sh tools/tests/run-engine.sh sduel 4        # IA com busca (src/ai/search.ts) x IA comum, partidas espelhadas por mapa; MS=ms de busca, W={pesos da avaliação}, MAP=id, SEED=n, V=1 (notas de cada plano). Rode um processo por mapa em paralelo (cuidado com a memória)
 sh tools/tests/run-engine.sh pduel 6       # IA comum A x B (PA/PB={params}), partidas espelhadas por mapa; some vários processos (SEED=n diferentes)

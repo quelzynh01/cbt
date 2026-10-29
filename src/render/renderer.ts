@@ -101,7 +101,7 @@ function drawSword(ctx: CanvasRenderingContext2D, s: number) {
 }
 
 /** O que a animação do golpe precisa saber (evento de ataque ou 'strike'). */
-type Strike = Pick<Extract<GameEvent, { t: 'strike' }>, 'attackerId' | 'cardName' | 'attackType' | 'targets' | 'cleave' | 'thrown' | 'sfx'>;
+type Strike = Pick<Extract<GameEvent, { t: 'strike' }>, 'attackerId' | 'cardName' | 'attackType' | 'targets' | 'cleave' | 'thrown' | 'sfx'> & { /** ✷ no ataque (evento 'attack') */ crits?: number };
 
 export class Renderer {
   readonly canvas: HTMLCanvasElement;
@@ -653,7 +653,7 @@ export class Renderer {
           a.lunge = { dx, dy, t0: now + 150 / sp, dur: 620 / sp, depth: Math.floor(t.pos.gx) + Math.floor(t.pos.gy) };
           // som de cada Monstro (Orcs) ou da arma
           const base = a.defId.replace(/\d+$/, '');
-          setTimeout(() => isSister(base) ? playSisterAttack(base) : play(base === 'orc' || base === 'capitao_orc' ? 'orc-sound' : 'atack-sword'), 330 / sp);
+          setTimeout(() => isSister(base) ? playSisterAttack(base, (e.crits ?? 0) > 0 && this.survivesAttack(e.attackerId)) : play(base === 'orc' || base === 'capitao_orc' ? 'orc-sound' : 'atack-sword'), 330 / sp);
         } else if (a.defId.replace(/\d+$/, '') === 'lorde_presas' && !e.thrown) {
           let longest = 0;
           for (const tg of e.targets) {
@@ -681,7 +681,7 @@ export class Renderer {
             this.projectiles.push({ from, to, t0: now + 250 / sp, dur: Math.min(900, 380 + dist * 0.35) / sp, kind: e.thrown ? 'blade' : kind, arc: e.thrown ? Math.max(20, Math.min(70, dist * 0.15)) : Math.max(50, Math.min(220, dist * 0.5)) });
           }
           const base = a.defId.replace(/\d+$/, '');
-          setTimeout(() => isSister(base) ? playSisterAttack(base) : play(e.thrown ? 'atack-sword' : base === 'goblin' ? 'archer-sound' : kind === 'orb' ? 'atack-magic' : 'atack-bow'), 230 / sp);
+          setTimeout(() => isSister(base) ? playSisterAttack(base, (e.crits ?? 0) > 0 && this.survivesAttack(e.attackerId)) : play(e.thrown ? 'atack-sword' : base === 'goblin' ? 'archer-sound' : kind === 'orb' ? 'atack-magic' : 'atack-bow'), 230 / sp);
         }
         // investida: encosta no alvo em 150 + 35% de 620 ms
         if (e.attackType === 'melee' && !e.thrown) { this.lastImpact = 370 / sp; return 820 / sp; }
@@ -813,6 +813,15 @@ export class Renderer {
         break;
     }
     return dur;
+  }
+
+  /** O atacante continua vivo depois deste ataque (nenhuma morte dele na fila antes do próximo ataque ou turno: ex. Espetado, Amuleto). */
+  private survivesAttack(id: string): boolean {
+    for (const q of this.queue) {
+      if (q.t === 'attack' || q.t === 'turn') break;
+      if (q.t === 'death' && q.id === id) return false;
+    }
+    return true;
   }
 
   /** Marcadores pegos pelo mesmo Herói logo em seguida (mesmo Espaço): saem da fila juntos para aparecerem de uma vez. */

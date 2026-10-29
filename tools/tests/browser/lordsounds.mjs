@@ -1,5 +1,5 @@
 // Distrito Sempressombrio: Alma do Lorde Presas (espírito azul); ataque do Lorde = morcego vai e volta (som próprio);
-// Irmãs: ✷ no ataque = risada (sorteada); no golpe, o som do ataque e depois a fala de cada Irmã
+// Irmãs: ✷ no ataque = risada (sorteada); no golpe, o som do ataque; a fala de cada Irmã só com ✷ e se ela sobreviver ao ataque
 import puppeteer from 'puppeteer-core';
 const OUT = process.argv[2] ?? '.';
 const browser = await puppeteer.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true, args: ['--autoplay-policy=no-user-gesture-required'] });
@@ -55,26 +55,30 @@ await clickAll();
 await wait(1500);
 const lordSounds = await page.evaluate(() => window.__played.slice());
 console.log('morcego visto:', batSeen, 'sons:', lordSounds.join(','));
-// Irmãs: sem acertos (risada) e com ✷ (fala)
-const sister = async crit => {
-  await page.evaluate(cr => {
+// Irmãs: sem acertos (sem fala), com ✷ (fala) e com ✷ mas morrendo no Amuleto da Retribuição (sem fala)
+const sister = async (crit, dies = false) => {
+  await page.evaluate((cr, dies) => {
     const c = window.cbt, g = c.game;
     const m = g.units().find(u => u.kind === 'monster' && u.alive && u.cell && u.defId.startsWith('irma_dor'));
     const h = g.heroesOf(g.currentGuild().id).find(u => u.alive && u.cell);
+    if (dies) { m.wounds = g.maxHp(m) - 1; h.cards.push({ uid: 'amu-ret', defId: 'amuleto_retribuicao', exhausted: false, uses: 0 }); }
     m.cell = { ...h.cell }; c.renderer.sync();
     const orig = g.roll.bind(g);
     g.roll = (...a) => a[2] !== 'shield' ? (cr ? { faces: ['crit', 'blank', 'blank', 'blank'], successes: 1, crits: 1 } : { faces: Array(a[0]).fill('blank'), successes: 0, crits: 0 }) : { faces: ['shield', 'shield', 'shield'], successes: 3, crits: 0 };
     window.__played = [];
     c.withDecisions(() => { g.monsterAttack(m, h, 'alerta'); return true; }, () => { c.pushLocal(g.drain()); g.roll = orig; });
-  }, crit);
+    window.__sisterAlive = m.alive;
+  }, crit, dies);
   await clickAll();
   await wait(4500);
   return page.evaluate(() => window.__played.slice());
 };
-const s1 = await sister(false), s2 = await sister(true);
-console.log('Irmã sem acertos:', s1.join(','), '| com ✷:', s2.join(','));
+const s1 = await sister(false), s2 = await sister(true), s3 = await sister(true, true);
+const s3dead = await page.evaluate(() => !window.__sisterAlive);
+console.log('Irmã sem acertos:', s1.join(','), '| com ✷:', s2.join(','), '| com ✷ e morre:', s3.join(','), 'morreu:', s3dead);
 const ok = info.soul && /Alma/.test(info.name) && batSeen && lordSounds.includes('atack-lorde-pressas.mp3')
-  && s1.some(x => x.startsWith('atack-sister')) && !s1.some(x => x.startsWith('lol-sister')) && s1.indexOf('sister-dor-crit.mp3') > s1.findIndex(x => x.startsWith('atack-sister'))
-  && s2.some(x => x.startsWith('lol-sister')) && s2.includes('sister-dor-crit.mp3');
+  && s1.some(x => x.startsWith('atack-sister')) && !s1.some(x => x.startsWith('lol-sister')) && !s1.includes('sister-dor-crit.mp3')
+  && s2.some(x => x.startsWith('lol-sister')) && s2.indexOf('sister-dor-crit.mp3') > s2.findIndex(x => x.startsWith('atack-sister'))
+  && s3dead && s3.some(x => x.startsWith('atack-sister')) && !s3.includes('sister-dor-crit.mp3');
 console.log(ok ? 'ALMA, MORCEGO E SONS OK' : 'FALHOU');
 await browser.close();

@@ -1716,7 +1716,8 @@ export class Game {
     this.applyFree();
   }
 
-  /** Depois de um combate: Heróis da Guilda da vez cujo Espaço ficou sem Inimigos pegam o que está no chão (p.25). */
+  /** Depois de um combate: se o Espaço do Herói ativado ficou sem Inimigos, ele pega o que está no chão (p.25).
+   *  Os outros Heróis da Guilda só pegam quando forem ativados. */
   private pickupAfterCombat() {
     if (this.s.winner) return;
     for (const u of this.heroesOf(this.currentGuild().id)) {
@@ -3289,9 +3290,11 @@ export class Game {
       rr: idx.length ? { before, idx, asked: false } : undefined };
   }
 
-  /** Pegar marcadores automaticamente se não houver Inimigo no Espaço (p.25). */
+  /** Pegar marcadores se não houver Inimigo no Espaço (p.25). Só o Herói ativado pega: quem foi empurrado,
+   *  trocado de lugar ou ficou num Espaço que esvaziou (outro Herói matou o Inimigo) só pega quando o jogador o ativar. */
   private pickup(h: Unit) {
     if (!h.alive || !h.cell) return;
+    if (this.s.activation?.heroId !== h.id) return;
     const k = key(h.cell);
     const list = this.s.floor[k];
     if (!list?.length) return;

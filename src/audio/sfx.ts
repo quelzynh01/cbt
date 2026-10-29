@@ -85,9 +85,10 @@ const SISTER_LOL: Sfx[] = ['lol-sister1', 'lol-sister2', 'lol-sister3'];
 /** Duração dos sons de ataque (ms): a fala começa quando o golpe termina. */
 const SISTER_ATTACK_MS: Partial<Record<Sfx, number>> = { 'atack-sister1': 2330, 'atack-sister2': 3060 };
 export const isSister = (defId: string) => /^irma_(dor|prazer)/.test(defId);
-export function playSisterAttack(defId: string) {
+/** Golpe da Irmã; a fala dela vem depois do golpe só com `speak` (✷ no ataque e ela sobreviveu). */
+export function playSisterAttack(defId: string, speak: boolean) {
   const pick = playRandom(SISTER_ATTACK);
-  setTimeout(() => play(defId.startsWith('irma_dor') ? 'sister-dor-crit' : 'sister-prazer-crit'), (SISTER_ATTACK_MS[pick] ?? 2500) + 100);
+  if (speak) setTimeout(() => play(defId.startsWith('irma_dor') ? 'sister-dor-crit' : 'sister-prazer-crit'), (SISTER_ATTACK_MS[pick] ?? 2500) + 100);
 }
 export function playSisterCrit() { playRandom(SISTER_LOL); }
 

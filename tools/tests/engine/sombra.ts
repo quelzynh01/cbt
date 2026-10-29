@@ -20,6 +20,7 @@ const step = (g: Game, color: string, faces: string[]) => {
   const orig = gg.roll.bind(g);
   gg.roll = (...a: unknown[]) => (a[0] === 2 ? { ...orig(...a), faces } : orig(...a));
   grom.cell = { c, r };
+  g.s.activation = { heroId: grom.id, mp: 3, moved: true, moveLocked: false, attacked: false }; // só o Herói ativado pega
   gg.pickup(grom);
   gg.roll = orig;
   return { k, ev: g.drain().find(e => e.t === 'summonRoll') as { cell: unknown; faces: string[] } | undefined };
