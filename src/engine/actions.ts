@@ -4,7 +4,7 @@ import type { Cell, GuildId } from './types';
 /** Jogadas serializáveis: é isto que viaja pela rede no modo online. */
 export type Action =
   | { type: 'activate'; heroId: string }
-  | { type: 'move'; cell: Cell; openDoors?: boolean }
+  | { type: 'move'; cell: Cell; openDoors?: boolean; /** IA: caminho com menos Reações de Alerta */ safe?: boolean }
   | { type: 'door'; doorId: string }
   | { type: 'attack'; cardUid: string; targetId: string; secondaryId?: string; sacrifice?: boolean; boosts?: string[] }
   | { type: 'token'; tokenId: string }
@@ -59,7 +59,7 @@ export function applyAction(g: Game, by: GuildId, a: Action): boolean {
 function turnAction(g: Game, a: Action): boolean {
   switch (a.type) {
     case 'activate': return g.activate(a.heroId);
-    case 'move': return g.moveTo(a.cell, !!a.openDoors);
+    case 'move': return g.moveTo(a.cell, !!a.openDoors, !!a.safe);
     case 'door': return g.toggleDoor(a.doorId);
     case 'attack': return g.attack(a.cardUid, a.targetId, a.secondaryId, !!a.sacrifice, a.boosts ?? []);
     case 'token': return g.useToken(a.tokenId);

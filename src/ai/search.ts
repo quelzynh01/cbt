@@ -14,6 +14,8 @@ export interface SearchOpts {
   timeMs: number;
   /** Simulações mínimas por plano antes de descartar os piores. */
   minSamples: number;
+  /** Com 2 planos restantes, para quando cada um tiver estas simulações (antes de acabar o tempo). */
+  maxSamples: number;
   /** Planos candidatos por Herói / no total. */
   perHero: number;
   total: number;
@@ -32,7 +34,7 @@ export interface EvalWeights {
 
 export const EVAL_W: EvalWeights = { win: 400, mission: 40, nearWin: 12, token: 9, hp: 1.2, alive: 5, exhausted: 0.6, coin: 0.35, kill: 2, pos: 0.25, next: 0.3, prior: 0.15, boss: 3, plan: 0.5 };
 
-export const SEARCH_OPTS: SearchOpts = { timeMs: 1500, minSamples: 6, perHero: 3, total: 7, w: EVAL_W };
+export const SEARCH_OPTS: SearchOpts = { timeMs: 1500, minSamples: 6, maxSamples: 24, perHero: 3, total: 7, w: EVAL_W };
 
 /** Cópia da partida para simular, sem informação escondida: outra semente para os dados e os marcadores virados
  *  (e o baralho de Recompensas) embaralhados entre si. */
@@ -136,14 +138,14 @@ function rollout(g0: Game, me: GuildId, plan: Plan | null, seed: number, params:
 
 export interface SearchResult { plan: Plan | null; tried: number; samples: number; scores: { label: string; mean: number; n: number }[] }
 
-/** Escolhe a ativação da Guilda atual. `ai` é a IA de verdade dessa Guilda (a memória dela é atualizada como no `plan()`). */
-export function searchTurn(g: Game, ai: SimpleAI, opts: SearchOpts = SEARCH_OPTS, params: Partial<AIParams> = {}): SearchResult {
+/** Preparação da busca: os planos candidatos (da IA comum + Descansar) e a nota de cada um. Devolve um SearchResult quando não precisa simular. */
+function prepare(g: Game, ai: SimpleAI, opts: SearchOpts) {
   const me = g.currentGuild().id;
   const { chosen, cands } = ai.planCandidates(g, opts.perHero, opts.total);
   const options: (Plan | null)[] = cands.slice();
   if (g.canRest()) options.push(null);
   if (chosen && !options.some(p => p && p.heroId === chosen.heroId && JSON.stringify(p.steps) === JSON.stringify(chosen.steps))) options.unshift(chosen);
-  if (options.length <= 1) return { plan: options[0] ?? chosen, tried: options.length, samples: 0, scores: [] };
+  if (options.length <= 1) return { plan: options[0] ?? chosen, tried: options.length, samples: 0, scores: [] } as SearchResult;
   const mem = ai.memory();
   // Descansar: a IA comum descansou = vale tanto quanto o melhor plano; senão, um pouco menos
   const restValue = chosen ? Math.min(2, cands[0]?.value ?? 0) : cands[0]?.value ?? 0;
@@ -151,9 +153,40 @@ export function searchTurn(g: Game, ai: SimpleAI, opts: SearchOpts = SEARCH_OPTS
   const stats = options.map(p => ({ p, sum: 0, n: 0, prior: isChosen(p) ? 1 : 0, pv: Math.max(-10, Math.min(30, p ? p.value : restValue)) }));
   // média das simulações + a nota da IA comum (o plano que ela escolheria leva uma pequena vantagem: desempata o ruído)
   const mean = (s: typeof stats[number]) => (s.n ? s.sum / s.n : -Infinity) + s.prior * opts.w.prior * Math.sqrt(opts.w.win) + s.pv * opts.w.plan;
-  let alive = stats.slice();
+  return { me, options, mem, stats, mean, seedBase: (g.s.rng ^ 0x5bd1e995) >>> 0 };
+}
+type Prep = Exclude<ReturnType<typeof prepare>, SearchResult>;
+type Stat = Prep['stats'][number];
+
+/** Depois de cada rodada: com minSamples, corta a metade pior. Devolve os vivos e se já dá para parar. */
+function prune(alive: Stat[], prep: Prep, opts: SearchOpts): { alive: Stat[]; stop: boolean } {
+  if (alive[0].n < opts.minSamples) return { alive, stop: false };
+  alive.sort((a, b) => prep.mean(b) - prep.mean(a));
+  alive = alive.slice(0, Math.max(2, Math.ceil(alive.length / 2)));
+  return { alive, stop: alive.length === 2 && alive[0].n >= opts.maxSamples };
+}
+
+function result(prep: Prep, alive: Stat[], total: number): SearchResult {
+  // entre os que sobraram, a melhor média
+  const best = alive.reduce((a, b) => (prep.mean(b) > prep.mean(a) ? b : a));
+  return {
+    plan: best.p, tried: prep.options.length, samples: total,
+    scores: prep.stats.map(s => ({ label: s.p ? `${s.p.heroId}:${s.p.steps.map(x => x.type).join('+')}` : 'descansar', mean: s.n ? s.sum / s.n : NaN, n: s.n })),
+  };
+}
+
+/** Soma das simulações de cada plano `plans[i]` com as sementes `seeds` (a mesma conta no Worker principal e nos auxiliares). */
+export function rolloutSums(g: Game, me: GuildId, plans: (Plan | null)[], seeds: number[], params: Partial<AIParams>, mem: ReturnType<SimpleAI['memory']>, w: EvalWeights): number[] {
+  return plans.map(p => seeds.reduce((s, seed) => s + rollout(g, me, p, seed, params, mem, w), 0));
+}
+
+/** Escolhe a ativação da Guilda atual. `ai` é a IA de verdade dessa Guilda (a memória dela é atualizada como no `plan()`). */
+export function searchTurn(g: Game, ai: SimpleAI, opts: SearchOpts = SEARCH_OPTS, params: Partial<AIParams> = {}): SearchResult {
+  const prep = prepare(g, ai, opts);
+  if ('plan' in prep) return prep;
+  const { me, mem, seedBase } = prep;
+  let alive = prep.stats.slice();
   const t0 = Date.now();
-  const seedBase = (g.s.rng ^ 0x5bd1e995) >>> 0;
   let j = 0, total = 0;
   // rodadas: todos os vivos recebem as mesmas sementes (comparação justa); depois de minSamples, corta a metade pior
   while (alive.length > 1) {
@@ -162,18 +195,52 @@ export function searchTurn(g: Game, ai: SimpleAI, opts: SearchOpts = SEARCH_OPTS
       if (Date.now() - t0 > opts.timeMs) break;
     }
     if (Date.now() - t0 > opts.timeMs) break;
-    if (alive[0].n >= opts.minSamples) {
-      alive.sort((a, b) => mean(b) - mean(a));
-      alive = alive.slice(0, Math.max(2, Math.ceil(alive.length / 2)));
-      if (alive.length === 2 && alive[0].n >= opts.minSamples * 4) break;
-    }
+    const pr = prune(alive, prep, opts);
+    alive = pr.alive;
+    if (pr.stop) break;
   }
-  // entre os que sobraram, a melhor média
-  const best = alive.reduce((a, b) => (mean(b) > mean(a) ? b : a));
-  return {
-    plan: best.p, tried: options.length, samples: total,
-    scores: stats.map(s => ({ label: s.p ? `${s.p.heroId}:${s.p.steps.map(x => x.type).join('+')}` : 'descansar', mean: s.n ? s.sum / s.n : NaN, n: s.n })),
-  };
+  return result(prep, alive, total);
+}
+
+/** Workers auxiliares: cada rodada, cada um simula os planos vivos com as suas sementes. */
+export interface RolloutPool {
+  readonly size: number;
+  /** Começa uma busca: manda a partida e os planos uma vez só. Devolve o número da busca. */
+  begin(job: { state: GameState; me: GuildId; plans: (Plan | null)[]; params: Partial<AIParams>; mem: ReturnType<SimpleAI['memory']>; w: EvalWeights }): number;
+  /** Uma rodada da busca `sid`: `seeds[k]` são as sementes do auxiliar k; devolve as somas (alinhadas com `idx`) ou null se ele não respondeu. */
+  run(sid: number, idx: number[], seeds: number[][]): Promise<(number[] | null)[]>;
+}
+
+/** Mesma busca, com as simulações divididas entre este Worker e os auxiliares (mais simulações no mesmo tempo). */
+export async function searchTurnParallel(g: Game, ai: SimpleAI, opts: SearchOpts, params: Partial<AIParams>, pool: RolloutPool): Promise<SearchResult> {
+  const prep = prepare(g, ai, opts);
+  if ('plan' in prep) return prep;
+  const { me, mem, seedBase, stats } = prep;
+  const sid = pool.begin({ state: g.s, me, plans: prep.options, params, mem, w: opts.w });
+  let alive = stats.slice();
+  const t0 = Date.now();
+  let j = 0, total = 0;
+  const K = pool.size;
+  while (alive.length > 1) {
+    const idx = alive.map(st => stats.indexOf(st));
+    const seedsOf = (k: number) => [j + 2 * k, j + 2 * k + 1].map(x => seedBase + x * 7919);
+    const pending = pool.run(sid, idx, Array.from({ length: K }, (_, k) => seedsOf(k)));
+    // a parte deste Worker, enquanto os auxiliares trabalham
+    for (const seed of seedsOf(K)) {
+      for (const st of alive) { st.sum += rollout(g, me, st.p, seed, params, mem, opts.w); st.n++; total++; }
+      if (Date.now() - t0 > opts.timeMs) break;
+    }
+    j += 2 * (K + 1);
+    for (const sums of await pending) {
+      if (!sums) continue;
+      sums.forEach((v, i) => { stats[idx[i]].sum += v; stats[idx[i]].n += 2; total += 2; });
+    }
+    if (Date.now() - t0 > opts.timeMs) break;
+    const pr = prune(alive, prep, opts);
+    alive = pr.alive;
+    if (pr.stop) break;
+  }
+  return result(prep, alive, total);
 }
 
 /** IA com busca: igual à comum, mas a escolha de cada ativação passa pela simulação. */
@@ -182,9 +249,19 @@ export class SearchAI extends SimpleAI {
     super('hard', rnd, simParams);
   }
   last: SearchResult | null = null;
+  private needsSearch(g: Game): boolean { return !g.s.puppet && !g.s.activation && !g.s.pending && !g.s.winner; }
   next(g: Game): AIAction {
-    if (!g.s.puppet && !g.s.activation && !g.s.pending && !g.s.winner) {
+    if (this.needsSearch(g)) {
       this.last = searchTurn(g, this, this.opts, this.simParams);
+      this.force(this.last.plan);
+    }
+    return super.next(g);
+  }
+  /** Com Workers auxiliares (navegador). Sem eles, igual ao `next`. */
+  async nextParallel(g: Game, pool: RolloutPool | null): Promise<AIAction> {
+    if (!pool?.size) return this.next(g);
+    if (this.needsSearch(g)) {
+      this.last = await searchTurnParallel(g, this, this.opts, this.simParams, pool);
       this.force(this.last.plan);
     }
     return super.next(g);

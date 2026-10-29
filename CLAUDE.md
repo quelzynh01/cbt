@@ -19,7 +19,7 @@ Jogo de tabuleiro tático, clone de Arcadia Quest (Core + Beyond the Grave + her
   - `types.ts`: `GameState` (serializável em JSON, é o que vai pela rede) e eventos (`GameEvent`).
   - `cards.ts` / `data.ts`: cartas, heróis, guildas, maldições. `extraHeroes.ts`, `heroBan.ts`, `titles.ts`, `tombstones.ts`.
   - `board.ts` + `maps/`: um arquivo por mapa (paredes, portas, áreas iniciais, missões, títulos).
-- `src/ai/` — IA: `SimpleAI` (heurística) + `search.ts` (busca Monte Carlo: testa os melhores planos da SimpleAI simulando a resposta dos adversários), que roda num Web Worker (`aiWorker.ts`, `brain.ts`). Mudou regra? Veja se a IA e o modo `'auto'` dos hooks continuam certos.
+- `src/ai/` — IA: `SimpleAI` (heurística) + `search.ts` (busca Monte Carlo: testa os melhores planos da SimpleAI simulando a resposta dos adversários), que roda num Web Worker (`aiWorker.ts`, `brain.ts`), com até 3 Workers auxiliares que dividem as simulações (`RolloutPool`). Mudou regra? Veja se a IA e o modo `'auto'` dos hooks continuam certos.
 - `src/ui/controller.ts` — liga engine, renderer, HUD e rede. Cuida dos modos local/host/client, de desfazer, descanso, vingança, deploy e votação.
 - `src/ui/hud.ts` — HUD estilo Dota (barra de baixo, placar em cima, dados no centro, avisos à esquerda). O combate é só o painel de dados do centro (`hud.centerDice` / `askDecision` / `spectateDecision`), o mesmo para todos na partida; a tela 2D de batalha ("Sempre") foi removida — `src/ui/battle.ts` hoje só serve para a escolha da arma (modo `prepare`).
 - `src/ui/campaignUI.ts` — campanha local. `src/ui/lobby.ts` — lobby online e campanha online.
@@ -90,6 +90,10 @@ sh tools/tests/run-engine.sh curairma      # Irmã do Prazer/Lorde: ✷ cura 2 a
 sh tools/tests/run-engine.sh aiitems       # IA: poções no fim da ativação e Baús/poções com o Herói mais seguro no Descanso
 sh tools/tests/run-engine.sh duel 6       # IA nova x IA antiga (tools/tests/engine/ai_old.ts = IA do commit anterior), partidas espelhadas; P={...} muda os pesos
 sh tools/tests/run-engine.sh sduel 4        # IA com busca (src/ai/search.ts) x IA comum, partidas espelhadas por mapa; MS=ms de busca, W={pesos da avaliação}, MAP=id, SEED=n, V=1 (notas de cada plano). Rode um processo por mapa em paralelo (cuidado com a memória)
+sh tools/tests/run-engine.sh pduel 6       # IA comum A x B (PA/PB={params}), partidas espelhadas por mapa; some vários processos (SEED=n diferentes)
+sh tools/tests/run-engine.sh ssduel 3      # busca A x busca B (OA/OB={opções da busca, ex. {"timeMs":1200,"maxSamples":96}})
+sh tools/tests/run-engine.sh samehash 3    # hash do estado final de partidas IA x IA: otimização do motor não pode mudar o hash (OLD=1 = unitsAt/status antigos; BTG=1)
+sh tools/tests/run-engine.sh safepath      # caminho seguro da IA: nunca mais Reações de Alerta que o normal, mesmos destinos
 sh tools/tests/run-engine.sh diag 4        # IA x IA nos mapas Clássicos com PvP: Ferimentos por origem (Vingança/Alerta/Heróis), ataques em Herói antes da 1ª Missão PvE, turno da 1ª PvE, ataques em Monstro que não matam; por mapa (P={...}, MAP=id)
 sh tools/tests/run-engine.sh xsim 30 mix   # partidas IA x IA nos mapas Clássicos (mix|core|extra; MAP=id, SEED=n repete uma, BTG=1 inclui Beyond, V=1 detalha) -> 0 travadas/0 erros
 sh tools/tests/run-engine.sh camp 20       # CAMPANHA INTEIRA só de IAs (6 cenários + Fase de Melhorias): estatísticas do Templo (barreira, mortes por causa, kit). Duelo A x B: PA/PB={params da IA}, OLDB=buy (B compra do jeito antigo), SEEDOFF=n, TR=1 (linha do tempo do Templo); some os "DUELO" de vários processos com sh tools/tests/ab_merge.sh .out/ab/x_*.txt (precisa de ~480 campanhas por lado para ±2%)
@@ -129,6 +133,7 @@ node tools/tests/browser/blessenter.mjs <pasta-prints>              # Bênção:
 node tools/tests/browser/alertwarn.mjs <pasta-prints>               # Templo: aviso de Reação de Alerta (Irmãs) aparece antes de andar
 node tools/tests/browser/rratk.mjs <pasta-prints>                   # online: Rerrolagem do ATAQUE do amigo acompanhada no painel de dados
 node tools/tests/browser/aiworker.mjs <pasta-prints>                # IA com busca no Web Worker: IA x IA no Modo Teste, turnos andam e a tela não trava (PORT=, SECS=)
+node tools/tests/browser/wpar.mjs                                   # Workers auxiliares da busca: simulações por jogada com 0 x 3 auxiliares (HELPERS=0,3, MS=)
 ```
 
 O jogo expõe `window.cbt` (o controller) para os testes manipularem o estado. Modo Teste via `localStorage['cbt.test']`.

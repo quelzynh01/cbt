@@ -2,6 +2,7 @@ import { key, parseKey, sameCell } from '../engine/board';
 import { CARDS, HEROES, MONSTERS } from '../engine/data';
 import type { Game, RestOptions } from '../engine/game';
 import type { CardInst, Cell, GuildId, MissionDef, Token, Unit } from '../engine/types';
+import { MinHeap } from '../engine/heap';
 
 // IA das Guildas. Decide uma ação por vez (o controlador anima entre elas).
 // Um nível só (Difícil): sem acaso, lê as ameaças dos Heróis inimigos, usa poções na hora certa, caça quem carrega
@@ -62,13 +63,21 @@ export interface AIParams {
   pvpEarly: number;
   /** Sem Missão do mapa: até que distância um Herói Inimigo ferido atrai a IA. */
   chaseDist: number;
+  /** Custo de exaustar uma carta de Ataque mais forte que a mais fraca pronta (por dado a mais): guarda a arma boa para quem precisa dela.
+   *  Medido (pduel, ~1500 partidas): neutro, por isso fica 0. */
+  cardKeep: number;
+  /** Anda pelo caminho com menos Reações de Alerta (mesmo gastando mais PM). Medido: neutro (quase toda Reação vem de
+   *  sair do Espaço inicial, que nenhum caminho evita) e ~10% mais lento na busca; por isso fica desligado. */
+  safePath: boolean;
+  /** Multiplicador do perigo de Monstros que Atordoam (Feral Martelador: o Herói fica sem Defesa depois). */
+  dazeW: number;
 }
 export const AI_PARAMS: AIParams = { pvpDoneKill: 1, pvpDoneDmg: 0.7, pvpDoneAttract: false, posW: 0.6, missionTok: 9, idleStart: 0, guardKill: 2, hiddenW: 3, denyW: 1, denyUrgentOnly: false,
-  riskW: 2.6, stayW: 0.8, pvpNeedPve: 1, leaderHi: 1.4, leaderLo: 0.6, pveFirst: 0.3, finisher: 4, winKill: 25, peace: 0.2, rush: 3, chip: 1, reach: true, goodKill: 0.5, pvpEarly: 0.3, chaseDist: 5 };
+  riskW: 2.6, stayW: 0.8, pvpNeedPve: 1, leaderHi: 1.4, leaderLo: 0.6, pveFirst: 0.3, finisher: 4, winKill: 25, peace: 0.2, rush: 3, chip: 1, reach: true, goodKill: 0.5, pvpEarly: 0.3, chaseDist: 5, cardKeep: 0, safePath: false, dazeW: 1 };
 
 export type AIAction =
   | { type: 'activate'; heroId: string }
-  | { type: 'move'; cell: Cell }
+  | { type: 'move'; cell: Cell; safe?: boolean }
   /** Abrir uma porta ao lado (sem atravessar): revela quem está do outro lado para atacar. */
   | { type: 'door'; doorId: string }
   | { type: 'attack'; cardUid: string; targetId: string; boosts?: string[]; sacrifice?: boolean }
@@ -212,8 +221,9 @@ export class SimpleAI {
     }
     if (a.type === 'move') {
       if (!g.canMove() || !h?.cell) return this.next(g);
-      const nd = g.reachable(h, g.s.activation!.mp, h.cell, true).get(key(a.cell));
+      const nd = g.reachable(h, g.s.activation!.mp, h.cell, true, false, this.p.safePath).get(key(a.cell));
       if (!nd || !nd.canEnd) return this.next(g);
+      return this.p.safePath ? { ...a, safe: true } : a;
     }
     if (a.type === 'door') {
       const d = g.s.doors.find(x => x.id === a.doorId);
@@ -429,7 +439,8 @@ export class SimpleAI {
   /** `moveOnly`: ativação só para o Movimento (Mente Brilhante). */
   private planHero(g: Game, h: Unit, goals: Map<string, number>, moveOnly = false): Plan | null {
     const mp0 = g.startMp(h);
-    const nodes = g.reachable(h, mp0, h.cell!, true);
+    // caminhos com menos Reações de Alerta (o `move` da IA vai com `safe`)
+    const nodes = g.reachable(h, mp0, h.cell!, true, false, this.p.safePath);
     const hp = g.maxHp(h) - h.wounds;
     let best: Plan | null = null;
     const consider = (value: number, steps: AIAction[]) => {
@@ -607,10 +618,12 @@ export class SimpleAI {
     const barrierClosed = !!g.map.barrier && !g.passesBarrier(h);
     const needPve = this.needPve(g, guild.id);
     try {
-      for (const card of g.usableCards(h)) {
-        if (card.exhausted) continue;
+      const ready = g.usableCards(h).filter(c => !c.exhausted && CARDS[c.defId].kind === 'attack');
+      const minDice = Math.min(...ready.map(c => CARDS[c.defId].dice ?? 0));
+      for (const card of ready) {
         const def = CARDS[card.defId];
-        if (def.kind !== 'attack') continue;
+        // a carta fica exausta até o Descanso: gastar a mais forte num alvo que a mais fraca resolve tem custo
+        const keepCost = ready.length > 1 ? Math.max(0, (def.dice ?? 0) - minDice) * this.p.cardKeep : 0;
         // ampliações: com as que ferem o próprio Herói e sem elas (escolhe a melhor, pagando o Ferimento)
         const allBoosts = this.pickBoosts(g, h, card);
         const woundOf = (ids: string[]) => ids.reduce((s, id) => { const c = h.cards.find(x => x.uid === id); const d = c && CARDS[c.defId]; return s + (d ? (d.fx.selfWound ?? 0) + (d.kind === 'permanent' ? d.fx.grrr ?? 0 : 0) : 0); }, 0);
@@ -701,7 +714,7 @@ export class SimpleAI {
           // Monstro comum que sobrevive: o Ferimento fica nele, mas a Vingança vem agora e outra Guilda pode roubar a morte
           // (o modo agressivo não infla esse "raspão": ele serve para buscar progresso, não para trocar Vida por nada)
           const chip = t.kind === 'monster' && !progress && !MONSTERS[t.defId].category.startsWith('Vilão');
-          const value = Math.min(exp, rem) * (chip ? this.p.chip : (1 + this.aggr) * dmgWeight * lfDmg) + progress + killP * killBonus - retaliation - deathRisk + (selfHeal ? Math.min(exp, h.wounds) * 0.6 : 0) - selfCost;
+          const value = Math.min(exp, rem) * (chip ? this.p.chip : (1 + this.aggr) * dmgWeight * lfDmg) + progress + killP * killBonus - retaliation - deathRisk + (selfHeal ? Math.min(exp, h.wounds) * 0.6 : 0) - selfCost - keepCost;
           if (!best || value > best.value) best = { card, target: t, value, boosts, killP };
         }
       }
@@ -742,17 +755,20 @@ export class SimpleAI {
     for (const m of near) {
       if (targets.has(m.defId.replace(/\d+$/, ''))) continue;
       const md = MONSTERS[m.defId];
-      r += Math.max(0.15, md.dice * ATK_EXP(md.attackType) - g.defenseDice(h) * DEF_EXP);
+      r += Math.max(0.15, md.dice * ATK_EXP(md.attackType) - g.defenseDice(h) * DEF_EXP) * this.dazeMul(md);
     }
     return hasTarget ? r * 0.4 : r;
   }
+
+  /** Monstro que Atordoa: o Herói ferido fica sem Defesa no próximo ataque (vale mais que o dano em si). */
+  private dazeMul(md: { abilities?: string[] }): number { return md.abilities?.includes('daze') ? this.p.dazeW : 1; }
 
   /** Dano esperado das Reações de Alerta ao sair de `c`. */
   private alertRisk(g: Game, h: Unit, c: Cell): number {
     let r = 0;
     for (const m of g.monstersCloseTo(c)) {
       const md = MONSTERS[m.defId];
-      r += Math.max(0.15, md.dice * ATK_EXP(md.attackType) - g.defenseDice(h) * DEF_EXP);
+      r += Math.max(0.15, md.dice * ATK_EXP(md.attackType) - g.defenseDice(h) * DEF_EXP) * this.dazeMul(md);
     }
     return r;
   }
@@ -889,12 +905,12 @@ export class SimpleAI {
   /** Mapa de distâncias até os objetivos da Guilda (Missões, marcadores, Monstros-alvo). `hero`: objetivos de quem carrega escolta. */
   goalDistances(g: Game, guildId: GuildId, hero?: Unit, mode?: 'heal' | 'sac'): Map<string, number> {
     const dist = new Map<string, number>();
-    const q: { c: Cell; d: number }[] = [];
+    const q = new MinHeap<{ c: Cell; d: number }>();
     const push = (c: Cell, d: number) => {
       const k = key(c);
       if (dist.has(k) && dist.get(k)! <= d) return;
       dist.set(k, d);
-      q.push({ c, d });
+      q.push({ c, d }, d);
     };
     const someone = hero ?? g.heroesOf(guildId).find(x => x.alive) ?? g.heroesOf(guildId)[0];
 
@@ -972,9 +988,8 @@ export class SimpleAI {
       if (g.map.barrier?.portalColor === color && !(someone && g.passesBarrier(someone))) return false;
       return true;
     };
-    while (q.length) {
-      q.sort((a, b) => a.d - b.d);
-      const { c, d } = q.shift()!;
+    while (q.size) {
+      const { c, d } = q.pop()!;
       if (dist.get(key(c))! < d) continue;
       for (const n of g.board.neighbors(c)) {
         const e = g.board.edge(c, n);

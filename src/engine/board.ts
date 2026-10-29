@@ -96,6 +96,36 @@ export const edgeKey = (a: Cell, b: Cell) => {
 };
 export const DIRS: Cell[] = [{ c: 1, r: 0 }, { c: -1, r: 0 }, { c: 0, r: 1 }, { c: 0, r: -1 }];
 
+/** Bordas que a reta entre dois centros cruza, em ordem (x = borda vertical, y = horizontal, as duas = quina).
+ *  Só depende da distância (dx, dy em coordenadas dobradas): calculada uma vez e guardada. */
+const LOS_GROUPS = new Map<string, { x: boolean; y: boolean }[]>();
+function losGroups(dx: number, dy: number): { x: boolean; y: boolean }[] {
+  const k = `${dx},${dy}`;
+  const hit = LOS_GROUPS.get(k);
+  if (hit) return hit;
+  const ax = 1, ay = 1, bx = 1 + dx, by = 1 + dy;
+  const sx = Math.sign(dx), sy = Math.sign(dy);
+  type Ev = { num: number; den: number; x: boolean; y: boolean };
+  const evs: Ev[] = [];
+  // t = num/den
+  if (dx !== 0) for (let X = Math.min(ax, bx) + 1; X < Math.max(ax, bx); X++) if (X % 2 === 0) evs.push({ num: (X - ax) * sx, den: Math.abs(dx), x: true, y: false });
+  if (dy !== 0) for (let Y = Math.min(ay, by) + 1; Y < Math.max(ay, by); Y++) if (Y % 2 === 0) evs.push({ num: (Y - ay) * sy, den: Math.abs(dy), x: false, y: true });
+  evs.sort((p, q) => p.num * q.den - q.num * p.den);
+  // agrupa eventos simultâneos (quinas)
+  const groups: { x: boolean; y: boolean }[] = [];
+  for (let i = 0; i < evs.length; i++) {
+    const e = evs[i];
+    const prev = i > 0 ? evs[i - 1] : null;
+    if (prev && prev.num * e.den === e.num * prev.den) {
+      const g = groups[groups.length - 1];
+      g.x = g.x || e.x;
+      g.y = g.y || e.y;
+    } else groups.push({ x: e.x, y: e.y });
+  }
+  LOS_GROUPS.set(k, groups);
+  return groups;
+}
+
 /** Geometria estática do mapa + estado das portas (vindo do GameState). */
 /** O que corta a Linha de Visão: borda (a-b), quina (de a para b na diagonal) ou Espaço (a). */
 export type LosBlock = { kind: 'wall' | 'door' | 'corner' | 'cell' | 'off'; a: Cell; b: Cell };
@@ -196,23 +226,7 @@ export class Board {
     const bx = 2 * to.c + 1, by = 2 * to.r + 1;
     const dx = bx - ax, dy = by - ay;
     const sx = Math.sign(dx), sy = Math.sign(dy);
-    type Ev = { num: number; den: number; x: boolean; y: boolean };
-    const evs: Ev[] = [];
-    // t = num/den
-    if (dx !== 0) for (let X = Math.min(ax, bx) + 1; X < Math.max(ax, bx); X++) if (X % 2 === 0) evs.push({ num: (X - ax) * sx, den: Math.abs(dx), x: true, y: false });
-    if (dy !== 0) for (let Y = Math.min(ay, by) + 1; Y < Math.max(ay, by); Y++) if (Y % 2 === 0) evs.push({ num: (Y - ay) * sy, den: Math.abs(dy), x: false, y: true });
-    evs.sort((p, q) => p.num * q.den - q.num * p.den);
-    // agrupa eventos simultâneos (quinas)
-    const groups: { x: boolean; y: boolean }[] = [];
-    for (let i = 0; i < evs.length; i++) {
-      const e = evs[i];
-      const prev = i > 0 ? evs[i - 1] : null;
-      if (prev && prev.num * e.den === e.num * prev.den) {
-        const g = groups[groups.length - 1];
-        g.x = g.x || e.x;
-        g.y = g.y || e.y;
-      } else groups.push({ x: e.x, y: e.y });
-    }
+    const groups = losGroups(dx, dy);
     const passable = (c: Cell) => this.playable(c) && !cellBlocks(c);
     let cur = { ...from };
     for (const g of groups) {

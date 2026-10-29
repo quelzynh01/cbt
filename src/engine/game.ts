@@ -2,6 +2,7 @@ import { Board, key, parseKey, sameCell, type MapDef, type LosBlock, mapTitlesOf
 import {
   heroPool, ATTACK_DIE, CARDS, DEFENSE_DIE, ENTRY_PAIRS, EXPLORATION_BAG, GUILDS, HEROES, HERO_ORDER, MONSTERS, TOKEN_INFO, distributeStartingGear, levelSuffix, lowerSuffix, bossAura, SISTER_ENTRANCE, DUO_ENTRANCE } from './data';
 import { nextRandom, randInt, shuffle } from './rng';
+import { MinHeap } from './heap';
 import { CURSES, curseDeck, type CardFx } from './cards';
 import { TITLES } from './titles';
 import { TOMB, TOMBSTONES } from './tombstones';
@@ -349,7 +350,13 @@ export class Game {
   unit(id: string): Unit { return this.s.units[id]; }
   units(): Unit[] { return Object.values(this.s.units); }
   onBoard(): Unit[] { return this.units().filter(u => u.alive && u.cell); }
-  unitsAt(c: Cell): Unit[] { return this.onBoard().filter(u => sameCell(u.cell, c)); }
+  // laço direto, sem listas intermediárias: é chamado milhões de vezes pela Linha de Visão e pela busca da IA
+  unitsAt(c: Cell): Unit[] {
+    const out: Unit[] = [];
+    const us = this.s.units;
+    for (const id in us) { const u = us[id]; if (u.alive && u.cell && u.cell.c === c.c && u.cell.r === c.r) out.push(u); }
+    return out;
+  }
   monstersOnBoard(): Unit[] { return this.onBoard().filter(u => u.kind === 'monster'); }
   guild(id: GuildId): GuildState { return this.s.guilds[id]!; }
   guilds(): GuildState[] { return this.s.guildOrder.map(g => this.guild(g)); }
@@ -373,10 +380,12 @@ export class Game {
 
   /** Livre / Ocupado (2 personagens, algum Aliado) / Bloqueado (2 Inimigos) para quem se move. */
   status(mover: Unit, c: Cell): 'free' | 'occupied' | 'blocked' {
-    const others = this.unitsAt(c).filter(u => u.id !== mover.id && !this.isObject(u));
+    const here = this.unitsAt(c);
+    if (!here.length) return 'free';
+    const others = here.filter(u => u.id !== mover.id && !this.isObject(u));
     // Empurrão (Rei Pavoroso): nunca é bloqueado por outros personagens
     if (others.length && this.monAbility(mover, 'shove')) return 'free';
-    if (this.cellLoad(c, mover) + this.weight(mover) <= 2) return 'free';
+    if (here.reduce((n, u) => n + (u === mover ? 0 : this.weight(u)), 0) + this.weight(mover) <= 2) return 'free';
     // um Enorme Inimigo bloqueia; um Enorme Aliado enche o Espaço
     if (others.some(o => this.monAbility(o, 'huge'))) return others.some(o => this.monAbility(o, 'huge') && this.isEnemy(mover, o)) ? 'blocked' : 'occupied';
     return others.length >= 2 && others.every(o => this.isEnemy(mover, o)) ? 'blocked' : 'occupied';
@@ -704,18 +713,19 @@ export class Game {
   // =========================================================================
   /** openDoors: o caminho pode incluir abrir portas (Monstros em Vingança e a IA). O jogador abre portas manualmente. */
   /** `noPortal`: sem usar portais (movimento das Botas). */
-  reachable(u: Unit, mp: number, from: Cell = u.cell!, openDoors = u.kind === 'monster', noPortal = false): Map<string, PathNode> {
+  reachable(u: Unit, mp: number, from: Cell = u.cell!, openDoors = u.kind === 'monster', noPortal = false, safe = false): Map<string, PathNode> {
+    if (safe && u.kind === 'hero' && this.ab(u) !== 'furtivo') return this.reachableSafe(u, mp, from, openDoors, noPortal);
     const res = new Map<string, PathNode>();
     const start: PathNode = { cell: from, mp: 0, cost: 0, prev: null, canEnd: true };
     res.set(key(from), start);
-    const open: PathNode[] = [start];
+    const open = new MinHeap<PathNode>();
+    open.push(start, 0);
     const done = new Set<string>();
     const isHero = u.kind === 'hero';
     const acro = isHero && this.ab(u) === 'acrobata';
     const ghost = this.monAbility(u, 'ghost');
-    while (open.length) {
-      open.sort((a, b) => a.cost - b.cost);
-      const n = open.shift()!;
+    while (open.size) {
+      const n = open.pop()!;
       const nk = key(n.cell);
       if (done.has(nk)) continue;
       done.add(nk);
@@ -735,7 +745,7 @@ export class Game {
         if (ex && ex.cost <= cost) return;
         const node: PathNode = { cell: to, mp: nmp, cost, prev: nk, canEnd: st === 'free', ...extra };
         res.set(k, node);
-        open.push(node);
+        open.push(node, cost);
       };
       for (const nb of this.board.neighbors(n.cell)) {
         const e = ghost ? 'open' : this.board.edge(n.cell, nb);
@@ -753,6 +763,77 @@ export class Game {
     }
     // o próprio Espaço inicial sempre é um final válido
     start.canEnd = true;
+    return res;
+  }
+
+  /** Caminhos com o menor número de Reações de Alerta (sair de um Espaço Perto de Monstros) dentro do Movimento,
+   *  mesmo que gastem mais PM; empate: menos PM. Usado pela IA (`move` com `safe`). Mesmas regras de passagem do `reachable`. */
+  private reachableSafe(u: Unit, mp: number, from: Cell, openDoors: boolean, noPortal: boolean): Map<string, PathNode> {
+    // estados (Espaço, PM gastos): um caminho que gasta menos PM pode ir mais longe, mesmo com mais Reações
+    type St = { node: PathNode; alerts: number; prevSt: string | null };
+    const sk = (c: Cell, m: number) => `${key(c)}|${m}`;
+    const states = new Map<string, St>();
+    const start: St = { node: { cell: from, mp: 0, cost: 0, prev: null, canEnd: true }, alerts: 0, prevSt: null };
+    states.set(sk(from, 0), start);
+    const open: St[] = [start];
+    const done = new Set<string>();
+    const acro = this.ab(u) === 'acrobata';
+    while (open.length) {
+      open.sort((a, b) => a.alerts - b.alerts || a.node.mp - b.node.mp);
+      const cur = open.shift()!;
+      const ck = sk(cur.node.cell, cur.node.mp);
+      if (done.has(ck)) continue;
+      done.add(ck);
+      const leave = this.monstersCloseTo(cur.node.cell).length;
+      const relax = (to: Cell, mpCost: number, extra: Partial<PathNode>, alerts: number) => {
+        const st = this.status(u, to);
+        if (st === 'blocked') return;
+        if (acro && !extra.portal && this.unitsAt(to).some(x => x.kind === 'hero' && x.id !== u.id)) mpCost = Math.max(0, mpCost - 1);
+        const nmp = cur.node.mp + mpCost;
+        if (nmp > mp) return;
+        const k = sk(to, nmp);
+        const na = cur.alerts + alerts;
+        const ex = states.get(k);
+        if (ex && ex.alerts <= na) return;
+        const next: St = { node: { cell: to, mp: nmp, cost: nmp + na * 0.01, prev: null, canEnd: st === 'free', ...extra }, alerts: na, prevSt: ck };
+        states.set(k, next);
+        open.push(next);
+      };
+      for (const nb of this.board.neighbors(cur.node.cell)) {
+        const e = this.board.edge(cur.node.cell, nb);
+        if (e === 'open') relax(nb, 1, {}, leave);
+        else if (e === 'door') {
+          const d = this.board.doorBetween(cur.node.cell, nb)!;
+          if (d.locked) { if (this.passesBarrier(u)) relax(nb, 1, {}, leave); }
+          else if (openDoors) relax(nb, 2, { door: d.id }, leave);
+        }
+      }
+      const pc = this.board.portalAt(cur.node.cell);
+      const portalOk = pc && !(this.map.barrier?.portalColor === pc && !this.passesBarrier(u))
+        && !(this.map.portalTitle?.color === pc && !(u.kind === 'hero' && this.hasTitle(u.guild!, this.map.portalTitle.title)));
+      if (pc && portalOk && !noPortal) for (const p of this.board.portalCells(pc)) if (!sameCell(p, cur.node.cell)) relax(p, 1, { portal: true }, 0);
+    }
+    // melhor estado de cada Espaço (menos Reações, depois menos PM); o caminho de cada um é refeito com chaves próprias
+    const best = new Map<string, St>();
+    for (const st of states.values()) {
+      const k = key(st.node.cell);
+      const b = best.get(k);
+      if (!b || st.alerts < b.alerts || (st.alerts === b.alerts && st.node.mp < b.node.mp)) best.set(k, st);
+    }
+    const res = new Map<string, PathNode>();
+    for (const [k, st] of best) {
+      if (st.prevSt === null) { res.set(k, { ...st.node, prev: null, canEnd: true }); continue; }
+      // cada Espaço do caminho vira um nó próprio com chave única (o caminho de um destino não depende do melhor de outro)
+      const chain: St[] = [];
+      for (let x: St | undefined = st; x && x.prevSt !== null; x = states.get(x.prevSt)) chain.unshift(x);
+      let prevKey: string = key(from);
+      chain.forEach((x, i) => {
+        const nk = i === chain.length - 1 ? k : `${k}~${i}`;
+        res.set(nk, { ...x.node, prev: prevKey, canEnd: i === chain.length - 1 && x.node.canEnd });
+        prevKey = nk;
+      });
+    }
+    res.set(key(from), { cell: from, mp: 0, cost: 0, prev: null, canEnd: true });
     return res;
   }
 
@@ -1086,12 +1167,13 @@ export class Game {
     return this.monstersCloseTo(h.cell, false).filter(m => m.id !== t.id && this.monsterCanAttack(m, h));
   }
 
-  moveTo(target: Cell, openDoors = false): boolean {
+  /** `safe`: pelo caminho com menos Reações de Alerta (IA), mesmo que gaste mais PM. */
+  moveTo(target: Cell, openDoors = false, safe = false): boolean {
     const a = this.s.activation;
     if (!this.canAct() || !a || a.moveLocked) return false;
     const h = this.unit(a.heroId);
     if (!h.alive || !h.cell) return false; // o Herói ativo morreu (ex.: numa Reação)
-    const nodes = this.reachable(h, a.mp, h.cell, openDoors);
+    const nodes = this.reachable(h, a.mp, h.cell, openDoors, false, safe);
     const node = nodes.get(key(target));
     if (!node || !node.canEnd || node.prev === null) return false;
     const steps = this.pathTo(nodes, target);

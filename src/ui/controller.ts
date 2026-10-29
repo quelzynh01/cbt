@@ -850,7 +850,7 @@ export class Controller {
   private aiAct(guild: GuildId, a: AIAction) {
     if (this.stopped || this.game.s.winner || this.game.s.pending || this.deciding) return;
     const gs = this.game.guild(guild);
-    const action: Action = a.type === 'move' ? { type: 'move', cell: a.cell, openDoors: true } : a;
+    const action: Action = a.type === 'move' ? { type: 'move', cell: a.cell, openDoors: true, safe: a.safe } : a;
     this.withDecisions(() => {
       if (!applyAction(this.game, gs.id, action)) applyAction(this.game, gs.id, { type: 'end' });
       return true;
