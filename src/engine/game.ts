@@ -1515,6 +1515,14 @@ export class Game {
       ...(cleaved || fenderHit ? { cleave: true } : {}), ...(thrown ? { thrown: true } : {}), ...(sfx ? { sfx } : {}),
     });
 
+    // Machado de Schmetterling: cada ✷ cura — logo depois do ataque, antes da retribuição (como a Irmã do Prazer)
+    if (fx.critHeal && atk.crits && h.wounds) {
+      const x = Math.min(h.wounds, atk.crits * fx.critHeal);
+      h.wounds -= x;
+      this.emit({ t: 'heal', id: h.id, amount: x, wounds: h.wounds });
+      this.log(`${def.name}: ${this.name(h)} se cura ${x} (${atk.crits}✷).`);
+    }
+
     const dying: Unit[] = [];
     let vengeful: Unit | null = null;
     /** Monstros atacados que podem fazer a Vingança (só um faz; quem controla escolhe, p.20). */

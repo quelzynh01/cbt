@@ -9,6 +9,7 @@ export type CardKind = 'attack' | 'boost' | 'permanent';
 export interface CardFx {
   // ataque
   critExtra?: number; // cada ✷ causa N acertos adicionais
+  critHeal?: number; // cada ✷ cura N Ferimentos do Herói que atacou
   vsOrcs?: number; // +N dados contra Orcs e Goblins
   vsHeroes?: number; // +N dados contra Heróis
   vsExhausted?: number; // +N dados contra Heróis com cartas exaustadas
@@ -195,7 +196,7 @@ atk('espada_capitao', 'Espada do Capitão', 'R-MG', 'R', 2, 0, 'melee', 'Espada'
 atk('maldicao_peles_verdes', 'Maldição dos Peles-Verdes', 'R-OH', 'R', 2, 0, 'ranged', 'Mágica', 3, { scenario: 'Covil dos Orcs', fx: { vsOrcs: 1 }, text: '+1 dado contra Orcs e Goblins.' });
 perm('coroa_sangue', 'Coroa de Sangue', 'R-RD', 'R', 1, 0, 'Joia', { scenario: 'Praça da Aurora Vermelha', fx: { bloodCrown: 2 }, text: 'Causa 2 Ferimentos a um Inimigo que saia de um Espaço Perto deste Herói.' });
 perm('saco_ossos', 'Saco de Ossos', 'R-S1', 'R', 1, 0, 'Equipamento', { scenario: 'A Mansão', fx: { sackBones: true }, text: 'Cura 2 Ferimentos sempre que este Herói mata um Inimigo.' });
-atk('machado_schmetterling', 'Machado de Schmetterling', 'R-S2', 'R', 1, 0, 'melee', 'Machado', 4, { scenario: 'A Mansão', fx: { critExtra: 1 }, text: 'Cada ✷ causa 1 acerto adicional (e cura 1 Ferimento).' });
+atk('machado_schmetterling', 'Machado de Schmetterling', 'R-S2', 'R', 1, 0, 'melee', 'Machado', 4, { scenario: 'A Mansão', fx: { critExtra: 1, critHeal: 1 }, text: 'Cada ✷ causa 1 acerto adicional e cura 1 Ferimento deste Herói.' });
 perm('coracao_anjos', 'Coração de Anjos', 'R-TM', 'R', 2, 0, 'Joia', { scenario: 'A Mansão', fx: { angelHeart: true }, text: 'Quando este Herói sofre Ferimentos, cura 1 de todos os Aliados.' });
 // Beyond the Grave (as cartas não vêm no livro: efeitos no padrão das Recompensas da caixa básica)
 atk('espinha_dorsal', 'Espinha Dorsal', 'R-HB', 'R', 2, 0, 'melee', 'Machado', 4, { scenario: 'Quartel Assombrado', rerolls: 1, text: 'Uma espinha arrancada que serve de chicote.' });
