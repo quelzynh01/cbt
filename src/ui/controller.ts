@@ -2556,7 +2556,7 @@ export class Controller {
     el.innerHTML = `<div class="cs-box"><button class="cs-x" title="Fechar">✕</button>
       <div class="cs-h">🏆 Placar da campanha</div>
       <div class="cs-time">⏱ Tempo total: <b>${fmtTime(total)}</b> · Cenário ${c.played.length + 1} de 6: <b>${this.game.map.name}</b> (${fmtTime(this.game.s.elapsed ?? 0)})</div>
-      ${rankingHtml(c, name)}
+      ${rankingHtml(c, name, { scenarios: false })}
       <h4>Cenários jogados</h4>
       ${played ? `<table class="cs-played"><tr><th></th><th>Cenário</th><th>Vencedor</th><th>Tempo</th></tr>${played}</table>` : '<p class="muted">Este é o primeiro cenário.</p>'}
     </div>`;

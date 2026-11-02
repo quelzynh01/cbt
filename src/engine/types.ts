@@ -303,13 +303,15 @@ export type GameEvent =
       sfx?: string;
       /** Arremesso de Lâmina (Jøhan): a Espada é arremessada a Distância. */
       thrown?: boolean;
+      /** Golpe Astral: a projeção do Herói surge junto do alvo e golpeia; o corpo fica onde está. */
+      astral?: boolean;
       /** Ataque de Monstro: a Guilda que controla os Monstros (rola os dados dele). */
       ctl?: GuildId;
       /** Só a rolagem: a animação no mapa vem depois, num evento 'strike' (dano espalhado escolhido antes). */
       noAnim?: boolean;
     }
   /** Animação do golpe no mapa (investida, giro do Fender ou projétil) contra todos os alvos de uma vez. */
-  | { t: 'strike'; attackerId: string; cardName: string; attackType: AttackType; targets: { id: string }[]; cleave?: boolean; thrown?: boolean; sfx?: string }
+  | { t: 'strike'; attackerId: string; cardName: string; attackType: AttackType; targets: { id: string }[]; cleave?: boolean; thrown?: boolean; astral?: boolean; sfx?: string }
   | { t: 'damage'; id: string; amount: number; wounds: number; maxHp: number }
   | { t: 'heal'; id: string; amount: number; wounds: number }
   | { t: 'death'; id: string; exterminated?: boolean; /** foi para o Tabuleiro de Entrada (Banimento) */ banish?: boolean }

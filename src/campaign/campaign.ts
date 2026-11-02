@@ -584,19 +584,21 @@ export function nextScenario(c: CampaignState): string | null {
 }
 
 // ------------------------------------------------------------------ fim da campanha (p.29)
-export interface Medal { name: string; winners: GuildId[] }
+/** `counts`: em quantos cenários cada Guilda cumpriu a Conquista; `winners`: quem lidera (e leva a Medalha). */
+export interface Medal { name: string; winners: GuildId[]; counts: Partial<Record<GuildId, number>> }
 export function medals(c: CampaignState): Medal[] {
   const count = (f: (r: ScenarioResult['guilds'][number], s: ScenarioResult) => boolean) =>
     Object.fromEntries(c.guilds.map(g => [g.id, c.played.filter(s => { const r = s.guilds.find(x => x.id === g.id); return r && f(r, s); }).length]));
   const best = (m: Record<string, number>) => { const max = Math.max(...Object.values(m)); return max > 0 ? Object.keys(m).filter(k => m[k] === max) as GuildId[] : []; };
+  const medal = (name: string, counts: Record<string, number>): Medal => ({ name, winners: best(counts), counts });
   const leastDeaths = count((r, s) => r.deaths === Math.min(...s.guilds.map(x => x.deaths)));
   const mostCoins = count((r, s) => r.coins === Math.max(...s.guilds.map(x => x.coins)));
   return [
-    { name: 'Vencedor', winners: best(count((r, s) => s.winner === r.id)) },
-    { name: 'Menos Mortes', winners: best(leastDeaths) },
-    { name: 'Mais Moedas', winners: best(mostCoins) },
-    { name: 'Recebeu Recompensa', winners: best(count(r => r.reward)) },
-    { name: 'Recebeu Título', winners: best(count(r => r.title)) },
+    medal('Vencedor', count((r, s) => s.winner === r.id)),
+    medal('Menos Mortes', leastDeaths),
+    medal('Mais Moedas', mostCoins),
+    medal('Recebeu Recompensa', count(r => r.reward)),
+    medal('Recebeu Título', count(r => r.title)),
   ];
 }
 

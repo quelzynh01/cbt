@@ -2,7 +2,7 @@ import { CARDS, CURSES } from '../engine/cards';
 import { GUILDS, HEROES } from '../engine/data';
 import type { GuildId } from '../engine/types';
 import { heroSlots, medals, victoryRank, type CampaignState } from '../campaign/campaign';
-import { MAPS, campaignList } from '../engine/maps';
+import { MAPS } from '../engine/maps';
 import { TITLES } from '../engine/titles';
 import { drawFace } from '../render/chibi';
 import { curseCard, itemCard, medal } from './cardview';
@@ -103,42 +103,31 @@ export function handFromHtml(c: CampaignState, me: GuildId, name: (g: GuildId) =
   return `<p class="up-from">🔄 Estas cartas são as que ${who(from, name)} passou para você (a sua mão foi para ${who(to, name)}).</p>`;
 }
 
-/** Ranking da campanha até agora (Medalhas do Livro de Campanha: quem lidera cada Conquista) e total por Guilda. */
-export function rankingHtml(c: CampaignState, name: (g: GuildId) => string): string {
+/** Placar da campanha: uma linha por Guilda, da que tem mais Medalhas para a que tem menos. Em cada Conquista, o número de
+ *  cenários em que a Guilda a cumpriu; em dourado, quem lidera e leva a Medalha. `scenarios: false` para quem já lista os cenários. */
+export function rankingHtml(c: CampaignState, name: (g: GuildId) => string, opts: { scenarios?: boolean } = {}): string {
   const ms = medals(c);
   const total = (g: GuildId) => ms.filter(m => m.winners.includes(g)).length;
-  const mark = (ids: GuildId[]) => ids.map(id => `<i class="cs-mk" style="--gc:${GUILDS[id].color}" title="${esc(name(id))}"></i>`).join('');
-  // linhas: os cenários da campanha (o último, o Confronto Final, em azul)
-  const list = campaignList(c.edition).filter(sc => sc.map);
-  const rows = list.map((sc, i) => {
-    const r = c.played.find(p => p.mapId === sc.map!.id);
-    const cell = (ids: GuildId[]) => `<td><div class="cs-cell">${mark(ids)}</div></td>`;
-    const cols = r ? [
-      [r.winner],
-      r.guilds.filter(x => x.deaths === Math.min(...r.guilds.map(y => y.deaths))).map(x => x.id),
-      r.guilds.filter(x => x.coins === Math.max(...r.guilds.map(y => y.coins))).map(x => x.id),
-      r.guilds.filter(x => x.reward).map(x => x.id),
-      r.guilds.filter(x => x.title).map(x => x.id),
-    ] : [[], [], [], [], []];
-    return `<tr class="${r ? 'done' : ''}"><th class="cs-map ${i === list.length - 1 ? 'final' : ''}">${esc(sc.name)}</th>${cols.map(cell).join('')}</tr>`;
+  const wins = (g: GuildId) => c.played.filter(p => p.winner === g).length;
+  const heads: Record<string, string> = { Vencedor: 'Vitórias', 'Menos Mortes': 'Menos mortes', 'Mais Moedas': 'Moedas', 'Recebeu Recompensa': 'Recomp.', 'Recebeu Título': 'Títulos' };
+  const tips: Record<string, string> = { Vencedor: 'Cenários vencidos', 'Menos Mortes': 'Cenários com menos mortes', 'Mais Moedas': 'Cenários com mais moedas', 'Recebeu Recompensa': 'Cenários com Recompensa', 'Recebeu Título': 'Cenários com Título' };
+  const order = c.guilds.slice().sort((a, b) => total(b.id) - total(a.id) || wins(b.id) - wins(a.id));
+  const rows = order.map(g => {
+    const n = total(g.id);
+    const pos = 1 + order.filter(x => total(x.id) > n).length;
+    const cells = ms.map(m => { const v = m.counts[g.id] ?? 0; return `<td class="${m.winners.includes(g.id) ? 'lead' : v ? '' : 'zero'}">${v}</td>`; }).join('');
+    return `<tr><td class="cs-pos">${pos}º</td><td class="cs-who"><i style="background:${GUILDS[g.id].color}"></i><span>${esc(name(g.id))}</span></td><td class="cs-total" title="${n} medalha${n === 1 ? '' : 's'}">${n}</td>${cells}</tr>`;
   }).join('');
-  // Títulos (como na folha do Livro de Campanha): frase curta e quem tem
-  const SHORT: Record<string, string> = {
-    guardiao_portao: 'Protegeu o portão!', senhor_aguias: 'Resgatou as águias!', cacador_trolls: 'Derrotou o troll!', destruidor_pedra: 'Destruiu a Pedra!',
-    protetor_fogo: 'Desarmou as bombas!', lider_rebelde: 'Resgatou a Resistência!', mestre_conhecimento: 'Recuperou dois tomos!', forjador_almas: 'Destruiu a alma do Lorde Presas!',
-  };
-  const groups: [string, string[]][] = c.edition === 'btg'
-    ? [['Títulos', ['orador_mortos', 'mente_mestra', 'purificador', 'casamenteiro', 'coveiro', 'capitao_milicia', 'mestre_morte', 'alquimista']]]
-    : [['Títulos · Círculo Exterior', ['guardiao_portao', 'senhor_aguias', 'cacador_trolls', 'destruidor_pedra']], ['Títulos · Círculo Interior', ['protetor_fogo', 'lider_rebelde', 'mestre_conhecimento', 'forjador_almas']]];
-  const titles = groups.map(([h, ids]) => `<div class="cs-tgroup"><h5>${h}</h5>${ids.filter(t => TITLES[t]).map(t => {
-    const holders = c.guilds.filter(g => g.titles.includes(t)).map(g => g.id);
-    return `<div class="cs-title ${holders.length ? 'got' : ''}"><b>"${esc(TITLES[t])}"</b> <small>${esc(SHORT[t] ?? '')}</small>${holders.length ? `<span>${mark(holders)}</span>` : ''}</div>`;
-  }).join('')}</div>`).join('');
-  return `<div class="cp-rank cs-sheet"><h4>🏆 Placar da campanha <small>(${c.played.length} de 6 cenários)</small></h4>
-    <table class="cs-table"><tr><th></th>${ms.map(m => `<th>${esc(m.name)}</th>`).join('')}</tr>${rows}
-      <tr class="cs-medal"><th class="cs-map">Ganhador da Medalha</th>${ms.map(m => `<td><div class="cs-cell">${mark(m.winners)}</div></td>`).join('')}</tr></table>
-    <div class="cs-totals">${c.guilds.slice().sort((a, b) => total(b.id) - total(a.id)).map(g => `<span>${who(g.id, name)}: <b>${total(g.id)}</b> medalha${total(g.id) === 1 ? '' : 's'}</span>`).join('')}</div>
-    <div class="cs-titles">${titles}</div></div>`;
+  // só os cenários já jogados, na ordem em que foram jogados
+  const scenarios = opts.scenarios === false || !c.played.length ? '' : `<ol class="cs-scen">${c.played.map(p =>
+    `<li><span>${esc(MAPS[p.mapId]?.name ?? p.mapId)}</span><b><i style="background:${GUILDS[p.winner].color}"></i>${esc(name(p.winner))}</b></li>`).join('')}</ol>`;
+  // só os Títulos já conquistados
+  const got = c.guilds.flatMap(g => g.titles.filter(t => TITLES[t]).map(t => `<span class="cs-got"><i style="background:${GUILDS[g.id].color}"></i>${esc(TITLES[t])}</span>`)).join('');
+  return `<div class="cp-rank cs-sheet"><h4>🏆 Placar da campanha <small>${c.played.length} de 6 cenários</small></h4>
+    <div class="cs-scroll"><table class="cs-lb"><tr><th></th><th class="cs-who">Guilda</th><th class="cs-total" title="Medalhas">🏅</th>${ms.map(m => `<th title="${tips[m.name]}">${heads[m.name]}</th>`).join('')}</tr>${rows}</table></div>
+    <p class="cs-note">Em dourado: quem lidera a coluna e leva a Medalha.</p>
+    ${got ? `<div class="cs-gots">${got}</div>` : ''}
+    ${scenarios}</div>`;
 }
 
 /** Fim da campanha (igual na campanha local e online): parabéns ao vencedor, o saldo final de cada Guilda e o placar.
@@ -170,7 +159,7 @@ export function campaignFinalHtml(c: CampaignState, name: (g: GuildId) => string
       ${rows.map((r, i) => `<tr class="${r.id === winner ? 'win' : ''} ${r.id === me ? 'me' : ''}"><td>${i === 0 ? '👑 ' : ''}${who(r.id, name)}${r.id === me ? ' <small>(você)</small>' : ''}</td><td>${r.medals}</td><td>${r.wins}</td><td>${r.titles}</td><td>${r.missions}</td><td>${r.coins}</td><td>${r.deaths}</td></tr>`).join('')}</table>
     <h3>🗺 Cenários</h3>
     <ol class="cf-maps">${c.played.map(p => `<li>${esc(MAPS[p.mapId]?.name ?? p.mapId)} — ${who(p.winner, name)}</li>`).join('')}</ol>
-    ${rankingHtml(c, name)}
+    ${rankingHtml(c, name, { scenarios: false })}
   </div>`;
 }
 

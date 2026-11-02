@@ -101,7 +101,7 @@ function drawSword(ctx: CanvasRenderingContext2D, s: number) {
 }
 
 /** O que a animação do golpe precisa saber (evento de ataque ou 'strike'). */
-type Strike = Pick<Extract<GameEvent, { t: 'strike' }>, 'attackerId' | 'cardName' | 'attackType' | 'targets' | 'cleave' | 'thrown' | 'sfx'> & { /** ✷ no ataque (evento 'attack') */ crits?: number };
+type Strike = Pick<Extract<GameEvent, { t: 'strike' }>, 'attackerId' | 'cardName' | 'attackType' | 'targets' | 'cleave' | 'thrown' | 'astral' | 'sfx'> & { /** ✷ no ataque (evento 'attack') */ crits?: number };
 
 export class Renderer {
   readonly canvas: HTMLCanvasElement;
@@ -131,6 +131,8 @@ export class Renderer {
   /** Entradas de Monstro sorteadas recentemente: chave do Espaço -> instante. */
   private spawnFlash = new Map<string, { t0: number; ok: boolean }>();
   private projectiles: Projectile[] = [];
+  /** Golpe Astral em andamento: a projeção do Herói junto do alvo. */
+  private astrals: Astral[] = [];
   private ground: HTMLCanvasElement | null = null;
   private groundOrigin = { x: 0, y: 0, scale: 1.5 };
   private doorIconPos = new Map<string, Pt>();
@@ -155,6 +157,7 @@ export class Renderer {
     this.current = null;
     this.floaters = [];
     this.projectiles = [];
+    this.astrals = [];
     this.buildDecor();
     this.buildGround();
     this.sync();
@@ -210,6 +213,7 @@ export class Renderer {
     this.waitUntil = 0;
     this.floaters = [];
     this.projectiles = [];
+    this.astrals = [];
     this.sync();
     this.idleSent = false;
   }
@@ -636,6 +640,7 @@ export class Renderer {
       {
         const kind = this.attackKind(e, a.defId);
         const sp = this.speed;
+        if (e.astral) return this.astralStrike(a, t, pa, pt);
         // o tipo da animação vem da carta usada (Próximo = investida, Distância = projétil), mesmo no mesmo Espaço
         if (e.sfx) setTimeout(() => play(e.sfx as Sfx), (e.attackType === 'melee' && !e.thrown ? 450 : 380) / sp);
         if (e.cleave && !e.thrown) {
@@ -690,6 +695,93 @@ export class Renderer {
         this.lastImpact = total;
         return total;
       }
+    }
+  }
+
+  /** Golpe Astral: o corpo fica no lugar; a projeção surge ao lado do alvo, ligada ao corpo por um fio de luz, golpeia e some. */
+  private astralStrike(a: UnitView, t: UnitView, pa: { x: number; y: number }, pt: { x: number; y: number }): number {
+    const sp = this.speed;
+    // surge do lado de onde o Herói está (no mesmo Espaço: do lado direito)
+    const d = Math.hypot(pa.x - pt.x, pa.y - pt.y);
+    const ux = d < 8 ? 1 : (pa.x - pt.x) / d, uy = d < 8 ? 0 : (pa.y - pt.y) / d;
+    this.astrals.push({
+      defId: a.defId, body: { x: pa.x, y: pa.y }, at: { x: pt.x + ux * 84, y: pt.y + uy * 46 }, hit: { x: pt.x + ux * 54, y: pt.y + uy * 30 }, target: { x: pt.x, y: pt.y },
+      flip: ux > 0, dir: dirFromScreen(-ux, -uy), t0: this.t, dur: ASTRAL_MS / sp, depth: Math.floor(t.pos.gx) + Math.floor(t.pos.gy),
+    });
+    setTimeout(() => play('teletransport', 0.7), 180 / sp);
+    setTimeout(() => play('atack-magic'), 520 / sp);
+    setTimeout(() => play('atack-sword'), 640 / sp);
+    this.lastImpact = ASTRAL_MS * ASTRAL_HIT / sp;
+    return ASTRAL_MS / sp;
+  }
+
+  private drawAstral(s: Astral, tt: number) {
+    const ctx = this.ctx;
+    const k = (this.t - s.t0) / s.dur;
+    const clamp = (x: number) => Math.max(0, Math.min(1, x));
+    // o corpo em transe: anel no chão e a alma subindo
+    const trance = clamp(k / 0.12) * clamp((1 - k) / 0.2);
+    ctx.save();
+    ctx.translate(s.body.x, s.body.y);
+    ctx.save();
+    ctx.scale(1, 0.5);
+    ctx.strokeStyle = `rgba(190,150,255,${0.85 * trance})`;
+    ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.arc(0, 0, 44 + 5 * Math.sin(tt * 9), 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+    const rise = clamp(k / 0.2);
+    if (rise < 1) {
+      ctx.globalAlpha = 1 - rise;
+      ctx.fillStyle = '#e4d4ff';
+      ctx.shadowColor = '#a877ff'; ctx.shadowBlur = 22;
+      ctx.beginPath(); ctx.arc(0, -40 - rise * 90, 11, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+    if (k < 0.18) return;
+    const appear = clamp((k - 0.18) / 0.14);
+    const fade = clamp((1 - k) / 0.26);
+    // fio de luz entre o corpo e a projeção
+    const lunge = k < 0.42 ? 0 : k < ASTRAL_HIT ? Math.pow((k - 0.42) / (ASTRAL_HIT - 0.42), 2) : k < 0.74 ? 1 : 1 - (k - 0.74) / 0.26;
+    const back = k > 0.32 && k < 0.42 ? Math.sin(((k - 0.32) / 0.1) * Math.PI) * 14 : 0; // recua antes de avançar
+    const dn = Math.hypot(s.at.x - s.hit.x, s.at.y - s.hit.y) || 1;
+    const x = s.at.x + (s.hit.x - s.at.x) * lunge + ((s.at.x - s.hit.x) / dn) * back;
+    const y = s.at.y + (s.hit.y - s.at.y) * lunge + ((s.at.y - s.hit.y) / dn) * back;
+    ctx.save();
+    ctx.globalAlpha = 0.55 * appear * fade;
+    ctx.strokeStyle = '#d9c6ff'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+    ctx.shadowColor = '#a877ff'; ctx.shadowBlur = 12;
+    ctx.setLineDash([2, 10]); ctx.lineDashOffset = -tt * 60;
+    ctx.beginPath(); ctx.moveTo(s.body.x, s.body.y - 44);
+    ctx.quadraticCurveTo((s.body.x + x) / 2, Math.min(s.body.y, y) - 110, x, y - 44);
+    ctx.stroke();
+    ctx.restore();
+    // clarão no chão quando surge
+    if (k < 0.4) {
+      const f = clamp((k - 0.18) / 0.22);
+      ctx.save();
+      ctx.translate(s.at.x, s.at.y); ctx.scale(1, 0.5);
+      ctx.strokeStyle = `rgba(226,210,255,${1 - f})`; ctx.lineWidth = 6;
+      ctx.beginPath(); ctx.arc(0, 0, 18 + f * 62, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+    }
+    // a projeção
+    ctx.save();
+    ctx.translate(x, y - (1 - fade) * 34 - (1 - appear) * 16);
+    ctx.filter = ASTRAL_FILTER;
+    drawCharacter(ctx, s.defId, { dir: s.dir, flip: s.flip, t: tt, hurt: 0, alpha: 0.82 * appear * fade, stunned: false, lunge: 0, scale: unitScale(s.defId) * 0.66 });
+    ctx.filter = 'none';
+    ctx.restore();
+    // corte no alvo
+    const cut = (k - ASTRAL_HIT) / 0.16;
+    if (cut >= 0 && cut < 1) {
+      ctx.save();
+      ctx.translate(s.target.x, s.target.y - 44);
+      ctx.rotate(s.flip ? 0.7 : -0.7);
+      ctx.globalAlpha = 1 - cut;
+      ctx.strokeStyle = '#f3ecff'; ctx.lineWidth = 9 * (1 - cut) + 2; ctx.lineCap = 'round';
+      ctx.shadowColor = '#a877ff'; ctx.shadowBlur = 18;
+      ctx.beginPath(); ctx.arc(0, 0, 40, -1.2 + cut * 0.6, 1.2 + cut * 0.6); ctx.stroke();
+      ctx.restore();
     }
   }
 
@@ -1643,6 +1735,10 @@ export class Renderer {
       const depth = busy ? Math.max(cx + cy, u.lunge?.depth ?? 0) + 1 : cx + cy;
       list.push({ d: busy ? K(depth, 3.5) : K(cx + cy, 2, (u.pos.gx + u.pos.gy - cx - cy) / 2), draw: () => this.drawUnit(u, tt) });
     }
+
+    // Golpe Astral: na frente do alvo e das paredes até ele
+    this.astrals = this.astrals.filter(s => this.t < s.t0 + s.dur);
+    for (const s of this.astrals) list.push({ d: K(s.depth + 1, 3.5), draw: () => this.drawAstral(s, tt) });
 
     for (const lb of g.map.labels ?? []) {
       const cx = lb.cells.reduce((a, c) => a + c.c + 0.5, 0) / lb.cells.length, cy = lb.cells.reduce((a, c) => a + c.r + 0.5, 0) / lb.cells.length;
@@ -2664,6 +2760,12 @@ function floorImage(id: string, ready: () => void): HTMLImageElement | null {
 }
 
 /** Tamanho do boneco: Monstros Enormes (ocupam o Espaço inteiro, como 2 personagens) são bem maiores. */
+/** Golpe Astral: duração (ms) e momento do golpe (fração da animação). */
+const ASTRAL_MS = 1150;
+const ASTRAL_HIT = 0.56;
+const ASTRAL_FILTER = 'grayscale(1) sepia(1) hue-rotate(215deg) saturate(3.2) brightness(1.3) drop-shadow(0 0 9px rgba(170,120,255,0.95))';
+interface Astral { defId: string; body: { x: number; y: number }; at: { x: number; y: number }; hit: { x: number; y: number }; target: { x: number; y: number }; flip: boolean; dir: Dir; t0: number; dur: number; depth: number }
+
 function unitScale(defId: string): number {
   const small = defId.replace(/\d+$/, '') === 'goblin' ? 0.85 : 1; // Goblin Arqueiro: um pouco menor
   return charScale(defId) * small * (MONSTERS[defId]?.abilities?.includes('huge') ? 1.6 : 1);

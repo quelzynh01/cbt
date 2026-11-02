@@ -657,7 +657,7 @@ export class Hud {
     let body: string;
     if (u.kind === 'monster') {
       const md = MONSTERS[u.defId];
-      const hpNow = v.alive ? md.hp - v.wounds : 0;
+      const hpNow = v.alive ? Math.max(0, md.hp - v.wounds) : 0;
       const live = { def: g.defenseDice(u), hp: hpNow, maxHp: md.hp, rr: g.rerollsOf(u) };
       body = `<div class="cv-cards">${monsterCard(u.defId, '', '', live)}</div>
         <div class="cv-info">
@@ -668,7 +668,7 @@ export class Hud {
     } else {
       const hd = HEROES[u.defId];
       const max = g.maxHp(u);
-      const hpNow = v.alive ? max - v.wounds : 0;
+      const hpNow = v.alive ? Math.max(0, max - v.wounds) : 0;
       const atk = g.attackBonus(u);
       const live = { def: g.defenseDice(u), hp: hpNow, maxHp: max, rr: g.rerollsOf(u), atk: atk.n };
       body = `<div class="cv-cards">${heroCard(u.defId, '', '', '', '', live)}</div>
