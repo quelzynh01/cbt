@@ -337,6 +337,17 @@ export class Game {
   // Utilidades
   // =========================================================================
   emit(e: GameEvent) { this.out.push(e); }
+  /** Mostra perto do Herói os itens dele que passam no teste. */
+  private showItems(h: Unit, test: (d: CardDef) => boolean, hold = false) {
+    if (h.kind !== 'hero') return;
+    for (const c of h.cards) { const d = this.cardDef(c); if (test(d)) this.emit({ t: 'item', id: h.id, card: d.id, ...(hold ? { hold: true } : {}) }); }
+  }
+  /** Itens que entraram na Defesa do Herói (mostrados depois dos dados, para não adiantar o resultado). */
+  private showDefenseItems(t: Unit, dr: RollResult) {
+    if (t.kind !== 'hero' || !dr.faces.length) return;
+    if (dr.rerolled) this.showItems(t, d => !!d.rerolls);
+    this.showItems(t, d => !!d.fx.moonShield || (!!d.fx.lastStand && t.wounds > 0) || (!!d.fx.dragonHeart && dr.crits > 0));
+  }
   /** Retorna e limpa os eventos gerados desde a última chamada. */
   drain(): GameEvent[] {
     const e = this.out;
@@ -1379,6 +1390,9 @@ export class Game {
     if (a.moved) a.moveLocked = true; // o Movimento não pode ser retomado depois do Ataque
     a.attacked = true;
     let { dice: n, notes } = this.attackDicePreview(h, card, target, boosts.map(b => b.uid));
+    // ampliações e bônus de dados aparecem antes de rolar
+    for (const b of boosts) this.emit({ t: 'item', id: h.id, card: this.cardDef(b).id, hold: true });
+    this.showItems(h, d => !!d.fx.rawr || (!!d.fx.bookDead && notes.some(x => x.startsWith('Livro dos Mortos'))));
     notes = notes.filter(x => !x.startsWith('Mestre Espadachim'));
     // Mestre Espadachim (Montoya): exaustar o Herói para +2 dados com Espada
     if (ab === 'mestre_espadachim' && def.group === 'Espada' && !h.spent && !this.freeMode
@@ -1489,6 +1503,9 @@ export class Game {
       dice: atk.faces, hits: atk.successes, crits: atk.crits, notes, rr: atk.rr,
       targets: results.map(evTarget),
     });
+    if (atk.rerolled) this.showItems(h, d => !!d.rerolls);
+    if (atk.crits && def.group === 'Arco') this.showItems(h, d => !!d.fx.soulseeker);
+    for (const r of results) this.showDefenseItems(r.t, r.dr);
     // dano espalhado: quem atacou escolhe o alvo adicional depois de ver o ataque e a Defesa do alvo principal
     let fenderHit = false;
     for (const sp of spreads) {
@@ -1502,6 +1519,7 @@ export class Game {
       targetCells.set(pick.id, { ...pick.cell! });
       const r = defend(pick);
       results.push(r);
+      this.showDefenseItems(r.t, r.dr);
       this.emit({
         t: 'attack', attackerId: h.id, reason: 'heroi', cardName: sp.source, attackType: def.attackType!, baseDice: n, spread: true, noAnim: true,
         dice: atk.faces, hits: atk.successes, crits: atk.crits, notes: [`${sp.source}: atinge também ${this.name(pick)} (mesmos dados)`],
@@ -1704,6 +1722,7 @@ export class Game {
     if (this.ab(defender) === 'espinhos') { const c = dr.faces.filter(f => f === 'crit').length; if (c) { n += c; parts.push('Vingança do Espetado'); this.emit({ t: 'skill', id: defender.id, skill: 'espinhos', name: 'Vingança' }); } }
     if (this.hasPerm(defender, 'retribution') && cancelled > 0) { n += cancelled; parts.push('Amuleto da Retribuição'); }
     if (!n) return;
+    if (parts.includes('Amuleto da Retribuição')) this.showItems(defender, d => !!d.fx.retribution, true);
     this.log(`${parts.join(' + ')}: ${n} Ferimento${n > 1 ? 's' : ''} em ${this.name(attacker)}!`);
     if (attacker.kind === 'hero') { this.damageHero(attacker, n, { kind: 'hero', id: defender.id }); return; }
     const md = MONSTERS[attacker.defId];
@@ -2381,6 +2400,7 @@ export class Game {
       const ally = this.unit(target ?? '');
       if (!ally || ally.guild !== h.guild || ally.id === h.id || !ally.alive || !ally.cell || !h.cell) return false;
       this.s.turnUsed = [...(this.s.turnUsed ?? []), c.uid];
+      this.emit({ t: 'item', id: h.id, card: this.cardDef(c).id, hold: true });
       const ca = { ...h.cell }, cb = { ...ally.cell };
       h.cell = cb;
       ally.cell = ca;
@@ -2406,6 +2426,7 @@ export class Game {
       if (this.s.activation) this.s.activation.committed = true;
       if (!(this.s.activatedThisTurn ?? []).includes(h.id)) this.s.activatedThisTurn = [...(this.s.activatedThisTurn ?? []), h.id];
       if (!(this.s.booted ?? []).includes(h.id)) this.s.booted = [...(this.s.booted ?? []), h.id];
+      this.emit({ t: 'item', id: h.id, card: this.cardDef(c).id, hold: true });
       for (const st of this.pathTo(nodes, cell)) {
         if (!h.alive || !h.cell) break;
         const from = h.cell!;
@@ -2646,7 +2667,8 @@ export class Game {
     for (const h of this.heroesOf(this.currentGuild().id)) {
       const g = this.permFx(h, 'genesis').reduce((a: number, b) => a + (b ?? 0), 0);
       const x = Math.min(g, h.wounds);
-      if (x > 0 && h.alive) { h.wounds -= x; this.emit({ t: 'heal', id: h.id, amount: x, wounds: h.wounds }); }
+      // o Vidro aparece perto do Herói e só depois ele cura
+      if (x > 0 && h.alive) { this.showItems(h, d => !!d.fx.genesis, true); h.wounds -= x; this.emit({ t: 'heal', id: h.id, amount: x, wounds: h.wounds }); }
     }
     return true;
   }
@@ -2994,7 +3016,7 @@ export class Game {
     } else this.gainCoins(g.id, md.reward, `matou ${md.name}`);
     g.monsterKills += 1;
     const base = baseId(m.defId);
-    if (this.hasPerm(killer, 'sackBones') && killer.alive && killer.wounds) { const x = Math.min(2, killer.wounds); killer.wounds -= x; this.emit({ t: 'heal', id: killer.id, amount: x, wounds: killer.wounds }); }
+    if (this.hasPerm(killer, 'sackBones') && killer.alive && killer.wounds) { this.showItems(killer, d => !!d.fx.sackBones, true); const x = Math.min(2, killer.wounds); killer.wounds -= x; this.emit({ t: 'heal', id: killer.id, amount: x, wounds: killer.wounds }); }
     for (const mi of this.s.missions) {
       if (mi.rule === 'kill_count' && g.monsterKills >= (mi.count ?? 3)) this.completeMission(g.id, mi.id, killer);
       if ((mi.rule === 'kill_type' || mi.rule === 'summon') && mi.types?.includes(base)) this.completeMission(g.id, mi.id, killer);
@@ -3519,6 +3541,7 @@ export class Game {
       dice: atk.faces, hits: atk.successes, crits: atk.crits, notes, rr: atk.rr,
       targets: res.map(r => ({ id: r.t.id, defense: r.dr.faces, blocks: r.dr.successes, wounds: r.wounds, stunnedNoDefense: r.t.stunned, rr: r.dr.rr, ...(r.dr.noHits ? { noHits: true } : {}), ...(r.dr.base !== undefined ? { base: r.dr.base } : {}) })),
     });
+    for (const r of res) this.showDefenseItems(r.t, r.dr);
     // Irmã do Prazer / Lorde Presas: cada ✷ cura 2 — logo depois do ataque, ANTES do dano de retribuição
     // (Vingança do Espetado, Amuleto da Retribuição). Conta o dano inteiro, inclusive o que passou da Vida:
     // quem estava com a Vida em -2 e cura 2 fica com 0 (morre); só sobrevive com pelo menos 1 de Vida.

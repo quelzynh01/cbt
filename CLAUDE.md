@@ -87,6 +87,7 @@ sh tools/tests/run-engine.sh resthp        # Descanso: não deixa tirar a carta 
 sh tools/tests/run-engine.sh fender        # Fender sempre pergunta (mesmo com 1 Inimigo Perto): usar ou não
 sh tools/tests/run-engine.sh raionova      # Raio Nova sempre pergunta com ✷ (mesmo com 1 Inimigo); Rei da Arena: 5 no mesmo marcador ou 1 em cada um dos 4 (3 lugares não completa)
 sh tools/tests/run-engine.sh schmet        # Machado de Schmetterling: cada ✷ dá +1 acerto e cura 1 Ferimento de quem atacou; sem ✷ não cura
+sh tools/tests/run-engine.sh itemfx        # item em ação: o Vidro do Gênesis aparece antes da cura; ampliação antes do ataque
 sh tools/tests/run-engine.sh bencao        # Bênção: o Aliado não troca de volta para quem já jogou; troca normal antes de agir continua
 sh tools/tests/run-engine.sh curairma      # Irmã do Prazer/Lorde: ✷ cura 2 antes da retribuição (Espetado/Amuleto); dano além da Vida conta; vive só com Vida >= 1
 sh tools/tests/run-engine.sh aiitems       # IA: poções no fim da ativação e Baús/poções com o Herói mais seguro no Descanso

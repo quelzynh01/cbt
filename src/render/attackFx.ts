@@ -6,7 +6,7 @@ type Ctx = CanvasRenderingContext2D;
 export interface Pt { x: number; y: number }
 
 /** Efeito solto no mapa. `ms`: tempo desde o começo, já na velocidade 1 (o renderer desconta a velocidade do jogo). */
-export interface Fx { t0: number; ms: number; draw(ctx: Ctx, ms: number, tt: number): void }
+export interface Fx { t0: number; ms: number; tag?: string; draw(ctx: Ctx, ms: number, tt: number): void }
 
 export type Spell = 'laser' | 'drain' | 'wind' | 'skulls' | 'meteors';
 const clamp = (x: number) => Math.max(0, Math.min(1, x));
@@ -296,7 +296,110 @@ export function heldWeapon(cardName: string, t0: number, dur: number, aim: numbe
 }
 
 export function preloadWeapons() {
-  for (const d of Object.values(CARDS)) if (d.attackType && !d.magic) artFor(d.id, d.group);
+  for (const d of Object.values(CARDS)) {
+    if (d.attackType && !d.magic) artFor(d.id, d.group);
+    else if (d.kind !== 'attack' && CARD_ART[d.id]) image(CARD_ART[d.id].img);
+  }
+}
+
+/** Item em ação: a arte da carta surge em cima do Herói, com um brilho, e sobe sumindo. */
+export function itemFx(card: string, slot: number, where: () => Pt | null): Omit<Fx, 't0'> {
+  const ms = 1150, art = CARD_ART[card], img = art ? image(art.img) : null, name = CARDS[card]?.name ?? '';
+  return { ms, draw(ctx, t) {
+    const p = where();
+    if (!p) return;
+    const pop = clamp(t / 140), a = clamp((ms - t) / 280);
+    const s = pop < 1 ? pop * (1.25 - 0.25 * pop) : 1;
+    const R = 40;
+    const x = p.x + (slot % 2 ? 1 : -1) * Math.ceil(slot / 2) * (R * 2 + 10), y = p.y - 178 - clamp(t / ms) * 22;
+    ctx.save();
+    ctx.globalAlpha *= a;
+    ctx.translate(x, y); ctx.scale(s, s);
+    const g = ctx.createRadialGradient(0, 0, 4, 0, 0, R + 16);
+    g.addColorStop(0, 'rgba(255,236,170,0.75)'); g.addColorStop(0.65, 'rgba(255,200,90,0.3)'); g.addColorStop(1, 'rgba(255,190,70,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, R + 16, 0, Math.PI * 2); ctx.fill();
+    if (img?.complete && img.naturalWidth) {
+      const k = Math.min((R * 2) / img.naturalWidth, (R * 2) / img.naturalHeight);
+      const w = img.naturalWidth * k, h = img.naturalHeight * k;
+      if (art.kind === 'fill') {
+        // ilustração com fundo: num círculo
+        const c = Math.max((R * 2) / img.naturalWidth, (R * 2) / img.naturalHeight);
+        ctx.save();
+        ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI * 2); ctx.clip();
+        ctx.drawImage(img, (-img.naturalWidth * c) / 2, (-img.naturalHeight * c) / 2, img.naturalWidth * c, img.naturalHeight * c);
+        ctx.restore();
+        ctx.strokeStyle = '#f0c243'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI * 2); ctx.stroke();
+      } else {
+        ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 8;
+        ctx.drawImage(img, -w / 2, -h / 2, w, h);
+        ctx.shadowBlur = 0;
+      }
+    }
+    ctx.font = '800 15px "Baloo 2", sans-serif'; ctx.textAlign = 'center';
+    ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(30,18,8,0.9)'; ctx.strokeText(name, 0, R + 18);
+    ctx.fillStyle = '#ffe9a8'; ctx.fillText(name, 0, R + 18);
+    ctx.restore();
+  } };
+}
+
+/** Fúria de Combate: chão brilhando na cor da Guilda (atrás do Herói) e chamas subindo em volta dele (na frente). */
+export function drawFuryAura(ctx: Ctx, sc: number, tt: number, color: string, front: boolean) {
+  ctx.save();
+  if (!front) {
+    ctx.save();
+    ctx.scale(1, 0.5);
+    const R = 62 * sc, pulse = 0.75 + 0.25 * Math.sin(tt * 4);
+    const g = ctx.createRadialGradient(0, 0, R * 0.15, 0, 0, R);
+    g.addColorStop(0, `${color}cc`); g.addColorStop(0.65, `${color}66`); g.addColorStop(1, `${color}00`);
+    ctx.globalAlpha *= pulse;
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = color; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(0, 0, R * 0.8, tt * 2.2, tt * 2.2 + Math.PI * 1.3); ctx.stroke();
+    ctx.restore();
+  }
+  // chamas: as de trás antes do Herói, as da frente depois
+  ctx.shadowColor = color; ctx.shadowBlur = 10;
+  for (let i = 0; i < 12; i++) {
+    const k = (tt * (0.7 + rnd(i) * 0.5) + rnd(i + 20)) % 1, a = i * 2.4 + tt * 0.9;
+    if (Math.sin(a) > 0 !== front) continue;
+    const x = Math.cos(a) * (34 - k * 12) * sc, y = Math.sin(a) * 12 * sc - k * 104 * sc, r = (9 - k * 6) * sc;
+    ctx.globalAlpha = 0.85 * Math.sin(k * Math.PI);
+    ctx.fillStyle = i % 3 ? color : '#ffffff';
+    ctx.beginPath(); ctx.moveTo(x, y - r * 2); ctx.quadraticCurveTo(x + r, y, x, y + r); ctx.quadraticCurveTo(x - r, y, x, y - r * 2); ctx.fill();
+  }
+  ctx.restore();
+}
+
+/** Grito de Guerra: ondas de som saem da boca do Herói e um vento leve corre em volta dele. */
+export function warCryFx(p: Pt): Omit<Fx, 't0'> {
+  const ms = 1100, mouth = { x: p.x, y: p.y - 66 };
+  return { ms, draw(ctx, t) {
+    // ondas do grito
+    ctx.save();
+    ctx.translate(mouth.x, mouth.y); ctx.scale(1, 0.72);
+    ctx.lineCap = 'round';
+    ctx.shadowColor = 'rgba(255,190,90,0.9)'; ctx.shadowBlur = 10;
+    for (let i = 0; i < 4; i++) {
+      const k = (t - i * 130) / 620;
+      if (k < 0 || k > 1) continue;
+      const r = 26 + k * 150;
+      ctx.strokeStyle = `rgba(255,232,180,${0.85 * (1 - k)})`; ctx.lineWidth = 9 * (1 - k) + 1.5;
+      ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke();
+    }
+    ctx.restore();
+    // vento rente ao chão, girando para fora
+    ctx.save();
+    ctx.translate(p.x, p.y); ctx.scale(1, 0.46);
+    ctx.lineCap = 'round';
+    for (let i = 0; i < 10; i++) {
+      const k = (t - 60 - rnd(i) * 320) / 620;
+      if (k < 0 || k > 1) continue;
+      const a0 = (i / 10) * Math.PI * 2 + k * 1.2, r = 34 + k * (90 + rnd(i + 5) * 60);
+      ctx.strokeStyle = `rgba(232,246,236,${0.75 * (1 - k)})`; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.arc(0, 0, r, a0, a0 + 0.8); ctx.stroke();
+    }
+    ctx.restore();
+  } };
 }
 
 /** Desenha a arma com o cabo na origem e a ponta para +x. */

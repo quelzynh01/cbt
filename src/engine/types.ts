@@ -331,6 +331,8 @@ export type GameEvent =
   | { t: 'reward'; heroId: string; cardId: string; /** ficou com as cartas sem Herói (inventário cheio) */ spare?: boolean; /** de onde veio (padrão: Carta de Recompensa) */ source?: string }
   /** Habilidade Natural ativada (Furtividade do Vapor, Vingança do Espetado…). */
   | { t: 'skill'; id: string; skill: string; name: string }
+  /** Item do Herói entrou em ação: a figura aparece perto dele. `hold`: a fila espera um pouco (o item vem antes do efeito). */
+  | { t: 'item'; id: string; card: string; hold?: boolean }
   /** Aviso na tela de todos (ex.: a Lápide não tem Monstro para ativar). */
   | { t: 'notice'; text: string; color?: string }
   /** Lápide revelada (Beyond the Grave): o texto aparece na tela de todos. */

@@ -42,5 +42,26 @@ for (const [name, cardName, attackType, hits, extra, moments] of CASES) {
   await wait(ms + 300);
   console.log(name, Math.round(ms));
 }
+// itens em ação e Grito de Guerra (pela fila de eventos, como no jogo)
+await page.evaluate(i => {
+  const r = window.cbt.renderer;
+  r.enqueue([{ t: 'item', id: i.h, card: 'tiro_flamejante', hold: true }, { t: 'item', id: i.h, card: 'vidro_genesis', hold: true }, { t: 'item', id: i.h, card: 'anel_sol' }, { t: 'skill', id: i.h, skill: 'grito_guerra', name: 'Grito de Guerra' }]);
+}, ids);
+await wait(1700);
+await page.screenshot({ path: `${OUT}/fx_itens.png` });
+await wait(4000);
+await page.screenshot({ path: `${OUT}/fx_grito.png` });
+// Jøhan: a espada da carta arremessada; Grom ferido: aura na cor da Guilda
+await page.evaluate(i => {
+  const c = window.cbt, r = c.renderer, g = c.game;
+  r.animateAttack({ attackerId: i.h, cardName: 'Lâmina Confiável', attackType: 'melee', thrown: true, targets: [{ id: i.m }], hits: 2 });
+  const grom = g.units().find(u => u.kind === 'hero' && u.alive && u.cell && u.id !== i.h);
+  grom.defId = 'grom'; grom.wounds = 1;
+  const v = r.units.get(grom.id); v.defId = 'grom'; v.wounds = 1;
+  window.__grom = g.ab(grom);
+}, ids);
+await wait(1600);
+await page.screenshot({ path: `${OUT}/fx_johan.png` });
+console.log('habilidade do Herói com aura:', await page.evaluate(() => window.__grom ?? null));
 console.log(errors ? 'FALHOU' : 'ANIMAÇÕES OK (veja os prints)');
 await browser.close();

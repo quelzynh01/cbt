@@ -3,7 +3,7 @@ import { getSettings } from '../ui/settings';
 import { playMinoLaugh, isTroll, playTrollAttack, playTrollEntrance, playTrollLaugh, isMinotaur, playMinoEntrance, playSisterLaugh, playSisterVoice, playMinoKill, isSister, playSisterAttack, play, playLordEntrance, playOnce, playRandom, type Sfx } from '../audio/sfx';
 import { CARDS } from '../engine/cards';
 import { CARD_ART } from '../ui/cardArt';
-import { drainFx, drawAlong, drawHeld, heldWeapon, laserFx, meteorsFx, preloadWeapons, skullsFx, spellCount, spellOf, windFx, type Fx, type Held, type Spell } from './attackFx';
+import { drainFx, drawAlong, drawFuryAura, drawHeld, heldWeapon, itemFx, laserFx, meteorsFx, preloadWeapons, skullsFx, spellCount, spellOf, warCryFx, windFx, type Fx, type Held, type Spell } from './attackFx';
 import { drawTokenImage, tokenImage, tokenImageId } from './tokens';
 import { key, sameCell, type LosBlock } from '../engine/board';
 import { DUO_ENTRANCE, bossAura, GUILDS, MONSTERS, SISTER_ENTRANCE, teamName } from '../engine/data';
@@ -64,7 +64,7 @@ interface UnitView {
 }
 
 interface Floater { text: string; color: string; x: number; y: number; t0: number; dur: number; size: number }
-interface Projectile { from: Pt; to: Pt; t0: number; dur: number; kind: 'arrow' | 'orb' | 'stone' | 'blade' | 'bat'; arc: number }
+interface Projectile { from: Pt; to: Pt; t0: number; dur: number; kind: 'arrow' | 'orb' | 'stone' | 'blade' | 'bat'; arc: number; /** a arte da arma arremessada */ art?: Held['art'] }
 
 export interface RendererHooks {
   /** Retornar true segura a fila de animações até release() (ex.: tela de batalha). */
@@ -83,7 +83,7 @@ const DIE_ICON: Record<string, string> = { crit: '✷', melee: '⚔', ranged: '�
 const HIT_RESULT = new Set<GameEvent['t']>(['damage', 'death', 'stun', 'heal', 'coins', 'log', 'cemetery', 'drop', 'reward']);
 
 const DUR: Partial<Record<GameEvent['t'], number>> = {
-  move: 280, door: 220, attack: 1500, damage: 480, heal: 420, death: 520, stun: 200, pickup: 650, drop: 200,
+  item: 0, skill: 0, move: 280, door: 220, attack: 1500, damage: 480, heal: 420, death: 520, stun: 200, pickup: 650, drop: 200,
   spawn: 420, respawn: 420, spawnRoll: 0, lordEntrance: 3400, tomb: 2600, notice: 1600, mission: 1500, reaction: 520, turn: 950, rest: 700, card: 800, coins: 0, log: 0, gameover: 0,
 };
 
@@ -699,7 +699,7 @@ export class Renderer {
             if (Math.hypot(to.x - from.x, to.y - from.y) < 40) { const s = to.x >= from.x ? 1 : -1; from.x -= 30 * s; to.x += 30 * s; }
             const dist = Math.hypot(to.x - from.x, to.y - from.y);
             // Jøhan arremessa a Espada: voa girando, quase reta
-            this.projectiles.push({ from, to, t0: now + 250 / sp, dur: Math.min(900, 380 + dist * 0.35) / sp, kind: e.thrown ? 'blade' : kind, arc: e.thrown ? Math.max(20, Math.min(70, dist * 0.15)) : Math.max(50, Math.min(220, dist * 0.5)) });
+            this.projectiles.push({ from, to, t0: now + 250 / sp, dur: Math.min(900, 380 + dist * 0.35) / sp, kind: e.thrown ? 'blade' : kind, ...(e.thrown ? { art: heldWeapon(e.cardName, now, 1, 0)?.art } : {}), arc: e.thrown ? Math.max(20, Math.min(70, dist * 0.15)) : Math.max(50, Math.min(220, dist * 0.5)) });
           }
           const base = a.defId.replace(/\d+$/, '');
           setTimeout(() => isSister(base) ? playSisterAttack(base, (e.crits ?? 0) > 0 && this.survivesAttack(e.attackerId)) : play(e.thrown ? 'atack-sword' : base === 'goblin' ? 'archer-sound' : kind === 'orb' ? 'atack-magic' : 'atack-bow'), 230 / sp);
@@ -712,6 +712,13 @@ export class Renderer {
         return total;
       }
     }
+  }
+
+  /** A figura do item aparece em cima do personagem e acompanha ele; vários ao mesmo tempo ficam lado a lado. */
+  private showItem(id: string, card: string) {
+    const slot = this.spells.filter(f => f.tag === id).length;
+    this.spells.push({ ...itemFx(card, slot, () => { const u = this.units.get(id); return u ? g2s(u.pos.gx, u.pos.gy) : null; }), tag: id, t0: this.t });
+    play('pick-item', 0.5);
   }
 
   /** Magia do Herói: a quantidade de elementos vem dos acertos (no máximo os dados da carta). */
@@ -850,6 +857,21 @@ export class Renderer {
         const u = this.units.get(e.id)!;
         u.stunned = e.on;
         if (e.on) { this.floatAt(e.id, 'ATORDOADO!', '#ffe14d', 26, -18); play('stun', 0.8); }
+        break;
+      }
+      case 'item': {
+        this.showItem(e.id, e.card);
+        if (e.hold) dur = 520 / this.speed;
+        break;
+      }
+      case 'skill': {
+        // habilidade que vem de um item: a figura dele aparece também
+        const card = e.skill === 'celeridade' ? 'bastao_celeridade' : e.skill;
+        if (CARDS[card]) this.showItem(e.id, card);
+        if (e.skill === 'grito_guerra') {
+          const u = this.units.get(e.id);
+          if (u) { const p = g2s(u.pos.gx, u.pos.gy); this.spells.push({ ...warCryFx(p), t0: this.t }); this.floatAt(e.id, 'RAAAH!', '#ffd34d', 26, -18); }
+        }
         break;
       }
       case 'reward': {
@@ -2251,6 +2273,10 @@ export class Renderer {
     const isSoul = !!this.game?.s.units[u.id]?.soul && u.alive;
     if (isSoul) this.drawSoulWisps(ctx, L.scale, tt);
     const lava = u.alive && u.kind === 'monster' && this.game ? bossAura(this.game.map.id, u.defId) ?? null : null;
+    // Fúria de Combate (Grom ferido): aura na cor da Guilda; só depois que o Ferimento aparece no mapa
+    const real = this.game?.s.units[u.id];
+    const fury = u.alive && u.kind === 'hero' && u.wounds > 0 && !!real && this.game.ab(real) === 'furia' ? GUILDS[u.guild as keyof typeof GUILDS]?.color : undefined;
+    if (fury) drawFuryAura(ctx, L.scale, tt, fury, false);
     if (lava === 'sister') this.drawSisterAura(ctx, L.scale, tt, false);
     else if (lava === 'sand') this.drawSandAura(ctx, L.scale, tt, false);
     else if (lava) this.drawLavaAura(ctx, L.scale, tt, false, lava === 'dark');
@@ -2261,6 +2287,7 @@ export class Renderer {
     if (isSoul) ctx.translate(0, 6 + Math.sin(tt * 2) * 5);
     if (fx) ctx.filter = 'none';
     if (spinFx && spinFront) spinFx();
+    if (fury) drawFuryAura(ctx, L.scale, tt, fury, true);
     if (u.held) { if (this.t > u.held.t0 + u.held.dur) u.held = null; else drawHeld(ctx, u.held, this.t, flip, L.scale); }
     if (lava === 'sister') this.drawSisterAura(ctx, L.scale, tt, true);
     else if (lava === 'sand') this.drawSandAura(ctx, L.scale, tt, true);
@@ -2532,8 +2559,9 @@ export class Renderer {
         if (p.kind === 'blade') {
           // espada arremessada girando (Jøhan): do tamanho de uma espada de verdade
           ctx.rotate(this.t / 45);
-          ctx.translate(-12, 0);
-          drawSword(ctx, 2.1);
+          // a espada da carta que ele está usando, girando em torno do meio
+          ctx.translate(-48, 0);
+          if (!p.art || !drawAlong(ctx, p.art, 96)) { ctx.translate(36, 0); drawSword(ctx, 2.1); }
           ctx.restore(); continue;
         }
         ctx.strokeStyle = '#5a3a1a'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(-12, 0); ctx.lineTo(10, 0); ctx.stroke();
