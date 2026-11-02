@@ -556,7 +556,7 @@ export class SimpleAI {
       const mine = g.s.arena?.[h.guild!] ?? [];
       const total = g.map.missionMarkers.length;
       const fresh = !mine.includes(key(c));
-      const willComplete = mine.length + 1 >= 5 || (fresh && new Set(mine).size + 1 >= total);
+      const willComplete = mine.filter(k => k === key(c)).length + 1 >= 5 || (fresh && new Set(mine).size + 1 >= total);
       v += willComplete ? 14 : fresh ? 6 : 3.5;
     }
     // carregando uma escolta: chegar ao destino completa a Missão
@@ -843,7 +843,7 @@ export class SimpleAI {
         if (m.rule === 'arena') {
           const list = g.s.arena?.[eg.id] ?? [];
           const total = g.map.missionMarkers.length;
-          const prog = Math.max(list.length / 5, new Set(list).size / Math.max(1, total));
+          const prog = Math.max(Math.max(0, ...[...new Set(list)].map(k => list.filter(x => x === k).length)) / 5, new Set(list).size / Math.max(1, total));
           for (const mm of g.map.missionMarkers) {
             const nf = near(mm.cell, 3);
             if (!nf.length) continue;

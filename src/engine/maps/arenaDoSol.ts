@@ -110,7 +110,7 @@ export const ARENA_DO_SOL: MapDef = {
 
   missions: {
     pve: [
-      { id: 'rei_arena', name: 'Rei da Arena', kind: 'pve', text: 'Termine a ativação de um Herói num marcador de Missão sem Inimigos: coloque 1 marcador da sua Guilda. Complete com 5 marcadores ou 1 em cada um dos 4. Os 2 primeiros ganham uma Recompensa (Escudo das Almas).', rule: 'arena', reward: true },
+      { id: 'rei_arena', name: 'Rei da Arena', kind: 'pve', text: 'Termine a ativação de um Herói num marcador de Missão sem Inimigos: coloque 1 marcador da sua Guilda. Complete com 5 no mesmo marcador de Missão ou 1 em cada um dos 4. Os 2 primeiros ganham uma Recompensa (Escudo das Almas).', rule: 'arena', reward: true },
       { id: 'minotauro', name: 'Matar o Minotauro', kind: 'pve', text: 'Mate Urratouro, o Minotauro.', rule: 'kill_type', types: ['minotauro'] },
     ],
     rewards: ['escudo_almas', 'escudo_almas'],

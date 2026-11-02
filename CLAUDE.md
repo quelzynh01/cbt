@@ -85,6 +85,7 @@ sh tools/tests/run-engine.sh furtivo       # Vapor (Wisp): Furtividade 1 vez por
 sh tools/tests/run-engine.sh irmas         # ordem de entrada sorteada: Irmãs (Alquimista) e dupla Troll + Minotauro (Pátio)
 sh tools/tests/run-engine.sh resthp        # Descanso: não deixa tirar a carta que dá Vida se o Herói ficar com a Vida zerada
 sh tools/tests/run-engine.sh fender        # Fender sempre pergunta (mesmo com 1 Inimigo Perto): usar ou não
+sh tools/tests/run-engine.sh raionova      # Raio Nova sempre pergunta com ✷ (mesmo com 1 Inimigo); Rei da Arena: 5 no mesmo marcador ou 1 em cada um dos 4 (3 lugares não completa)
 sh tools/tests/run-engine.sh bencao        # Bênção: o Aliado não troca de volta para quem já jogou; troca normal antes de agir continua
 sh tools/tests/run-engine.sh curairma      # Irmã do Prazer/Lorde: ✷ cura 2 antes da retribuição (Espetado/Amuleto); dano além da Vida conta; vive só com Vida >= 1
 sh tools/tests/run-engine.sh aiitems       # IA: poções no fim da ativação e Baús/poções com o Herói mais seguro no Descanso

@@ -1958,9 +1958,9 @@ export class Game {
   }
 
   /** Alvo adicional escolhido pelo jogador (Raio Nova, Fender). undefined = escolha automática; null = nenhum.
-   *  Raio Nova com um só Inimigo possível não pergunta; o Fender sempre pergunta (o jogador decide se usa). */
+   *  Sempre pergunta, mesmo com um só Inimigo possível: o efeito é opcional ("pode atingir"). */
   private chooseExtra(h: Unit, source: string, extra: Unit[], faces: DieFace[]): Unit | null | undefined {
-    if ((extra.length < 2 && source !== 'Fender') || !h.guild || !this.choiceHook) return undefined;
+    if (!h.guild || !this.choiceHook) return undefined;
     const i = this.choiceHook({ choice: 'extra', guild: h.guild, heroId: h.id, source, units: extra.map(u => u.id), faces: faces.slice() });
     return i === 'auto' ? undefined : extra[i] ?? null;
   }
@@ -3110,8 +3110,10 @@ export class Game {
     const list = ((this.s.arena ??= {})[g] ??= []);
     list.push(key(h.cell));
     const total = this.map.missionMarkers.length;
-    this.log(`${this.name(h)} marcou o marcador de Missão em (${h.cell.c},${h.cell.r}) — ${list.length}/5 marcadores, ${new Set(list).size}/${total} diferentes.`);
-    if (list.length >= 5 || new Set(list).size >= total) this.completeMission(g, m.id, h);
+    const here5 = list.filter(k => k === key(h.cell!)).length;
+    this.log(`${this.name(h)} marcou o marcador de Missão em (${h.cell.c},${h.cell.r}) — ${here5}/5 neste marcador, ${new Set(list).size}/${total} diferentes.`);
+    // Rei da Arena: 5 no MESMO marcador ou 1 em cada marcador
+    if (here5 >= 5 || new Set(list).size >= total) this.completeMission(g, m.id, h);
   }
 
   /** Pisar no marcador invoca um Monstro numa Entrada de Monstro sorteada (Sombra do Lorde Presas). */
