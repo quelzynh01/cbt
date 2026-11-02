@@ -135,6 +135,7 @@ node tools/tests/browser/blessenter.mjs <pasta-prints>              # Bênção:
 node tools/tests/browser/alertwarn.mjs <pasta-prints>               # Templo: aviso de Reação de Alerta (Irmãs) aparece antes de andar
 node tools/tests/browser/rratk.mjs <pasta-prints>                   # online: Rerrolagem do ATAQUE do amigo acompanhada no painel de dados
 node tools/tests/browser/aiworker.mjs <pasta-prints>                # IA com busca no Web Worker: IA x IA no Modo Teste, turnos andam e a tela não trava (PORT=, SECS=)
+node tools/tests/browser/nospoil.mjs <pasta-prints>                 # Herói morre na Vingança: barra, placar e ficha só mostram a morte depois dos dados
 node tools/tests/browser/wpar.mjs                                   # Workers auxiliares da busca: simulações por jogada com 0 x 3 auxiliares (HELPERS=0,3, MS=)
 ```
 

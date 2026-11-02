@@ -391,11 +391,12 @@ export class Hud {
     const done = g.s.activatedThisTurn ?? [];
     const face = (h: Unit, gc: string, mine: boolean) => {
       const max = g.maxHp(h);
-      const state = !h.alive || !h.cell ? 'dead' : a?.heroId === h.id ? 'on' : mine && myTurn && done.includes(h.id) && !g.canBless(h.id) ? 'used' : '';
+      const v = this.shown(h);
+      const state = !v.alive ? 'dead' : a?.heroId === h.id ? 'on' : mine && myTurn && done.includes(h.id) && !g.canBless(h.id) ? 'used' : '';
       const tag = state === 'dead' ? '☠' : state === 'on' ? '✔' : state === 'used' ? '✓' : '';
       return `<button class="hp-hero sb-hero ${state} ${this.pendingActivate === h.id ? 'sel' : ''} ${this.inspected === h.id ? 'insp' : ''}" data-sb="${h.id}" style="--gc:${gc}" title="${HEROES[h.defId].name}">
-        <img src="${this.portrait(h.defId, gc)}"/><span class="hp-num" style="background:${gc}">${h.num}</span>${tag ? `<span class="hp-tag">${tag}</span>` : ''}${h.stunned ? '<span class="hp-stun">✷</span>' : ''}
-        <span class="hp-life"><i style="width:${h.alive ? ((max - h.wounds) / max) * 100 : 0}%"></i></span></button>`;
+        <img src="${this.portrait(h.defId, gc)}"/><span class="hp-num" style="background:${gc}">${h.num}</span>${tag ? `<span class="hp-tag">${tag}</span>` : ''}${v.stunned ? '<span class="hp-stun">✷</span>' : ''}
+        <span class="hp-life"><i style="width:${v.alive ? ((max - v.wounds) / max) * 100 : 0}%"></i></span></button>`;
     };
     const team = (id: GuildId, mine: boolean) => {
       const gs = g.guild(id);
@@ -403,7 +404,7 @@ export class Hud {
       const hot = !g.s.winner && shown === g.s.missionsToWin - 1;
       return `<div class="sb-team ${id === cur.id && !g.s.winner ? 'cur' : ''} ${hot ? 'hot' : ''}" style="--gc:${gs.color}">
         <div class="sb-heroes">${g.heroesOf(id).map(h => face(h, gs.color, mine)).join('')}</div>
-        <div class="sb-info"><b>${guildShort(id)}</b><span title="Missões cumpridas">🏆 ${shown}/${g.s.missionsToWin}</span><span title="Moedas">🪙 ${g.wealth(id)}</span><span title="Mortes de Heróis da Guilda neste cenário">☠ ${g.heroesOf(id).reduce((n, h) => n + h.deaths, 0)}</span></div>
+        <div class="sb-info"><b>${guildShort(id)}</b><span title="Missões cumpridas">🏆 ${shown}/${g.s.missionsToWin}</span><span title="Moedas">🪙 ${g.wealth(id)}</span><span title="Mortes de Heróis da Guilda neste cenário">☠ ${g.heroesOf(id).reduce((n, h) => n + this.shownDeaths(h), 0)}</span></div>
         ${g.activeTitles(id).length ? `<div class="sb-titles">${g.activeTitles(id).map(t => `<button class="sb-title" data-title="${t}" title="${TITLES[t] ?? t}: clique para ver a vantagem neste mapa">🏅 ${TITLES[t] ?? t} <span class="mt-ex">!</span></button>`).join('')}</div>` : ''}</div>`;
     };
     const who = g.s.winner ? 'Fim do cenário' : myTurn ? '<span class="sb-you">Sua vez!</span>' : cur.controller === 'ai' ? `Vez da IA · ${guildShort(cur.id)}` : `Vez de ${this.nameOf(cur.id) ?? guildShort(cur.id)}`;
@@ -443,7 +444,7 @@ export class Hud {
     el.innerHTML = g.heroesOf(mine).map(h => {
       const max = g.maxHp(h);
       const v = this.shown(h);
-      const state = !v.alive || !h.cell ? 'dead' : a?.heroId === h.id ? 'on' : done.includes(h.id) && !g.canBless(h.id) ? 'used' : '';
+      const state = !v.alive ? 'dead' : a?.heroId === h.id ? 'on' : done.includes(h.id) && !g.canBless(h.id) ? 'used' : '';
       const tag = state === 'dead' ? '☠' : state === 'on' ? '✔' : state === 'used' ? '✓' : '';
       return `<button class="hp-hero ${state} ${this.pendingActivate === h.id ? 'sel' : ''}" data-hp="${h.id}" ${state === 'dead' ? 'disabled' : ''} title="${HEROES[h.defId].name}">
         <img src="${this.portrait(h.defId, gc)}"/><span class="hp-num">${h.num}</span>${tag ? `<span class="hp-tag">${tag}</span>` : ''}${v.stunned ? '<span class="hp-stun">✷</span>' : ''}
@@ -616,8 +617,8 @@ export class Hud {
     $('#score', this.root).innerHTML = g.s.guildOrder.map(id => {
       const gs = g.guild(id);
       const heroes = g.heroesOf(id);
-      const alive = heroes.filter(h => h.alive).length;
-      const deaths = heroes.reduce((s, h) => s + h.deaths, 0);
+      const alive = heroes.filter(h => this.shown(h).alive).length;
+      const deaths = heroes.reduce((s, h) => s + this.shownDeaths(h), 0);
       const tokens = heroes.reduce((s, h) => s + h.tokens.length, 0);
       // só o que já apareceu na tela (o combate que cumpre a Missão ainda pode estar sendo animado)
       const shown = (this.shownMissions[id] ?? []).filter(m => gs.missions.includes(m));
@@ -633,7 +634,7 @@ export class Hud {
         <div class="sc-detail">
           <span title="Mortes de Heróis da Guilda">☠ ${deaths} mortes</span>
           <span title="Heróis vivos">❤ ${alive}/${heroes.length} vivos</span><span title="Marcadores de Exploração">🎒 ${tokens}</span>
-          <div class="sc-heroes">${heroes.map(h => `<span class="${h.alive ? '' : 'dead'}" title="${HEROES[h.defId].name}: ${h.alive ? `${g.maxHp(h) - h.wounds}/${g.maxHp(h)} de Vida` : 'morto'}">${HEROES[h.defId].name} <i>${h.alive ? `❤${g.maxHp(h) - h.wounds}` : '☠'}</i></span>`).join('')}</div>
+          <div class="sc-heroes">${heroes.map(h => { const v = this.shown(h); return `<span class="${v.alive ? '' : 'dead'}" title="${HEROES[h.defId].name}: ${v.alive ? `${g.maxHp(h) - v.wounds}/${g.maxHp(h)} de Vida` : 'morto'}">${HEROES[h.defId].name} <i>${v.alive ? `❤${g.maxHp(h) - v.wounds}` : '☠'}</i></span>`; }).join('')}</div>
           ${done.length ? `<div class="sc-miss">✔ ${done.join(' · ')}</div>` : '<div class="sc-miss muted">Nenhuma Missão cumprida</div>'}
           ${titles.length ? `<div class="sc-miss">🏅 ${titles.length} Título(s)</div>` : ''}
         </div>
@@ -647,6 +648,7 @@ export class Hud {
   showCard(id: string) {
     const g = this.game;
     const u = g.unit(id);
+    const v = this.shown(u);
     const box = $('#cardview', this.root);
     // aberta pela lupa: carta normal (o Alt marca de novo depois, em peekCard)
     this.peeking = false;
@@ -655,24 +657,24 @@ export class Hud {
     let body: string;
     if (u.kind === 'monster') {
       const md = MONSTERS[u.defId];
-      const hpNow = u.alive ? md.hp - u.wounds : 0;
+      const hpNow = v.alive ? md.hp - v.wounds : 0;
       const live = { def: g.defenseDice(u), hp: hpNow, maxHp: md.hp, rr: g.rerollsOf(u) };
       body = `<div class="cv-cards">${monsterCard(u.defId, '', '', live)}</div>
         <div class="cv-info">
           <div class="cv-life">❤ Vida atual: <b class="${stat(hpNow, md.hp)}">${hpNow}/${md.hp}</b></div>
-          ${u.stunned ? '<div class="tag stun">Atordoado: não rola Defesa (Defesa 0)</div>' : ''}
+          ${v.stunned ? '<div class="tag stun">Atordoado: não rola Defesa (Defesa 0)</div>' : ''}
           ${this.modList([['Vida', md.hp, hpNow], ['Defesa', md.defense, live.def], ['Rerrolagem', md.rerolls, live.rr]])}
         </div>`;
     } else {
       const hd = HEROES[u.defId];
       const max = g.maxHp(u);
-      const hpNow = u.alive ? max - u.wounds : 0;
+      const hpNow = v.alive ? max - v.wounds : 0;
       const atk = g.attackBonus(u);
       const live = { def: g.defenseDice(u), hp: hpNow, maxHp: max, rr: g.rerollsOf(u), atk: atk.n };
       body = `<div class="cv-cards">${heroCard(u.defId, '', '', '', '', live)}</div>
         <div class="cv-info">
-          <div class="cv-life">❤ Vida atual: <b class="${stat(hpNow, hd.hp)}">${hpNow}/${max}</b>${max !== hd.hp ? ` <small>(máx. ${max}; carta ${hd.hp})</small>` : ''} · ☠ ${u.deaths} morte(s)</div>
-          ${u.stunned ? '<div class="tag stun">Atordoado: não rola Defesa até Descansar</div>' : ''}
+          <div class="cv-life">❤ Vida atual: <b class="${stat(hpNow, hd.hp)}">${hpNow}/${max}</b>${max !== hd.hp ? ` <small>(máx. ${max}; carta ${hd.hp})</small>` : ''} · ☠ ${this.shownDeaths(u)} morte(s)</div>
+          ${v.stunned ? '<div class="tag stun">Atordoado: não rola Defesa até Descansar</div>' : ''}
           ${u.curse === 'amnesia' ? '<div class="tag dead">Amnésia: sem Habilidade Natural</div>' : ''}
           ${this.modList([['Vida', hd.hp, hpNow], ['Vida máxima', hd.hp, max], ['Defesa', hd.defense, live.def], ['Rerrolagem', 0, live.rr], ['Dados de ataque (bônus)', 0, atk.n]])}
           ${atk.notes.length ? `<div class="muted">${atk.notes.join(' · ')}</div>` : ''}
@@ -961,7 +963,9 @@ export class Hud {
   busy: () => boolean = () => false;
   /** O personagem como aparece no mapa agora (sem adiantar dano, morte ou Atordoado da animação que ainda vai passar). */
   view: (id: string) => { wounds: number; alive: boolean; stunned: boolean } | null = () => null;
-  private shown(h: Unit) { const v = this.view(h.id); return v ?? { wounds: h.wounds, alive: h.alive, stunned: h.stunned }; }
+  private shown(h: Unit) { const v = this.view(h.id); return v ?? { wounds: h.wounds, alive: h.alive && !!h.cell, stunned: h.stunned }; }
+  /** Mortes do Herói sem contar a que a animação ainda não mostrou. */
+  private shownDeaths(h: Unit) { return h.deaths - (!h.alive && this.shown(h).alive ? 1 : 0); }
   private boxShown: string | null | undefined = undefined;
 
   private renderHeroBox() {
@@ -998,12 +1002,14 @@ export class Hud {
       return;
     }
     const u = g.unit(id);
+    // Vida, morte e Atordoado como estão no mapa: trocar de personagem no meio do lance não adianta o resultado
+    const v = this.shown(u);
     if (u.kind === 'monster') {
       const md = MONSTERS[u.defId];
       box.innerHTML = `<div class="hb-c1">
         <div class="hb-head"><img src="${this.portrait(u.defId, '#7a2b8f', u.soul ? 'soul' : !!u.shadow)}"/><div><div class="hb-name">${g.name(u)}</div><div class="hb-sub">${md.category} · Nível ${md.level}</div></div><button class="lupa" id="hb-card" title="Ver a carta com os valores atuais">🔍</button><button class="x" id="hb-close">✕</button></div>
         <div class="stats hb-meds">
-          ${u.alive && md.hp - u.wounds > 0 ? medal('hp', md.hp - u.wounds, `Vida: ${md.hp - u.wounds} de ${md.hp}`, `hbm${u.wounds ? ' down' : ''}`) : ''}
+          ${v.alive && md.hp - v.wounds > 0 ? medal('hp', md.hp - v.wounds, `Vida: ${md.hp - v.wounds} de ${md.hp}`, `hbm${v.wounds ? ' down' : ''}`) : ''}
           ${Number.isFinite(md.exterm) && md.exterm > 0 ? medal('skull', md.exterm, `Extermínio: ${md.exterm} Ferimentos num só ataque matam sem Vingança`, 'hbm') : ''}
           ${g.defenseDice(u) > 0 ? medal('def', g.defenseDice(u), `${g.defenseDice(u)} dado${g.defenseDice(u) === 1 ? '' : 's'} de Defesa`, `hbm${g.defenseDice(u) > md.defense ? ' up' : g.defenseDice(u) < md.defense ? ' down' : ''}`) : ''}
           ${g.rerollsOf(u) > 0 ? medal('rr', g.rerollsOf(u), `Rerrolagem ${g.rerollsOf(u)}`, 'hbm') : ''}
@@ -1011,7 +1017,7 @@ export class Hud {
         </div></div><div class="hb-c2">
         <div class="mcard"><b>${md.attackType === 'melee' ? '⚔ Ataque Próximo' : '➶ Ataque a Distância'}</b> — ${md.attackName}: ${md.dice} dados</div>
         <div class="hb-note">Reação de Alerta: ataca quem sair de um Espaço Perto dele ou atacar outro alvo estando Perto.<br/>Reação de Vingança: ao ser atacado, move até ${md.move} e revida.</div>
-        ${u.stunned ? '<div class="tag stun">Atordoado (não rola Defesa)</div>' : ''}</div>
+        ${v.stunned ? '<div class="tag stun">Atordoado (não rola Defesa)</div>' : ''}</div>
         ${actions}`;
       $('#hb-close', box).onclick = () => this.actions.inspect(null);
       $('#hb-card', box).onclick = () => this.showCard(u.id);
@@ -1039,10 +1045,10 @@ export class Hud {
         ${this.inspected ? '<button class="x" id="hb-close">✕</button>' : ''}
       </div>
       <div class="stats hb-meds">
-        ${u.alive && max - u.wounds > 0 ? medal('hp', max - u.wounds, `Vida: ${max - u.wounds} de ${max} (carta: ${hd.hp})`, 'hbm') : ''}
+        ${v.alive && max - v.wounds > 0 ? medal('hp', max - v.wounds, `Vida: ${max - v.wounds} de ${max} (carta: ${hd.hp})`, 'hbm') : ''}
         ${g.defenseDice(u) > 0 ? medal('def', g.defenseDice(u), `${g.defenseDice(u)} dado${g.defenseDice(u) === 1 ? '' : 's'} de Defesa (carta: ${hd.defense})`, 'hbm') : ''}
         ${g.rerollsOf(u) ? medal('rr', g.rerollsOf(u), `Rerrolagem ${g.rerollsOf(u)}`, 'hbm') : ''}
-        ${u.deaths ? medal('skull', u.deaths, `Morreu ${u.deaths} vez${u.deaths === 1 ? '' : 'es'} neste cenário`, 'hbm') : ''}
+        ${this.shownDeaths(u) ? medal('skull', this.shownDeaths(u), `Morreu ${this.shownDeaths(u)} vez${this.shownDeaths(u) === 1 ? '' : 'es'} neste cenário`, 'hbm') : ''}
         ${isActive ? (g.freeMode ? '<span class="mp" title="Modo Livre">👣 ∞</span>' : `<span class="mp" title="Pontos de Movimento">👣 ${[0, 1, 2].map(i => `<i class="${i < act!.mp && !act!.moveLocked ? 'on' : ''}"></i>`).join('')}</span>`) : ''}
         ${isActive ? `<span title="Ataque">${act!.attacked ? '⚔ usado' : '⚔ disponível'}</span>` : ''}
       </div></div><div class="hb-c2">
@@ -1054,8 +1060,8 @@ export class Hud {
       ${g.s.copied?.heroId === u.id ? `<div class="tag rr">🐒 Copiou: <b>${Object.values(HEROES).find(x => x.ability === g.s.copied!.ability)?.abilityName ?? ''}</b> (até o fim do turno)</div>` : ''}
       ${u.petrified ? `<div class="tag stun">🗿 Petrificado: −${u.petrified} de Movimento até Descansar</div>` : ''}
       ${u.curse ? `<div class="ability curse-ab" title="${CURSES[u.curse]?.text ?? ''}"><b>☠ ${CURSES[u.curse]?.name}</b> — ${CURSES[u.curse]?.text}</div>` : ''}
-      ${u.stunned ? '<div class="tag stun">✷ Atordoado — não rola Defesa até Descansar</div>' : ''}
-      ${!u.alive ? '<div class="tag dead">☠ Morto — ressuscita quando a Guilda Descansar</div>' : ''}
+      ${v.stunned ? '<div class="tag stun">✷ Atordoado — não rola Defesa até Descansar</div>' : ''}
+      ${!v.alive ? '<div class="tag dead">☠ Morto — ressuscita quando a Guilda Descansar</div>' : ''}
       ${u.spent ? '<div class="tag stun">💤 Exausto — não usa de novo as cartas e habilidades que exaurem o Herói até a Guilda Descansar</div>' : ''}
       </div><div class="hb-c3">
       ${(() => {
