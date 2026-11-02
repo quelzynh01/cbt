@@ -3,6 +3,7 @@ import { getSettings } from '../ui/settings';
 import { playMinoLaugh, isTroll, playTrollAttack, playTrollEntrance, playTrollLaugh, isMinotaur, playMinoEntrance, playSisterLaugh, playSisterVoice, playMinoKill, isSister, playSisterAttack, play, playLordEntrance, playOnce, playRandom, type Sfx } from '../audio/sfx';
 import { CARDS } from '../engine/cards';
 import { CARD_ART } from '../ui/cardArt';
+import { drainFx, drawAlong, drawHeld, heldWeapon, laserFx, meteorsFx, preloadWeapons, skullsFx, spellCount, spellOf, windFx, type Fx, type Held, type Spell } from './attackFx';
 import { drawTokenImage, tokenImage, tokenImageId } from './tokens';
 import { key, sameCell, type LosBlock } from '../engine/board';
 import { DUO_ENTRANCE, bossAura, GUILDS, MONSTERS, SISTER_ENTRANCE, teamName } from '../engine/data';
@@ -52,8 +53,10 @@ interface UnitView {
   hurtT0: number;
   /** depth: profundidade do Espaço do alvo (durante a investida o boneco é desenhado na frente das portas/paredes do caminho). */
   lunge: { dx: number; dy: number; t0: number; dur: number; depth?: number } | null;
+  /** A arma da carta aparecendo na mão durante o ataque. */
+  held?: Held | null;
   /** Fender: gira com a espada (golpe em volta). */
-  spin?: { t0: number; dur: number } | null;
+  spin?: { t0: number; dur: number; art?: Held['art'] } | null;
   flip: boolean;
   dir: Dir;
   /** Itens da bolsa mostrados girando (só entram quando a animação de pegar acontece). */
@@ -101,7 +104,7 @@ function drawSword(ctx: CanvasRenderingContext2D, s: number) {
 }
 
 /** O que a animação do golpe precisa saber (evento de ataque ou 'strike'). */
-type Strike = Pick<Extract<GameEvent, { t: 'strike' }>, 'attackerId' | 'cardName' | 'attackType' | 'targets' | 'cleave' | 'thrown' | 'astral' | 'sfx'> & { /** ✷ no ataque (evento 'attack') */ crits?: number };
+type Strike = Pick<Extract<GameEvent, { t: 'strike' }>, 'attackerId' | 'cardName' | 'attackType' | 'targets' | 'cleave' | 'thrown' | 'astral' | 'sfx' | 'hits'> & { /** ✷ no ataque (evento 'attack') */ crits?: number };
 
 export class Renderer {
   readonly canvas: HTMLCanvasElement;
@@ -133,6 +136,8 @@ export class Renderer {
   private projectiles: Projectile[] = [];
   /** Golpe Astral em andamento: a projeção do Herói junto do alvo. */
   private astrals: Astral[] = [];
+  /** Magias dos Heróis em andamento (attackFx.ts). */
+  private spells: Fx[] = [];
   private ground: HTMLCanvasElement | null = null;
   private groundOrigin = { x: 0, y: 0, scale: 1.5 };
   private doorIconPos = new Map<string, Pt>();
@@ -143,6 +148,7 @@ export class Renderer {
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d')!;
+    preloadWeapons();
     this.resize();
     window.addEventListener('resize', () => this.resize());
   }
@@ -158,6 +164,7 @@ export class Renderer {
     this.floaters = [];
     this.projectiles = [];
     this.astrals = [];
+    this.spells = [];
     this.buildDecor();
     this.buildGround();
     this.sync();
@@ -214,6 +221,7 @@ export class Renderer {
     this.floaters = [];
     this.projectiles = [];
     this.astrals = [];
+    this.spells = [];
     this.sync();
     this.idleSent = false;
   }
@@ -645,10 +653,18 @@ export class Renderer {
         if (e.sfx) setTimeout(() => play(e.sfx as Sfx), (e.attackType === 'melee' && !e.thrown ? 450 : 380) / sp);
         if (e.cleave && !e.thrown) {
           // Fender: gira no lugar com a espada, atingindo quem está em volta
-          a.spin = { t0: now + 100 / sp, dur: 700 / sp };
+          a.spin = { t0: now + 100 / sp, dur: 700 / sp, art: heldWeapon(e.cardName, now, 1, 0)?.art };
           setTimeout(() => play('cleave'), 200 / sp);
           this.lastImpact = 420 / sp;
           return 820 / sp;
+        }
+        // magias com animação própria (Raio Nova, Drenar Vida, Rajada de Vento, Ódio, Incinerar)
+        const spell = a.kind === 'hero' && !e.thrown ? spellOf(e.cardName) : null;
+        if (spell) return this.spellStrike(spell, e, pa);
+        // a arma da carta aparece na mão
+        if (a.kind === 'hero' && !e.thrown) {
+          const melee = e.attackType === 'melee';
+          a.held = heldWeapon(e.cardName, now, (melee ? 820 : 640) / sp, Math.atan2(pt.y - pa.y, pt.x - pa.x));
         }
         if (e.attackType === 'melee' && !e.thrown) {
           // investida: corre até encostar no inimigo e volta
@@ -696,6 +712,27 @@ export class Renderer {
         return total;
       }
     }
+  }
+
+  /** Magia do Herói: a quantidade de elementos vem dos acertos (no máximo os dados da carta). */
+  private spellStrike(spell: Spell, e: Strike, pa: { x: number; y: number }): number {
+    const sp = this.speed;
+    const n = spellCount(e.cardName, e.hits);
+    const feet = e.targets.map(tg => { const v = this.units.get(tg.id)!; return g2s(v.pos.gx, v.pos.gy); });
+    const from = { x: pa.x, y: pa.y - 44 };
+    const chest = feet.map(p => {
+      // mesmo Espaço: afasta para o efeito aparecer
+      const near = Math.hypot(p.x - pa.x, p.y - pa.y) < 40;
+      return { x: p.x + (near ? (p.x >= pa.x ? 42 : -42) : 0), y: p.y - 40 };
+    });
+    const made = spell === 'laser' ? laserFx(from, chest, n) : spell === 'drain' ? drainFx(from, chest[0], n) : spell === 'wind' ? windFx(from, feet[0], n) : spell === 'skulls' ? skullsFx(from, chest[0], n) : meteorsFx(feet, n);
+    this.spells.push({ ...made.fx, t0: this.t });
+    if (spell === 'wind') setTimeout(() => playOnce('rajada-de-vento', 1500), 100 / sp);
+    else if (spell === 'skulls' || spell === 'meteors') for (let i = 0; i < n; i++) setTimeout(() => play('atack-magic', 0.6), (spell === 'skulls' ? 380 + i * 140 : 100 + i * 150) / sp);
+    else if (spell === 'laser') for (let i = 0; i < n; i++) setTimeout(() => play('atack-magic', 0.7), (130 + i * 170) / sp);
+    else setTimeout(() => play('atack-magic'), 120 / sp);
+    this.lastImpact = made.hit / sp;
+    return made.fx.ms / sp;
   }
 
   /** Golpe Astral: o corpo fica no lugar; a projeção surge ao lado do alvo, ligada ao corpo por um fio de luz, golpeia e some. */
@@ -2170,6 +2207,7 @@ export class Renderer {
         // uma volta só: vira para as 4 direções e a espada dá a volta em torno dele
         const turn: [Dir, boolean][] = [['se', false], ['sw', false], ['nw', false], ['ne', false]];
         [dir, flip] = turn[Math.min(3, Math.floor(k * 4))];
+        const spinArt = u.spin.art;
         const ease = 1 - Math.pow(1 - k, 2);
         const a0 = Math.PI * 0.5 + ease * Math.PI * 2; // começa na frente e gira 360°
         const R = 58 * L.scale;
@@ -2185,8 +2223,10 @@ export class Renderer {
         for (let i = 0; i < 6; i++) {
           ctx.beginPath();
           ctx.arc(0, 0, R - i * 3, a0 - trail * (1 - i * 0.12), a0);
-          ctx.strokeStyle = `rgba(235,245,255,${fade * (0.75 - i * 0.11)})`;
-          ctx.lineWidth = 10 - i * 1.4;
+          // rastro de fogo, como na carta do Fender: branco-quente na frente, vermelho no fim
+          ctx.strokeStyle = `rgba(${['255,244,190', '255,205,110', '255,150,50', '250,100,30', '235,60,20', '200,30,20'][i]},${fade * (0.95 - i * 0.12)})`;
+          ctx.lineWidth = 16 - i * 2;
+          ctx.shadowColor = 'rgba(255,110,20,0.9)'; ctx.shadowBlur = 14;
           ctx.stroke();
         }
         ctx.restore();
@@ -2195,7 +2235,7 @@ export class Renderer {
         ctx.translate(sx, sy);
         ctx.rotate(Math.atan2(Math.sin(a0) * 0.5, Math.cos(a0)));
         ctx.globalAlpha = fade;
-        drawSword(ctx, 1.5 * L.scale);
+        if (!spinArt || !drawAlong(ctx, spinArt, 92 * L.scale)) drawSword(ctx, 1.5 * L.scale);
         ctx.restore();
         };
         // atrás do Herói na metade de cima do círculo; na frente na metade de baixo
@@ -2221,6 +2261,7 @@ export class Renderer {
     if (isSoul) ctx.translate(0, 6 + Math.sin(tt * 2) * 5);
     if (fx) ctx.filter = 'none';
     if (spinFx && spinFront) spinFx();
+    if (u.held) { if (this.t > u.held.t0 + u.held.dur) u.held = null; else drawHeld(ctx, u.held, this.t, flip, L.scale); }
     if (lava === 'sister') this.drawSisterAura(ctx, L.scale, tt, true);
     else if (lava === 'sand') this.drawSandAura(ctx, L.scale, tt, true);
     else if (lava) this.drawLavaAura(ctx, L.scale, tt, true, lava === 'dark');
@@ -2431,15 +2472,18 @@ export class Renderer {
         ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,.55)';
         ctx.strokeText(`×${m.n}`, x, y + 5); ctx.fillText(`×${m.n}`, x, y + 5);
         ctx.textBaseline = 'alphabetic';
-        // total da Guilda (5 marcações ou 1 em cada marcador)
+        // 5 neste marcador ou 1 em cada marcador
         ctx.font = '800 14px "Baloo 2", sans-serif'; ctx.fillStyle = '#ffe9a8';
-        ctx.fillText(`${list.length}/5 · ${new Set(list).size}/${total}`, x, y + R + 20);
+        ctx.fillText(`${m.n}/5 · ${new Set(list).size}/${total}`, x, y + R + 20);
       });
     }
   }
 
   private drawFx() {
     const ctx = this.ctx;
+    // magias dos Heróis
+    this.spells = this.spells.filter(f => (this.t - f.t0) * this.speed < f.ms);
+    for (const f of this.spells) f.draw(ctx, (this.t - f.t0) * this.speed, this.t / 1000);
     // projéteis
     this.projectiles = this.projectiles.filter(p => this.t - p.t0 < p.dur);
     for (const p of this.projectiles) {

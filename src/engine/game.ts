@@ -1512,7 +1512,7 @@ export class Game {
     // e só agora o golpe no mapa, em todos os alvos de uma vez (Fender: o Herói gira com a espada)
     if (willSpread) this.emit({
       t: 'strike', attackerId: h.id, cardName: def.name, attackType: def.attackType!, targets: results.map(r => ({ id: r.t.id })),
-      ...(cleaved || fenderHit ? { cleave: true } : {}), ...(thrown ? { thrown: true } : {}), ...(fx.astral ? { astral: true } : {}), ...(sfx ? { sfx } : {}),
+      ...(cleaved || fenderHit ? { cleave: true } : {}), ...(thrown ? { thrown: true } : {}), ...(fx.astral ? { astral: true } : {}), ...(sfx ? { sfx } : {}), hits: atk.successes,
     });
 
     // Machado de Schmetterling: cada ✷ cura — logo depois do ataque, antes da retribuição (como a Irmã do Prazer)
