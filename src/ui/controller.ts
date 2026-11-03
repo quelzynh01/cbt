@@ -195,7 +195,7 @@ export class Controller {
       useToken: id => this.act({ type: 'token', tokenId: id }),
       useCard: (heroId, cardUid) => this.useCard(heroId, cardUid),
       usePower: heroId => this.usePower(heroId),
-      revealTomb: () => { if (this.isHumanTurn() && !this.renderer.busy) this.act({ type: 'tomb' }); },
+      revealTomb: () => this.revealTombNow(),
       endTurn: () => this.tryEndTurn(),
       rest: () => this.openRest(),
       cancelAttack: null,
@@ -1270,6 +1270,7 @@ export class Controller {
     const hl = this.renderer.hl;
     const a = this.game.s.activation;
     hl.activeUnit = a?.heroId ?? null;
+    hl.markHero = a?.heroId ?? this.hud.pendingActivate ?? this.hud.inspected;
     hl.moveColor = 'blue';
     hl.attackCells = new Set();
     if (this.choicePick) { this.paintChoice(); return; }
@@ -1354,8 +1355,8 @@ export class Controller {
     const parts: string[] = [];
     if (hl.move.size) parts.push('<span class="k blue">■</span> clique para mover');
     if (hl.attackUnits.size) parts.push('<span class="k red">■</span> clique no inimigo para abrir a <b>Batalha</b>');
-    if (hl.doorIcons.length) parts.push('🔑 clique na porta para abrir/fechar (1 PM)');
-    if (this.game.canRevealTomb()) parts.push('🪦 <b>Lápide</b> aqui: revele no quadro do Herói (1 PM)');
+    if (hl.doorIcons.length) parts.push('🚪 abrir/fechar a porta no botão lá em cima (1 PM)');
+    if (this.game.canRevealTomb()) parts.push('🪦 <b>Lápide</b> aqui: revele no botão lá em cima (1 PM)');
     if (a.moved && !a.attacked && !a.moveLocked) parts.push('<i>atacar agora encerra o Movimento</i>');
     if (this.game.s.blessing) parts.push('✨ <b>Bênção</b>: clique em um Aliado em Linha de Visão de Hobsbawm para ativá-lo');
     parts.push('<b>Enter</b> encerra o turno · <b>R</b> descansar');
@@ -1808,6 +1809,8 @@ export class Controller {
   private quickReturn: string | null = null;
 
   /** Atalhos lá em cima: itens prontos de outros Heróis da sua Guilda (ex.: Botas) enquanto um Herói está ativado. */
+  private revealTombNow() { if (this.isHumanTurn() && !this.renderer.busy) this.act({ type: 'tomb' }); }
+
   private paintQuickItems() {
     let bar = document.getElementById('itemquick');
     if (!bar) { bar = document.createElement('div'); bar.id = 'itemquick'; (document.getElementById('topbar')?.parentElement ?? document.body).appendChild(bar); }
@@ -1815,6 +1818,16 @@ export class Controller {
     const a = g.s.activation;
     const items: string[] = [];
     if (a && this.isHumanTurn() && !this.renderer.busy && !this.choicePick && !g.s.pending && !g.s.puppet && !this.bootMode && !this.soulMode) {
+      // Herói ativo: portas ao lado dele e Lápide do Espaço dele (a seta diz para que lado a porta está na tela)
+      const me = g.unit(a.heroId), face = this.hud.portraitOf(me);
+      if (a.mp >= 1 && !a.moveLocked && me.cell) for (const id of g.doorsAdjacentToActive()) {
+        const d = g.s.doors.find(x => x.id === id)!;
+        if (d.locked) continue;
+        const to = sameCell(d.a, me.cell) ? d.b : d.a, dc = to.c - me.cell.c, dr = to.r - me.cell.r;
+        const arrow = dc > 0 ? '↘' : dc < 0 ? '↖' : dr > 0 ? '↙' : '↗', verb = d.open ? 'Fechar' : 'Abrir';
+        items.push(`<button class="${d.open ? 'iq-close' : 'iq-open'}" data-qdoor="${id}" title="${verb} a porta (1 Ponto de Movimento)"><img src="${face}" alt=""/><span class="iq-emoji">🚪</span><small>${verb} Porta ${arrow}</small></button>`);
+      }
+      if (g.canRevealTomb()) items.push(`<button data-qtomb="1" title="Revelar a Lápide (1 Ponto de Movimento; não aciona Reação de Alerta)"><img src="${face}" alt=""/><span class="iq-emoji">🪦</span><small>Revelar Lápide</small></button>`);
       for (const h of g.heroesOf(g.currentGuild().id)) {
         if (h.id === a.heroId || !h.alive || !h.cell) continue;
         for (const c of h.cards) {
@@ -1831,9 +1844,28 @@ export class Controller {
     const html = items.join('');
     if (bar.innerHTML !== html) {
       bar.innerHTML = html;
+      this.renderer.hl.doorHover = null;
+      bar.querySelectorAll<HTMLElement>('[data-qdoor]').forEach(b => {
+        // passar o mouse mostra a chave na porta certa
+        b.onmouseenter = () => { this.renderer.hl.doorHover = b.dataset.qdoor!; };
+        b.onmouseleave = () => { this.renderer.hl.doorHover = null; };
+        b.onclick = e => { e.stopPropagation(); if (this.isHumanTurn() && !this.renderer.busy) this.act({ type: 'door', doorId: b.dataset.qdoor! }); };
+      });
+      bar.querySelector<HTMLElement>('[data-qtomb]')?.addEventListener('click', e => { e.stopPropagation(); this.revealTombNow(); });
       bar.querySelectorAll<HTMLElement>('[data-qh]').forEach(b => { b.onclick = e => { e.stopPropagation(); void this.quickItem(b.dataset.qh!, b.dataset.qc!); }; });
     }
     bar.classList.toggle('hidden', !items.length);
+    // o texto de ajuda muda no mesmo refresh: mede no próximo quadro
+    if (items.length) requestAnimationFrame(() => this.placeQuickItems());
+  }
+
+  /** A barra lá em cima fica logo abaixo do texto de ajuda quando os dois se encostam. */
+  private placeQuickItems() {
+    const bar = document.getElementById('itemquick'), hint = document.getElementById('hint');
+    if (!bar || !hint) return;
+    bar.style.top = '';
+    const b = bar.getBoundingClientRect(), h = hint.getBoundingClientRect();
+    if (h.height && h.bottom > b.top && h.top < b.bottom) bar.style.top = `${Math.ceil(h.bottom) + 6}px`;
   }
 
   /** Atalho: câmera e seleção vão para o dono do item e o item já começa a ser usado. */

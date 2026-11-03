@@ -37,7 +37,7 @@ await page.screenshot({ path: `${OUT}/qb-boot.png` });
 const target = await page.evaluate(() => { const c = window.cbt; const k = [...c.renderer.hl.move.keys()][0]; const [col, row] = k.split(',').map(Number); return c.renderer.cellScreenPos({ c: col, r: row }); });
 await page.mouse.click(target.x, target.y);
 await wait(2500);
-const end = await page.evaluate(() => { const c = window.cbt, g = c.game; return { boot: !!c.bootMode, inspected: c.hud.inspected, active: g.s.activation?.heroId, bar: !document.getElementById('itemquick').classList.contains('hidden') }; });
+const end = await page.evaluate(() => { const c = window.cbt, g = c.game; return { boot: !!c.bootMode, inspected: c.hud.inspected, active: g.s.activation?.heroId, bar: document.querySelectorAll('#itemquick [data-qh]').length > 0 }; });
 console.log('final:', JSON.stringify(end));
 const ok = bar.n === 1 && st.boot && st.inspected === setup.b && st.green > 0 && !end.boot && end.inspected === setup.a && !end.bar;
 console.log(ok ? 'ATALHO DAS BOTAS OK' : 'FALHOU');

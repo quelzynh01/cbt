@@ -311,7 +311,7 @@ export type GameEvent =
       noAnim?: boolean;
     }
   /** Animação do golpe no mapa (investida, giro do Fender ou projétil) contra todos os alvos de uma vez. */
-  | { t: 'strike'; attackerId: string; cardName: string; attackType: AttackType; targets: { id: string }[]; cleave?: boolean; thrown?: boolean; astral?: boolean; sfx?: string; hits?: number }
+  | { t: 'strike'; attackerId: string; cardName: string; attackType: AttackType; targets: { id: string; wounds?: number }[]; cleave?: boolean; thrown?: boolean; astral?: boolean; sfx?: string; hits?: number }
   | { t: 'damage'; id: string; amount: number; wounds: number; maxHp: number }
   | { t: 'heal'; id: string; amount: number; wounds: number }
   | { t: 'death'; id: string; exterminated?: boolean; /** foi para o Tabuleiro de Entrada (Banimento) */ banish?: boolean }

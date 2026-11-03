@@ -1,9 +1,9 @@
 import { entryPlaque } from './dice';
 import { getSettings } from '../ui/settings';
-import { playMinoLaugh, isTroll, playTrollAttack, playTrollEntrance, playTrollLaugh, isMinotaur, playMinoEntrance, playSisterLaugh, playSisterVoice, playMinoKill, isSister, playSisterAttack, play, playLordEntrance, playOnce, playRandom, type Sfx } from '../audio/sfx';
+import { playMinoLaugh, isTroll, playTrollAttack, playTrollEntrance, playTrollLaugh, isMinotaur, playMinoEntrance, playSisterLaugh, playSisterVoice, playMinoKill, isSister, playSisterAttack, play, playLordEntrance, playOnce, playHeroDeath, playRandom, type Sfx } from '../audio/sfx';
 import { CARDS } from '../engine/cards';
 import { CARD_ART } from '../ui/cardArt';
-import { drainFx, drawAlong, drawFuryAura, drawHeld, heldWeapon, itemFx, laserFx, meteorsFx, preloadWeapons, skullsFx, spellCount, spellOf, warCryFx, windFx, type Fx, type Held, type Spell } from './attackFx';
+import { drainFx, CHAIN_PULL, chainClip, chainSink, drawAlong, drawChainPull, drawFuryAura, drawHeld, drawUnitMark, furyBody, heldWeapon, itemFx, laserFx, meteorsFx, preloadWeapons, skullsFx, spellCount, spellOf, warCryFx, windFx, type Fx, type Held, type Spell, type UnitMark } from './attackFx';
 import { drawTokenImage, tokenImage, tokenImageId } from './tokens';
 import { key, sameCell, type LosBlock } from '../engine/board';
 import { DUO_ENTRANCE, bossAura, GUILDS, MONSTERS, SISTER_ENTRANCE, teamName } from '../engine/data';
@@ -24,11 +24,15 @@ export interface Highlights {
   hoverCell: Cell | null;
   hoverUnit: string | null;
   doorIcons: string[];
+  /** Porta do botão lá em cima com o mouse em cima: mostra a chave nela. */
+  doorHover?: string | null;
   /** Portas que dá para clicar sem mostrar o ícone (Monstro da Vingança). */
   doorClick?: string[];
   /** Portas desenhadas ao contrário (prévia: o Monstro vai abrir/fechar). */
   doorFlip?: string[];
   activeUnit: string | null;
+  /** De quem são as marcas de habilidade (Herói ativo ou escolhido). */
+  markHero?: string | null;
   /** `aim`: prévia do Shift (marca o Espaço de onde se mira e o ponto que bloqueia). */
   los: { from: Cell; to: Cell; ok: boolean; aim?: boolean; block?: LosBlock | null } | null;
   moveColor?: 'blue' | 'purple' | 'green';
@@ -55,6 +59,13 @@ interface UnitView {
   lunge: { dx: number; dy: number; t0: number; dur: number; depth?: number } | null;
   /** A arma da carta aparecendo na mão durante o ataque. */
   held?: Held | null;
+  /** Fúria de Combate acesa (para só explodir quando acende de verdade); furyT0: quando acendeu. */
+  furyOn?: boolean;
+  /** Ataque não causou Ferimento: o alvo desvia para o lado e volta. */
+  dodge?: { t0: number; dur: number; dx: number; dy: number } | null;
+  /** Seth matou com magia: correntes puxando para baixo. */
+  sink?: { t0: number; dur: number; color: string } | null;
+  furyT0?: number;
   /** Fender: gira com a espada (golpe em volta). */
   spin?: { t0: number; dur: number; art?: Held['art'] } | null;
   flip: boolean;
@@ -64,7 +75,7 @@ interface UnitView {
 }
 
 interface Floater { text: string; color: string; x: number; y: number; t0: number; dur: number; size: number }
-interface Projectile { from: Pt; to: Pt; t0: number; dur: number; kind: 'arrow' | 'orb' | 'stone' | 'blade' | 'bat'; arc: number; /** a arte da arma arremessada */ art?: Held['art'] }
+interface Projectile { from: Pt; to: Pt; t0: number; dur: number; kind: 'arrow' | 'orb' | 'stone' | 'blade' | 'bat'; arc: number; /** a arte da arma arremessada */ art?: Held['art']; /** crítico de Arco (Casacaverde): flecha em dobro com rastros de vento na cor da Guilda */ big?: string }
 
 export interface RendererHooks {
   /** Retornar true segura a fila de animações até release() (ex.: tela de batalha). */
@@ -414,6 +425,8 @@ export class Renderer {
         cell: u.alive && u.cell ? { ...u.cell } : null, wounds: u.wounds, maxHp: g.maxHp(u), alive: u.alive && !!u.cell,
         stunned: u.stunned, pos: v?.pos ?? { gx: 0, gy: 0 }, tween: null, alpha: this.lordWaits(u) ? 0 : 1, fade: null, bag: u.tokens.slice(),
         hurtT0: v?.hurtT0 ?? -9, lunge: null, flip: v?.flip ?? false, dir: v?.dir ?? this.centerDir(u.cell),
+        // partida carregada com o Herói já ferido: a Fúria já está acesa, sem explosão
+        furyOn: v ? v.furyOn : u.wounds > 0, furyT0: v?.furyT0,
       };
       this.units.set(u.id, nv);
     }
@@ -435,7 +448,9 @@ export class Renderer {
   /** Entrada do Lorde Presas (começo da partida ou Sombra invocada): fumaça e anéis de sangue no Espaço. */
   private lordFxs: { cell: Cell; t0: number; kind: 'lord' | 'mino' | 'lava' | 'sister' | 'dark'; len?: number }[] = [];
   /** Último ataque animado (para a fala do Minotauro quando ele mata alguém). */
-  private lastStrike: { attackerId: string; targets: string[]; t: number } | null = null;
+  private marks = new Map<string, UnitMark>();
+  private marksAt = -1;
+  private lastStrike: { attackerId: string; targets: string[]; t: number; magic: boolean } | null = null;
 
   /** Direção de quem olha para o meio do tabuleiro a partir de `c`. */
   centerDir(c: Cell | null): Dir {
@@ -620,19 +635,43 @@ export class Renderer {
 
   /** Animação do ataque (investida ou projétil). Retorna quanto tempo leva (ms). */
   animateAttack(e: Strike): number {
-    this.lastStrike = { attackerId: e.attackerId, targets: e.targets.map(t => t.id), t: this.t };
-    const dur = this.animateAttack0(e);
+    this.lastStrike = { attackerId: e.attackerId, targets: e.targets.map(t => t.id), t: this.t, magic: !!Object.values(CARDS).find(c => c.name === e.cardName)?.magic };
+    // nenhum alvo ferido: ataque sem som; quem não foi ferido desvia e aparece MISS no impacto
+    const silent = e.targets.length > 0 && e.targets.every(t => t.wounds === 0);
+    const dur = this.animateAttack0(e, silent);
+    this.showMisses(e);
     const g = this.game;
     const att = g?.s.units[e.attackerId];
     const after = dur + 200 / this.speed;
     // Troll atacou: se continua vivo, a fala dele; se acertou mais de um alvo, ri
-    if (att && isTroll(att.defId)) setTimeout(() => { if (g.s.units[e.attackerId]?.alive) { if (e.targets.length > 1) playTrollLaugh(); else playTrollAttack(); } }, after);
+    if (att && isTroll(att.defId)) { if (!silent) setTimeout(() => { if (g.s.units[e.attackerId]?.alive) { if (e.targets.length > 1) playTrollLaugh(); else playTrollAttack(); } }, after); }
     // Troll atacado sem sofrer dano (bloqueou tudo ou o ataque errou): ri
     else if (e.targets.some(t => { const u = g?.s.units[t.id]; return !!u && isTroll(u.defId) && 'wounds' in t && !(t as { wounds?: number }).wounds; })) setTimeout(() => playTrollLaugh(), after);
     return dur;
   }
-  private animateAttack0(e: Strike): number {
+  /** Alvos que não sofreram Ferimento: desviam do golpe (para o lado de quem ataca) e aparece MISS. */
+  private showMisses(e: Strike) {
+    const a = this.units.get(e.attackerId), sp = this.speed;
+    if (!a) return;
+    const pa = g2s(a.pos.gx, a.pos.gy), at = this.lastImpact;
+    e.targets.forEach((tg, i) => {
+      const t = this.units.get(tg.id);
+      if (tg.wounds !== 0 || !t || t === a) return;
+      setTimeout(() => this.floatAt(tg.id, 'MISS', '#eef3fb', 30, -18), at);
+      if (t.stunned || this.game?.isObject(this.game.s.units[tg.id])) return;
+      const pt = g2s(t.pos.gx, t.pos.gy);
+      let ux = pt.x - pa.x, uy = pt.y - pa.y;
+      const d = Math.hypot(ux, uy);
+      if (d < 8) { ux = 1; uy = 0; } else { ux /= d; uy /= d; }
+      // de lado em relação ao golpe; alternando se forem vários
+      const side = i % 2 ? -1 : 1;
+      t.dodge = { t0: this.t + Math.max(0, at - 150 / sp), dur: 560 / sp, dx: -uy * side * 46, dy: ux * side * 24 };
+    });
+  }
+
+  private animateAttack0(e: Strike, silent = false): number {
     const now = this.t;
+    const snd: typeof play = silent ? () => {} : play;
     const a = this.units.get(e.attackerId);
     const t = this.units.get(e.targets[0]?.id);
     this.lastImpact = 0;
@@ -648,19 +687,19 @@ export class Renderer {
       {
         const kind = this.attackKind(e, a.defId);
         const sp = this.speed;
-        if (e.astral) return this.astralStrike(a, t, pa, pt);
+        if (e.astral) return this.astralStrike(a, t, pa, pt, snd);
         // o tipo da animação vem da carta usada (Próximo = investida, Distância = projétil), mesmo no mesmo Espaço
-        if (e.sfx) setTimeout(() => play(e.sfx as Sfx), (e.attackType === 'melee' && !e.thrown ? 450 : 380) / sp);
+        if (e.sfx && (!silent || e.sfx === 'hobsbawn')) setTimeout(() => play(e.sfx as Sfx), (e.attackType === 'melee' && !e.thrown ? 450 : 380) / sp);
         if (e.cleave && !e.thrown) {
           // Fender: gira no lugar com a espada, atingindo quem está em volta
           a.spin = { t0: now + 100 / sp, dur: 700 / sp, art: heldWeapon(e.cardName, now, 1, 0)?.art };
-          setTimeout(() => play('cleave'), 200 / sp);
+          setTimeout(() => snd('cleave'), 200 / sp);
           this.lastImpact = 420 / sp;
           return 820 / sp;
         }
         // magias com animação própria (Raio Nova, Drenar Vida, Rajada de Vento, Ódio, Incinerar)
         const spell = a.kind === 'hero' && !e.thrown ? spellOf(e.cardName) : null;
-        if (spell) return this.spellStrike(spell, e, pa);
+        if (spell) return this.spellStrike(spell, e, pa, snd);
         // a arma da carta aparece na mão
         if (a.kind === 'hero' && !e.thrown) {
           const melee = e.attackType === 'melee';
@@ -674,7 +713,7 @@ export class Renderer {
           a.lunge = { dx, dy, t0: now + 150 / sp, dur: 620 / sp, depth: Math.floor(t.pos.gx) + Math.floor(t.pos.gy) };
           // som de cada Monstro (Orcs) ou da arma
           const base = a.defId.replace(/\d+$/, '');
-          setTimeout(() => isSister(base) ? playSisterAttack(base, (e.crits ?? 0) > 0 && this.survivesAttack(e.attackerId)) : play(base === 'orc' || base === 'capitao_orc' ? 'orc-sound' : 'atack-sword'), 330 / sp);
+          if (!silent) setTimeout(() => isSister(base) ? playSisterAttack(base, (e.crits ?? 0) > 0 && this.survivesAttack(e.attackerId)) : play(base === 'orc' || base === 'capitao_orc' ? 'orc-sound' : 'atack-sword'), 330 / sp);
         } else if (a.defId.replace(/\d+$/, '') === 'lorde_presas' && !e.thrown) {
           let longest = 0;
           for (const tg of e.targets) {
@@ -686,7 +725,7 @@ export class Renderer {
             longest = Math.max(longest, dur);
             this.projectiles.push({ from, to, t0: now + 200 / sp, dur, kind: 'bat', arc: 50 });
           }
-          setTimeout(() => play('atack-lorde-pressas'), 120 / sp);
+          setTimeout(() => snd('atack-lorde-pressas'), 120 / sp);
           // o morcego acerta na metade (chega no alvo) e volta para o Lorde
           this.lastImpact = 200 / sp + longest / 2;
           return 200 / sp + longest;
@@ -699,10 +738,10 @@ export class Renderer {
             if (Math.hypot(to.x - from.x, to.y - from.y) < 40) { const s = to.x >= from.x ? 1 : -1; from.x -= 30 * s; to.x += 30 * s; }
             const dist = Math.hypot(to.x - from.x, to.y - from.y);
             // Jøhan arremessa a Espada: voa girando, quase reta
-            this.projectiles.push({ from, to, t0: now + 250 / sp, dur: Math.min(900, 380 + dist * 0.35) / sp, kind: e.thrown ? 'blade' : kind, ...(e.thrown ? { art: heldWeapon(e.cardName, now, 1, 0)?.art } : {}), arc: e.thrown ? Math.max(20, Math.min(70, dist * 0.15)) : Math.max(50, Math.min(220, dist * 0.5)) });
+            this.projectiles.push({ from, to, t0: now + 250 / sp, dur: Math.min(900, 380 + dist * 0.35) / sp, kind: e.thrown ? 'blade' : kind, ...(e.sfx === 'bow-critico' && kind === 'arrow' ? { big: this.guildColor(a.guild) } : {}), ...(e.thrown ? { art: heldWeapon(e.cardName, now, 1, 0)?.art } : {}), arc: e.thrown ? Math.max(20, Math.min(70, dist * 0.15)) : Math.max(50, Math.min(220, dist * 0.5)) });
           }
           const base = a.defId.replace(/\d+$/, '');
-          setTimeout(() => isSister(base) ? playSisterAttack(base, (e.crits ?? 0) > 0 && this.survivesAttack(e.attackerId)) : play(e.thrown ? 'atack-sword' : base === 'goblin' ? 'archer-sound' : kind === 'orb' ? 'atack-magic' : 'atack-bow'), 230 / sp);
+          if (!silent) setTimeout(() => isSister(base) ? playSisterAttack(base, (e.crits ?? 0) > 0 && this.survivesAttack(e.attackerId)) : play(e.thrown ? 'atack-sword' : base === 'goblin' ? 'archer-sound' : kind === 'orb' ? 'atack-magic' : 'atack-bow'), 230 / sp);
         }
         // investida: encosta no alvo em 150 + 35% de 620 ms
         if (e.attackType === 'melee' && !e.thrown) { this.lastImpact = 370 / sp; return 820 / sp; }
@@ -714,6 +753,32 @@ export class Renderer {
     }
   }
 
+  private guildColor(g: string | null | undefined): string { return GUILDS[g as keyof typeof GUILDS]?.color ?? '#ffd65a'; }
+
+  /** Marcas de habilidade do Herói ativo ou escolhido: lança (Zazu), adaga (Escarlate), livro (Hobsbawm). Calculadas 1 vez por quadro. */
+  private unitMarks(): Map<string, UnitMark> {
+    if (this.marksAt === this.t) return this.marks;
+    this.marksAt = this.t;
+    const out = this.marks = new Map<string, UnitMark>();
+    const g = this.game, id = this.hl.markHero, h = id ? g?.s.units[id] : null;
+    if (!h || h.kind !== 'hero' || !h.alive || !h.cell || this.busy || g.s.deploying?.length) return out;
+    const ab = g.ab(h), a = g.s.activation?.heroId === h.id ? g.s.activation : null;
+    const played = !a && (g.s.activatedThisTurn ?? []).includes(h.id);
+    if (ab === 'oportunista' || ab === 'apunhalar') {
+      if (played || a?.attacked || a?.moveOnly) return out;
+      for (const u of g.units()) if (u.alive && u.cell && g.isEnemy(u, h) && g.isCornered(u, h)) out.set(u.id, ab === 'oportunista' ? 'spear' : 'dagger');
+    } else if (ab === 'bencao') {
+      // depois do ataque: quem a Bênção pode ativar; antes: quem está em Linha de Visão, se ele ainda pode usá-la
+      const blessed = g.s.blessing?.heroId === h.id;
+      if (!blessed && (played || a?.moved || a?.attacked)) return out;
+      for (const u of g.heroesOf(h.guild!)) {
+        if (u.id === h.id || !u.alive || !u.cell || (g.s.activatedThisTurn ?? []).includes(u.id)) continue;
+        if (g.hasLOS(h, h.cell, u.cell)) out.set(u.id, 'book');
+      }
+    }
+    return out;
+  }
+
   /** A figura do item aparece em cima do personagem e acompanha ele; vários ao mesmo tempo ficam lado a lado. */
   private showItem(id: string, card: string) {
     const slot = this.spells.filter(f => f.tag === id).length;
@@ -722,7 +787,7 @@ export class Renderer {
   }
 
   /** Magia do Herói: a quantidade de elementos vem dos acertos (no máximo os dados da carta). */
-  private spellStrike(spell: Spell, e: Strike, pa: { x: number; y: number }): number {
+  private spellStrike(spell: Spell, e: Strike, pa: { x: number; y: number }, snd: typeof play): number {
     const sp = this.speed;
     const n = spellCount(e.cardName, e.hits);
     const feet = e.targets.map(tg => { const v = this.units.get(tg.id)!; return g2s(v.pos.gx, v.pos.gy); });
@@ -734,16 +799,16 @@ export class Renderer {
     });
     const made = spell === 'laser' ? laserFx(from, chest, n) : spell === 'drain' ? drainFx(from, chest[0], n) : spell === 'wind' ? windFx(from, feet[0], n) : spell === 'skulls' ? skullsFx(from, chest[0], n) : meteorsFx(feet, n);
     this.spells.push({ ...made.fx, t0: this.t });
-    if (spell === 'wind') setTimeout(() => playOnce('rajada-de-vento', 1500), 100 / sp);
-    else if (spell === 'skulls' || spell === 'meteors') for (let i = 0; i < n; i++) setTimeout(() => play('atack-magic', 0.6), (spell === 'skulls' ? 380 + i * 140 : 100 + i * 150) / sp);
-    else if (spell === 'laser') for (let i = 0; i < n; i++) setTimeout(() => play('atack-magic', 0.7), (130 + i * 170) / sp);
-    else setTimeout(() => play('atack-magic'), 120 / sp);
+    // o vento da Rajada só toca quando o alvo é empurrado (evento 'move' com push)
+    if (spell === 'skulls' || spell === 'meteors') for (let i = 0; i < n; i++) setTimeout(() => snd('atack-magic', 0.6), (spell === 'skulls' ? 380 + i * 140 : 100 + i * 150) / sp);
+    else if (spell === 'laser') for (let i = 0; i < n; i++) setTimeout(() => snd('atack-magic', 0.7), (130 + i * 170) / sp);
+    else setTimeout(() => snd('atack-magic'), 120 / sp);
     this.lastImpact = made.hit / sp;
     return made.fx.ms / sp;
   }
 
   /** Golpe Astral: o corpo fica no lugar; a projeção surge ao lado do alvo, ligada ao corpo por um fio de luz, golpeia e some. */
-  private astralStrike(a: UnitView, t: UnitView, pa: { x: number; y: number }, pt: { x: number; y: number }): number {
+  private astralStrike(a: UnitView, t: UnitView, pa: { x: number; y: number }, pt: { x: number; y: number }, snd: typeof play): number {
     const sp = this.speed;
     // surge do lado de onde o Herói está (no mesmo Espaço: do lado direito)
     const d = Math.hypot(pa.x - pt.x, pa.y - pt.y);
@@ -752,9 +817,9 @@ export class Renderer {
       defId: a.defId, body: { x: pa.x, y: pa.y }, at: { x: pt.x + ux * 84, y: pt.y + uy * 46 }, hit: { x: pt.x + ux * 54, y: pt.y + uy * 30 }, target: { x: pt.x, y: pt.y },
       flip: ux > 0, dir: dirFromScreen(-ux, -uy), t0: this.t, dur: ASTRAL_MS / sp, depth: Math.floor(t.pos.gx) + Math.floor(t.pos.gy),
     });
-    setTimeout(() => play('teletransport', 0.7), 180 / sp);
-    setTimeout(() => play('atack-magic'), 520 / sp);
-    setTimeout(() => play('atack-sword'), 640 / sp);
+    setTimeout(() => snd('teletransport', 0.7), 180 / sp);
+    setTimeout(() => snd('atack-magic'), 520 / sp);
+    setTimeout(() => snd('atack-sword'), 640 / sp);
     this.lastImpact = ASTRAL_MS * ASTRAL_HIT / sp;
     return ASTRAL_MS / sp;
   }
@@ -848,9 +913,18 @@ export class Renderer {
       }
       case 'death': {
         const u = this.units.get(e.id)!;
-        u.fade = { from: 1, to: 0, t0: now, dur: 480 / this.speed };
+        // Seth matou com magia: correntes puxam o alvo para baixo, no tempo do som
+        const ls = this.lastStrike;
+        const sethKill = !e.banish && !!ls?.magic && this.t - ls.t < 6000 && ls.targets.includes(e.id) && this.units.get(ls.attackerId)?.defId === 'seth';
+        if (!sethKill) u.fade = { from: 1, to: 0, t0: now, dur: 480 / this.speed };
         if (e.exterminated) this.floatAt(e.id, 'EXTERMINADO!', '#ffd34d', 26, -18);
         if (e.banish) this.floatAt(e.id, 'BANIDO!', '#b892ff', 26, -18);
+        if (u.kind === 'hero' && !e.banish) playHeroDeath(u.defId);
+        if (sethKill) {
+          u.sink = { t0: now, dur: CHAIN_PULL / this.speed, color: this.guildColor(this.units.get(ls!.attackerId)?.guild) };
+          playOnce('atack-seth-kill', 2500);
+          return CHAIN_PULL / this.speed;
+        }
         break;
       }
       case 'stun': {
@@ -1016,6 +1090,7 @@ export class Renderer {
       u.cell = null;
       u.fade = null;
       u.alpha = 1;
+      u.sink = null;
     }
   }
 
@@ -1713,7 +1788,7 @@ export class Renderer {
       const box = edgeBox(d.a, d.b, 0.025);
       const fade = behind(back);
       list.push({ d: K(front.c + front.r, 0, 0.01), draw: () => { ctx.save(); if (fade && !open) ctx.globalAlpha = 0.5; drawDoor(ctx, box, open, !!d.small, !!d.locked); ctx.restore(); } });
-      if (this.hl.doorIcons.includes(d.id)) {
+      if (this.hl.doorHover === d.id) {
         const p = g2s(box.mx, box.my, 90);
         this.doorIconPos.set(d.id, p);
         list.push({ d: 1e9, draw: () => drawDoorIcon(ctx, p, open, tt) });
@@ -2214,6 +2289,13 @@ export class Renderer {
       lx = u.lunge.dx * f; ly = u.lunge.dy * f;
       if (k > 1) u.lunge = null;
     }
+    if (u.dodge) {
+      // pula para o lado, fica um instante e volta
+      const k = (this.t - u.dodge.t0) / u.dodge.dur;
+      const f = k < 0 ? 0 : k < 0.3 ? 1 - Math.pow(1 - k / 0.3, 2) : k < 0.55 ? 1 : k < 1 ? 1 - (k - 0.55) / 0.45 : 0;
+      lx += u.dodge.dx * f; ly += u.dodge.dy * f - Math.sin(Math.PI * Math.min(1, Math.max(0, k / 0.3))) * 12;
+      if (k > 1) u.dodge = null;
+    }
     ctx.translate(lx, ly);
     // arrastando este Herói: no lugar dele fica só um "fantasma"
     if (this.dragUnit?.id === u.id) ctx.globalAlpha = 0.3;
@@ -2276,18 +2358,40 @@ export class Renderer {
     // Fúria de Combate (Grom ferido): aura na cor da Guilda; só depois que o Ferimento aparece no mapa
     const real = this.game?.s.units[u.id];
     const fury = u.alive && u.kind === 'hero' && u.wounds > 0 && !!real && this.game.ab(real) === 'furia' ? GUILDS[u.guild as keyof typeof GUILDS]?.color : undefined;
-    if (fury) drawFuryAura(ctx, L.scale, tt, fury, false);
+    if (!!fury !== !!u.furyOn) {
+      u.furyOn = !!fury;
+      // a Fúria acendeu agora: rugido e explosão
+      if (fury) { u.furyT0 = this.t; play('orc-sound', 0.9); }
+    }
+    const furyMs = this.t - (u.furyT0 ?? -1e9);
+    const body = fury ? furyBody(tt, furyMs) : null;
+    if (fury) drawFuryAura(ctx, L.scale, tt, fury, false, furyMs);
+    const sinkK = u.sink ? Math.max(0, Math.min(1, (this.t - u.sink.t0) / u.sink.dur)) : -1;
+    if (sinkK >= 0) drawChainPull(ctx, L.scale, tt, sinkK, false, u.sink!.color);
     if (lava === 'sister') this.drawSisterAura(ctx, L.scale, tt, false);
     else if (lava === 'sand') this.drawSandAura(ctx, L.scale, tt, false);
     else if (lava) this.drawLavaAura(ctx, L.scale, tt, false, lava === 'dark');
-    const fx = [isShadow ? 'grayscale(1) contrast(1.15) brightness(0.9)' : '', isSoul ? SOUL_FILTER : '', lava === 'fire' ? `drop-shadow(0 0 ${7 + 4 * Math.sin(tt * 5)}px rgba(255,110,20,0.95)) drop-shadow(0 -4px 14px rgba(255,60,0,0.6))` : lava === 'sister' ? `drop-shadow(0 0 ${7 + 3 * Math.sin(tt * 3.5)}px rgba(255,90,200,0.9)) drop-shadow(0 -3px 12px rgba(150,40,200,0.6))` : lava === 'sand' ? `drop-shadow(0 0 ${7 + 3 * Math.sin(tt * 3)}px rgba(255,205,110,0.9)) drop-shadow(0 -3px 12px rgba(220,160,60,0.6))` : lava === 'dark' ? `drop-shadow(0 0 ${9 + 4 * Math.sin(tt * 4)}px rgba(0,0,0,1)) drop-shadow(0 0 4px rgba(0,0,0,1)) drop-shadow(0 -4px 16px rgba(80,25,130,0.85))` : '', blink ? `brightness(${1.25 + 0.45 * Math.sin(tt * 7)}) drop-shadow(0 0 8px rgba(184,146,255,0.95))` : ''].filter(Boolean).join(' ');
+    const fx = [isShadow ? 'grayscale(1) contrast(1.15) brightness(0.9)' : '', isSoul ? SOUL_FILTER : '', body?.glow ?? '', lava === 'fire' ? `drop-shadow(0 0 ${7 + 4 * Math.sin(tt * 5)}px rgba(255,110,20,0.95)) drop-shadow(0 -4px 14px rgba(255,60,0,0.6))` : lava === 'sister' ? `drop-shadow(0 0 ${7 + 3 * Math.sin(tt * 3.5)}px rgba(255,90,200,0.9)) drop-shadow(0 -3px 12px rgba(150,40,200,0.6))` : lava === 'sand' ? `drop-shadow(0 0 ${7 + 3 * Math.sin(tt * 3)}px rgba(255,205,110,0.9)) drop-shadow(0 -3px 12px rgba(220,160,60,0.6))` : lava === 'dark' ? `drop-shadow(0 0 ${9 + 4 * Math.sin(tt * 4)}px rgba(0,0,0,1)) drop-shadow(0 0 4px rgba(0,0,0,1)) drop-shadow(0 -4px 16px rgba(80,25,130,0.85))` : '', blink ? `brightness(${1.25 + 0.45 * Math.sin(tt * 7)}) drop-shadow(0 0 8px rgba(184,146,255,0.95))` : ''].filter(Boolean).join(' ');
     if (fx) ctx.filter = fx;
     if (isSoul) ctx.translate(0, -6 - Math.sin(tt * 2) * 5);
-    drawCharacter(ctx, u.defId, { dir, flip, t: idleT, hurt, alpha: isSoul ? 0.72 + 0.08 * Math.sin(tt * 3) : 1, stunned: u.stunned, lunge: 0, scale: L.scale * 0.66 });
+    if (body) ctx.translate(body.x, body.y);
+    if (sinkK >= 0) {
+      // puxado para o buraco: só aparece o que ainda não afundou
+      const sk = chainSink(sinkK, L.scale, tt);
+      ctx.save();
+      chainClip(ctx, L.scale);
+      ctx.translate(sk.x, sk.y);
+      drawCharacter(ctx, u.defId, { dir, flip, t: idleT, hurt, alpha: 1, stunned: false, lunge: 0, scale: L.scale * 0.66, shadow: false });
+      ctx.restore();
+    } else drawCharacter(ctx, u.defId, { dir, flip, t: idleT, hurt, alpha: isSoul ? 0.72 + 0.08 * Math.sin(tt * 3) : 1, stunned: u.stunned, lunge: 0, scale: L.scale * 0.66 * (body?.scale ?? 1) });
+    if (body) ctx.translate(-body.x, -body.y);
     if (isSoul) ctx.translate(0, 6 + Math.sin(tt * 2) * 5);
     if (fx) ctx.filter = 'none';
     if (spinFx && spinFront) spinFx();
-    if (fury) drawFuryAura(ctx, L.scale, tt, fury, true);
+    if (fury) drawFuryAura(ctx, L.scale, tt, fury, true, furyMs);
+    if (sinkK >= 0) drawChainPull(ctx, L.scale, tt, sinkK, true, u.sink!.color);
+    const mark = this.unitMarks().get(u.id);
+    if (mark) drawUnitMark(ctx, mark, L.scale, tt, this.guildColor(this.game?.s.units[this.hl.markHero ?? '']?.guild));
     if (u.held) { if (this.t > u.held.t0 + u.held.dur) u.held = null; else drawHeld(ctx, u.held, this.t, flip, L.scale); }
     if (lava === 'sister') this.drawSisterAura(ctx, L.scale, tt, true);
     else if (lava === 'sand') this.drawSandAura(ctx, L.scale, tt, true);
@@ -2364,6 +2468,8 @@ export class Renderer {
       }
     }
 
+    // sendo puxado pelas correntes: sem barra de vida
+    if (u.sink) { ctx.restore(); return; }
     // barra de vida + número
     const top = -78 * L.scale - 16;
     // barra maior, dividida em gomos (1 por ponto de Vida, como no Dota)
@@ -2547,6 +2653,22 @@ export class Renderer {
         ctx.lineCap = 'round';
         ctx.beginPath(); ctx.moveTo(a0.x, a0.y); ctx.lineTo(a1.x, a1.y); ctx.stroke();
       }
+      // crítico de Arco: rastros de vento enrolando em volta do caminho da flecha
+      if (p.big) {
+        ctx.lineCap = 'round';
+        for (let l = 0; l < 4; l++) {
+          ctx.strokeStyle = `rgba(${hexRgb(p.big)},${0.95 - l * 0.13})`;
+          ctx.lineWidth = 3.4 - l * 0.5;
+          ctx.beginPath();
+          for (let i = 0; i <= 22; i++) {
+            const q = Math.max(0, k - 0.42 + (0.42 * i) / 22), c = at(q), c2 = at(Math.min(1, q + 0.01));
+            const d = Math.hypot(c2.x - c.x, c2.y - c.y) || 1, nx = -(c2.y - c.y) / d, ny = (c2.x - c.x) / d;
+            const off = Math.sin(q * 34 + l * 1.6) * (9 + l * 6) * (i / 22);
+            if (i) ctx.lineTo(c.x + nx * off, c.y + ny * off); else ctx.moveTo(c.x + nx * off, c.y + ny * off);
+          }
+          ctx.stroke();
+        }
+      }
       const nxt = at(Math.min(1, k + 0.02));
       ctx.save();
       ctx.translate(x, y);
@@ -2564,6 +2686,7 @@ export class Renderer {
           if (!p.art || !drawAlong(ctx, p.art, 96)) { ctx.translate(36, 0); drawSword(ctx, 2.1); }
           ctx.restore(); continue;
         }
+        if (p.big) ctx.scale(2, 2);
         ctx.strokeStyle = '#5a3a1a'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(-12, 0); ctx.lineTo(10, 0); ctx.stroke();
         ctx.fillStyle = '#ccc'; ctx.beginPath(); ctx.moveTo(14, 0); ctx.lineTo(8, -4); ctx.lineTo(8, 4); ctx.fill();
       } else {

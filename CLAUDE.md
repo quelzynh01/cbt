@@ -140,6 +140,11 @@ node tools/tests/browser/aiworker.mjs <pasta-prints>                # IA com bus
 node tools/tests/browser/nospoil.mjs <pasta-prints>                 # Herói morre na Vingança: barra, placar e ficha só mostram a morte depois dos dados
 node tools/tests/browser/astral.mjs <pasta-prints>                  # Golpe Astral: a projeção surge junto do alvo e golpeia; o corpo fica no lugar (PORT=)
 node tools/tests/browser/atkfx.mjs <pasta-prints>                   # magias dos Heróis (src/render/attackFx.ts: elementos = acertos, até os dados da carta), arma da carta na mão e rastro do Fender: prints de cada uma (PORT=)
+node tools/tests/browser/furyfx.mjs <pasta-prints>                 # Fúria do Grom: prints acendendo e nas 4 cores de Guilda; som da Rajada só no empurrão, nunca no ataque (PORT=)
+node tools/tests/browser/sethkill.mjs <pasta-prints>               # Seth mata com magia: som e correntes puxando o alvo para baixo; sem magia ou Herói comum, não; gemido masculino/feminino ao morrer (PORT=)
+node tools/tests/browser/marks.mjs <pasta-prints>                  # marcas: lança (Zazu) e adaga (Escarlate) em alvo flanqueado, livro (Hobsbawm) em Aliado em Linha de Visão; flecha crítica do Casacaverde (PORT=)
+node tools/tests/browser/quickdoor.mjs <pasta-prints>              # porta e Lápide no atalho lá em cima: Abrir/Fechar Porta do Herói ativo, chave só com o mouse no botão; Revelar Lápide (Beyond). MOB=1 = celular (PORT=)
+node tools/tests/browser/miss.mjs <pasta-prints>                   # ataque sem Ferimento: sem som, alvo desvia e aparece MISS; ataque com Ferimento continua normal (PORT=)
 node tools/tests/browser/wpar.mjs                                   # Workers auxiliares da busca: simulações por jogada com 0 x 3 auxiliares (HELPERS=0,3, MS=)
 ```
 

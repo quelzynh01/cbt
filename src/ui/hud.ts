@@ -1054,7 +1054,6 @@ export class Hud {
       </div></div><div class="hb-c2">
       <div class="ability ${u.curse === 'amnesia' ? 'off' : ''}"><b>${hd.abilityName}</b> — ${richText(hd.abilityText)}</div>
       ${(() => { const p = mine ? g.heroPower(u) : null; return p ? `<button class="hb-power ${p.ok ? '' : 'off'}" id="hb-power" title="${p.label}${p.why ? ` — ${p.why}` : ''}">⚡ ${hd.abilityName}<small>${p.ok ? p.label : p.why}</small></button>` : ''; })()}
-      ${mine && isActive && g.canRevealTomb() ? `<button class="hb-power hb-tomb" id="hb-tomb" title="Gasta 1 Ponto de Movimento; não aciona Reação de Alerta">🪦 Revelar a Lápide<small>1 PM — o efeito acontece na hora</small></button>` : ''}
       ${g.s.shroud?.includes(u.id) ? '<div class="tag rr">🪦 Mortalha: +2 dados de Defesa até o próximo turno da Guilda</div>' : ''}
       ${u.banished ? '<div class="tag dead">👻 Banido — está no Tabuleiro de Entrada (volta na Entrada de Monstros ou ao Descansar)</div>' : ''}
       ${g.s.copied?.heroId === u.id ? `<div class="tag rr">🐒 Copiou: <b>${Object.values(HEROES).find(x => x.ability === g.s.copied!.ability)?.abilityName ?? ''}</b> (até o fim do turno)</div>` : ''}
@@ -1084,8 +1083,6 @@ export class Hud {
     box.querySelectorAll<HTMLElement>('[data-card]').forEach(el => {
       el.onclick = () => { if (mine && isActive && usableIds.has(el.dataset.card!)) this.actions.selectCard(el.dataset.card!); };
     });
-    const tb = box.querySelector<HTMLElement>('#hb-tomb');
-    if (tb) tb.onclick = e => { e.stopPropagation(); this.actions.revealTomb(); };
     const pw = box.querySelector<HTMLElement>('#hb-power');
     if (pw) pw.onclick = e => { e.stopPropagation(); if (!pw.classList.contains('off')) this.actions.usePower(u.id); };
     box.querySelectorAll<HTMLElement>('[data-useact]').forEach(b => {

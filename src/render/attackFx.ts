@@ -342,30 +342,201 @@ export function itemFx(card: string, slot: number, where: () => Pt | null): Omit
   } };
 }
 
-/** Fúria de Combate: chão brilhando na cor da Guilda (atrás do Herói) e chamas subindo em volta dele (na frente). */
-export function drawFuryAura(ctx: Ctx, sc: number, tt: number, color: string, front: boolean) {
+/** Duração da explosão de quando a Fúria acende (ms). */
+export const FURY_BURST = 1100;
+type Rgb = [number, number, number];
+const rgbOf = (hex: string): Rgb => [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
+/** k > 0 clareia, k < 0 escurece. */
+const shade = (c: Rgb, k: number): Rgb => c.map(v => Math.round(k >= 0 ? lerp(v, 255, k) : lerp(v, 0, -k))) as Rgb;
+const rgba = (c: Rgb, a: number) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+
+/** Coração do bárbaro: duas batidas fortes e uma pausa (0 a 1). */
+export function furyBeat(tt: number): number {
+  const p = tt % 1.15;
+  return Math.max(Math.exp(-(((p - 0.06) / 0.07) ** 2)), 0.7 * Math.exp(-(((p - 0.3) / 0.08) ** 2)));
+}
+
+/** 0 a 1: força da explosão, `ms` depois de a Fúria acender. */
+const furyFlare = (ms: number) => (ms < 0 || ms >= FURY_BURST ? 0 : ms < 120 ? ms / 120 : 1 - (ms - 120) / (FURY_BURST - 120));
+
+/** O corpo do bárbaro em Fúria: fica maior e pulsa com o coração; treme quando a Fúria acende. */
+export function furyBody(tt: number, ms: number): { scale: number; x: number; y: number; glow: string } {
+  const b = furyBeat(tt), f = furyFlare(ms);
+  const shake = f * 4;
+  return {
+    scale: 1.1 + 0.03 * b + 0.12 * f,
+    x: Math.sin(tt * 71) * shake, y: Math.cos(tt * 57) * shake * 0.6,
+    glow: `saturate(1.35) contrast(1.08) brightness(${(1.02 + 0.1 * b + 0.25 * f).toFixed(2)})`,
+  };
+}
+
+/** Lasca de rocha arrancada do chão pela Fúria (cada uma com o seu formato). */
+function rockChip(ctx: Ctx, x: number, y: number, r: number, rot: number, edge: Rgb, seed: number) {
+  ctx.save();
+  ctx.translate(x, y); ctx.rotate(rot);
+  ctx.beginPath();
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * Math.PI * 2 + rnd(seed + i) * 0.7, q = r * (0.6 + 0.6 * rnd(seed + i + 7));
+    if (i) ctx.lineTo(Math.cos(a) * q, Math.sin(a) * q * 0.75); else ctx.moveTo(Math.cos(a) * q, Math.sin(a) * q * 0.75);
+  }
+  ctx.closePath();
+  ctx.fillStyle = '#3f352e'; ctx.fill();
+  ctx.strokeStyle = rgba(edge, 0.8); ctx.lineWidth = Math.max(0.8, r * 0.16); ctx.stroke();
+  ctx.restore();
+}
+
+/**
+ * Fúria de Combate: brilho na cor da Guilda em volta do corpo, pedras flutuando e fagulhas subindo (nada desenhado no chão).
+ * `ms`: tempo desde que a Fúria acendeu (explosão com rugido nos primeiros instantes).
+ */
+export function drawFuryAura(ctx: Ctx, sc: number, tt: number, color: string, front: boolean, ms: number) {
+  const base = rgbOf(color), hot = shade(base, 0.72), deep = shade(base, -0.45), white: Rgb = [255, 250, 225];
+  const b = furyBeat(tt), f = furyFlare(ms);
   ctx.save();
   if (!front) {
+    // pedras arrancadas do chão, tremendo dos dois lados do corpo; na explosão, voam para fora
+    for (let i = 0; i < 6; i++) {
+      const k = (tt * 0.24 + rnd(i + 50)) % 1, side = i % 2 ? 1 : -1, out = 1 + 1.1 * f;
+      const x = (side * (50 + 28 * rnd(i)) * out + Math.sin(tt * 37 + i) * 0.7) * sc, y = (-4 - k * (64 + 40 * rnd(i + 3)) - 26 * f) * sc;
+      ctx.globalAlpha = Math.min(1, 3 * Math.sin(k * Math.PI));
+      rockChip(ctx, x, y, (2.8 + 3 * rnd(i + 8)) * sc, tt * (0.8 + rnd(i)) + i, hot, i * 13);
+    }
+    ctx.globalAlpha = 1;
+    // brilho em volta do corpo
     ctx.save();
-    ctx.scale(1, 0.5);
-    const R = 62 * sc, pulse = 0.75 + 0.25 * Math.sin(tt * 4);
-    const g = ctx.createRadialGradient(0, 0, R * 0.15, 0, 0, R);
-    g.addColorStop(0, `${color}cc`); g.addColorStop(0.65, `${color}66`); g.addColorStop(1, `${color}00`);
-    ctx.globalAlpha *= pulse;
-    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = color; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.arc(0, 0, R * 0.8, tt * 2.2, tt * 2.2 + Math.PI * 1.3); ctx.stroke();
+    ctx.translate(0, -66 * sc); ctx.scale(0.72, 1);
+    glow(ctx, { x: 0, y: 0 }, (100 + 12 * b + 34 * f) * sc, rgba(base, 0.42));
+    ctx.restore();
+  } else {
+    // fagulhas riscando para cima, pelos lados
+    ctx.lineCap = 'round';
+    for (let i = 0; i < 14; i++) {
+      const k = (tt * (0.5 + rnd(i) * 0.6) + rnd(i + 40)) % 1;
+      const x = ((i % 2 ? 1 : -1) * (34 + 34 * rnd(i + 60)) + Math.sin(tt * 5 + i) * 5) * sc, y = (4 - k * (120 + 50 * rnd(i + 80))) * sc, len = (3 + 4 * rnd(i + 5)) * sc;
+      ctx.strokeStyle = rgba(i % 4 ? hot : white, 0.9 * Math.sin(k * Math.PI));
+      ctx.lineWidth = (1 + rnd(i + 15)) * sc;
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y + len); ctx.stroke();
+    }
+  }
+  // clarão da explosão
+  if (front && f > 0) glow(ctx, { x: 0, y: -50 * sc }, 130 * sc, rgba(white, 0.35 * f));
+  ctx.restore();
+}
+
+/** Duração das correntes do Seth (ms). */
+export const CHAIN_PULL = 1700;
+/** Quanto o alvo já afundou (0 a 1), aos trancos: as correntes prendem, puxam, ele resiste, puxam de vez. */
+const pullDepth = (k: number) => k < 0.26 ? 0 : k < 0.5 ? 0.3 * clamp((k - 0.26) / 0.12) : k < 0.62 ? 0.3 : lerp(0.3, 1, clamp((k - 0.62) / 0.3) ** 2);
+
+/** Quantos pixels (já em escala) o corpo desce e o tremor enquanto as correntes puxam. */
+export function chainSink(k: number, sc: number, tt: number): { y: number; x: number } {
+  return { y: pullDepth(k) * 190 * sc, x: k < 0.92 && k > 0.2 ? Math.sin(tt * 63) * 2.2 * sc : 0 };
+}
+
+/** Recorte do corpo: só aparece acima do chão e dentro do buraco. */
+export function chainClip(ctx: Ctx, sc: number) {
+  ctx.beginPath();
+  ctx.rect(-400 * sc, -600 * sc, 800 * sc, 600 * sc);
+  ctx.ellipse(0, 0, 60 * sc, 24 * sc, 0, 0, Math.PI * 2);
+  ctx.clip();
+}
+
+/** Uma corrente esticada, elo por elo. */
+function chain(ctx: Ctx, a: Pt, b: Pt, sc: number, c: Rgb) {
+  const d = Math.hypot(b.x - a.x, b.y - a.y), step = 9 * sc, n = Math.floor(d / step);
+  if (!n) return;
+  const ang = Math.atan2(b.y - a.y, b.x - a.x);
+  ctx.save();
+  ctx.translate(a.x, a.y); ctx.rotate(ang);
+  for (let i = 0; i <= n; i++) {
+    ctx.beginPath();
+    ctx.ellipse(i * step, 0, 6.5 * sc, (i % 2 ? 1.9 : 4) * sc, 0, 0, Math.PI * 2);
+    ctx.lineWidth = 3.4 * sc; ctx.strokeStyle = rgba(shade(c, -0.8), 1); ctx.stroke();
+    ctx.lineWidth = 1.7 * sc; ctx.strokeStyle = rgba(shade(c, i % 2 ? 0.55 : 0.2), 1); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/** Seth matou com magia: um buraco se abre embaixo do alvo e correntes o prendem e puxam para baixo. */
+export function drawChainPull(ctx: Ctx, sc: number, tt: number, k: number, front: boolean, color: string) {
+  const c = rgbOf(color);
+  const open = clamp(k / 0.14) * clamp((1 - k) / 0.1);
+  const sink = pullDepth(k) * 190 * sc, shoot = clamp((k - 0.06) / 0.2);
+  if (!front) {
+    ctx.save();
+    ctx.scale(1, 0.4);
+    const R = 60 * sc * open;
+    if (R > 1) {
+      const g = ctx.createRadialGradient(0, 0, R * 0.2, 0, 0, R);
+      g.addColorStop(0, '#040306'); g.addColorStop(0.72, rgba(shade(c, -0.82), 1)); g.addColorStop(0.92, rgba(c, 0.95)); g.addColorStop(1, rgba(c, 0));
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI * 2); ctx.fill();
+    }
     ctx.restore();
   }
-  // chamas: as de trás antes do Herói, as da frente depois
-  ctx.shadowColor = color; ctx.shadowBlur = 10;
-  for (let i = 0; i < 12; i++) {
-    const k = (tt * (0.7 + rnd(i) * 0.5) + rnd(i + 20)) % 1, a = i * 2.4 + tt * 0.9;
-    if (Math.sin(a) > 0 !== front) continue;
-    const x = Math.cos(a) * (34 - k * 12) * sc, y = Math.sin(a) * 12 * sc - k * 104 * sc, r = (9 - k * 6) * sc;
-    ctx.globalAlpha = 0.85 * Math.sin(k * Math.PI);
-    ctx.fillStyle = i % 3 ? color : '#ffffff';
-    ctx.beginPath(); ctx.moveTo(x, y - r * 2); ctx.quadraticCurveTo(x + r, y, x, y + r); ctx.quadraticCurveTo(x - r, y, x, y - r * 2); ctx.fill();
+  // cada corrente sai da borda do buraco e prende um ponto do corpo, que desce junto
+  const ends: [number, number, number, boolean][] = [[-0.5, -30, -82, false], [3.6, 28, -86, false], [2.5, -26, -44, true], [0.6, 26, -50, true]];
+  for (const [ang, ex, ey, inFront] of ends) {
+    if (inFront !== front) continue;
+    const a = { x: Math.cos(ang) * 54 * sc, y: Math.sin(ang) * 21 * sc };
+    const b = { x: ex * sc, y: ey * sc + sink };
+    if (b.y > a.y) continue; // já desceu para dentro do buraco
+    chain(ctx, a, { x: lerp(a.x, b.x, shoot), y: lerp(a.y, b.y, shoot) }, sc, c);
+  }
+  // volta da corrente em torno da cintura
+  const waist = -56 * sc + sink;
+  if (front && shoot >= 1 && waist < 0) {
+    ctx.save();
+    ctx.translate(Math.sin(tt * 63) * 2.2 * sc, 0);
+    ctx.lineCap = 'butt';
+    ctx.setLineDash([9 * sc, 3 * sc]);
+    ctx.strokeStyle = rgba(shade(c, -0.8), 1); ctx.lineWidth = 7 * sc;
+    ctx.beginPath(); ctx.ellipse(0, waist, 33 * sc, 12 * sc, 0, 0, Math.PI); ctx.stroke();
+    ctx.strokeStyle = rgba(shade(c, 0.55), 1); ctx.lineWidth = 3.4 * sc;
+    ctx.beginPath(); ctx.ellipse(0, waist, 33 * sc, 12 * sc, 0, 0, Math.PI); ctx.stroke();
+    ctx.restore();
+  }
+}
+
+export type UnitMark = 'spear' | 'dagger' | 'book';
+/** Marca pequena flutuando ao lado da unidade: Oportunista (lança), Apunhalar (adaga), Bênção (livro). */
+export function drawUnitMark(ctx: Ctx, mark: UnitMark, sc: number, tt: number, color: string) {
+  const bob = Math.sin(tt * 3.2) * 3 * sc;
+  ctx.save();
+  ctx.translate(40 * sc, -66 * sc + bob);
+  ctx.scale(sc, sc);
+  const c = rgbOf(color), rim = rgba(shade(c, 0.25), 1), dark = rgba(shade(c, -0.25), 1);
+  ctx.shadowColor = rim; ctx.shadowBlur = 9;
+  ctx.fillStyle = 'rgba(28,18,12,0.9)'; ctx.strokeStyle = rim; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(0, 0, 15, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  ctx.shadowBlur = 0;
+  ctx.lineJoin = 'round';
+  if (mark === 'book') {
+    // livro aberto
+    ctx.fillStyle = dark;
+    ctx.beginPath(); ctx.moveTo(0, -5); ctx.quadraticCurveTo(-5, -9, -11, -7); ctx.lineTo(-11, 7); ctx.quadraticCurveTo(-5, 5, 0, 9); ctx.quadraticCurveTo(5, 5, 11, 7); ctx.lineTo(11, -7); ctx.quadraticCurveTo(5, -9, 0, -5); ctx.fill();
+    ctx.fillStyle = '#f6edd8';
+    ctx.beginPath(); ctx.moveTo(0, -4); ctx.quadraticCurveTo(-5, -8, -9, -6); ctx.lineTo(-9, 5); ctx.quadraticCurveTo(-5, 3, 0, 7); ctx.quadraticCurveTo(5, 3, 9, 5); ctx.lineTo(9, -6); ctx.quadraticCurveTo(5, -8, 0, -4); ctx.fill();
+    ctx.strokeStyle = color; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(0, -4); ctx.lineTo(0, 7);
+    for (const y of [-2, 1]) { ctx.moveTo(-7, y); ctx.lineTo(-2.5, y + 1); ctx.moveTo(7, y); ctx.lineTo(2.5, y + 1); }
+    ctx.stroke();
+  } else {
+    // ponta para baixo: aponta para o alvo
+    ctx.rotate(Math.PI * 0.8);
+    if (mark === 'spear') {
+      ctx.strokeStyle = '#8a5a2b'; ctx.lineWidth = 2.6; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(0, 11); ctx.lineTo(0, -4); ctx.stroke();
+      ctx.fillStyle = '#e8edf4';
+      ctx.beginPath(); ctx.moveTo(0, -12); ctx.lineTo(4, -4); ctx.lineTo(0, -2); ctx.lineTo(-4, -4); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = color; ctx.fillRect(-2.2, -2, 4.4, 2.4);
+    } else {
+      ctx.fillStyle = '#e8edf4';
+      ctx.beginPath(); ctx.moveTo(0, -12); ctx.lineTo(3.4, 2); ctx.lineTo(-3.4, 2); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = '#9aa4b2'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(0, -10); ctx.lineTo(0, 2); ctx.stroke();
+      ctx.fillStyle = color; ctx.fillRect(-6, 2, 12, 2.4);
+      ctx.fillStyle = '#4a2f1b'; ctx.fillRect(-1.8, 4.4, 3.6, 6.2);
+      ctx.fillStyle = color; ctx.beginPath(); ctx.arc(0, 11, 2, 0, Math.PI * 2); ctx.fill();
+    }
   }
   ctx.restore();
 }

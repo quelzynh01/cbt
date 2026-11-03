@@ -345,7 +345,6 @@ export class Game {
   /** Itens que entraram na Defesa do Herói (mostrados depois dos dados, para não adiantar o resultado). */
   private showDefenseItems(t: Unit, dr: RollResult) {
     if (t.kind !== 'hero' || !dr.faces.length) return;
-    if (dr.rerolled) this.showItems(t, d => !!d.rerolls);
     this.showItems(t, d => !!d.fx.moonShield || (!!d.fx.lastStand && t.wounds > 0) || (!!d.fx.dragonHeart && dr.crits > 0));
   }
   /** Retorna e limpa os eventos gerados desde a última chamada. */
@@ -1503,7 +1502,6 @@ export class Game {
       dice: atk.faces, hits: atk.successes, crits: atk.crits, notes, rr: atk.rr,
       targets: results.map(evTarget),
     });
-    if (atk.rerolled) this.showItems(h, d => !!d.rerolls);
     if (atk.crits && def.group === 'Arco') this.showItems(h, d => !!d.fx.soulseeker);
     for (const r of results) this.showDefenseItems(r.t, r.dr);
     // dano espalhado: quem atacou escolhe o alvo adicional depois de ver o ataque e a Defesa do alvo principal
@@ -1529,7 +1527,7 @@ export class Game {
     }
     // e só agora o golpe no mapa, em todos os alvos de uma vez (Fender: o Herói gira com a espada)
     if (willSpread) this.emit({
-      t: 'strike', attackerId: h.id, cardName: def.name, attackType: def.attackType!, targets: results.map(r => ({ id: r.t.id })),
+      t: 'strike', attackerId: h.id, cardName: def.name, attackType: def.attackType!, targets: results.map(r => ({ id: r.t.id, wounds: r.wounds })),
       ...(cleaved || fenderHit ? { cleave: true } : {}), ...(thrown ? { thrown: true } : {}), ...(fx.astral ? { astral: true } : {}), ...(sfx ? { sfx } : {}), hits: atk.successes,
     });
 
